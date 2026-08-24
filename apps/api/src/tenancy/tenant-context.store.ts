@@ -2,17 +2,28 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Prisma } from '@hrm/db';
 
 /**
- * Per-request tenant/user context. `branchId`, `userId`, and `roles` are
- * wired here but stay null until auth lands (0.4) — nothing populates them
- * yet. `tx` is the live Postgres transaction the whole request runs in
- * (opened by `TenantScopeInterceptor` via `withTenantContext`); it is null
- * for public and platform requests, which never open one.
+ * Per-request tenant/user context. `branchId`, `userId`, `roles`,
+ * `permissions`, and `branchIds` all stayed null until auth (0.4); they are
+ * now populated by `TenantScopeInterceptor` for any authenticated request
+ * (see tenant-scope.interceptor.ts). `tx` is the live Postgres transaction
+ * the whole request runs in; it is null for public and platform requests,
+ * which never open one.
  */
 export interface RequestTenantStore {
   tenantId: string | null;
+  /** The user's first allowed branch, or null if unrestricted/anonymous. Prefer `branchIds` for enforcement. */
   branchId: string | null;
   userId: string | null;
+  /** Role names held by the user, e.g. `["HR_MANAGER"]`. Null until authenticated. */
   roles: string[] | null;
+  /** The user's full resolved permission-key set, e.g. `["employee.read"]`. Null until authenticated. */
+  permissions: string[] | null;
+  /**
+   * Branches the user is limited to. `null` means UNRESTRICTED (sees every
+   * branch in the tenant, subject to tenant RLS as always) — this is the
+   * "user has zero UserBranch rows" case, not "user can see nothing".
+   */
+  branchIds: string[] | null;
   /** True only for requests through an explicit @PlatformRoute() — see platform-route.decorator.ts. */
   platform: boolean;
   tx: Prisma.TransactionClient | null;

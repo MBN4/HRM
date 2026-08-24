@@ -9,6 +9,7 @@
  * `withTenantContext`.
  */
 import { PrismaClient } from '@prisma/client';
+import { seedSystemRolesAndPermissions } from '../src/seed-rbac';
 
 const prisma = new PrismaClient();
 
@@ -48,11 +49,14 @@ async function main() {
     },
   });
 
+  await seedSystemRolesAndPermissions(prisma, tenant.id);
+
   console.log('Seeded tenant:', { id: tenant.id, slug: tenant.slug });
   console.log('Seeded branches:', [
     { id: usBranch.id, name: usBranch.name, countryCode: usBranch.countryCode },
     { id: qaBranch.id, name: qaBranch.name, countryCode: qaBranch.countryCode },
   ]);
+  console.log('Seeded system roles + permission catalog for tenant', tenant.slug);
 }
 
 main()

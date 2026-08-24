@@ -221,9 +221,165 @@ NOBYPASSRLS`, created by the RLS migration, granted only
     (RLS, not application code, is what blocks it), an unresolvable tenant
     gets `401`, `/health` works with no tenant, and a platform route is
     rejected while disabled.
-- **Auth / RBAC model** — _to be defined in step 0.4._ Will populate
-  `branchId`/`userId`/`roles` in the request context above; the shape
-  already exists.
+- **Auth / RBAC model** (defined in step 0.4 — `apps/api/src/auth`,
+  `apps/api/src/common/permissions`, `apps/api/src/tenancy`):
+  - **Where auth-context population actually lives.** `TenantScopeInterceptor`
+    (0.3) was EXTENDED, not replaced: after it resolves the tenant and opens
+    the transaction, and unless the route is `@AllowAnonymous()`, it also
+    verifies the request's `Authorization: Bearer` JWT and loads the user's
+    current roles/permissions/branch-scope — through the SAME transaction,
+    since `User`/`Role`/`Permission`/`UserBranch` are all RLS-protected.
+    This was deliberate, not an accident of convenience: `tx` only exists
+    inside that interceptor's call; a second global interceptor for auth
+    would make "does it see `tx`" an implicit property of module import
+    order rather than a guarantee. `RequestTenantStore` gained two fields
+    for this: `permissions: string[] | null` and `branchIds: string[] | null`
+    (see Branch scoping below) — exactly the extension 0.3 invited.
+  - **Two-token model.** Access tokens are short-lived, stateless JWTs
+    (`@nestjs/jwt`, `JWT_SECRET`/`JWT_EXPIRES_IN`) carrying only
+    `{ sub: userId, tenantId }` — deliberately NOT roles/permissions, so a
+    permission/role change takes effect on the very next request instead of
+    waiting out the token's TTL; `TenantScopeInterceptor` loads them fresh
+    from the DB every time instead. Refresh tokens are opaque random ids
+    tracked in Redis (`TokenService`, `JWT_REFRESH_EXPIRES_IN`), one record
+    per token at `auth:rt:<tokenId>`, because they need to be individually
+    revocable and rotation-tracked — a JWT refresh token would just be a
+    stateless wrapper around state we have to keep in Redis anyway.
+  - **Refresh rotation + reuse detection.** Every refresh both invalidates
+    the presented token and issues a new one in the same "family"
+    (`auth:family:<familyId>`, one per login/session). A rotated-away
+    token's record isn't deleted — it's flagged `used: true` and kept until
+    its original TTL lapses, as a tombstone. Presenting it again (the
+    signature of a leaked/stolen refresh token — a legitimate client would
+    never do this) revokes the ENTIRE family, not just that token, and
+    emits `auth.refresh_reuse_detected`. A token with no record at all
+    (never issued, or already fully expired/revoked) is just an ordinary
+    401, not a reuse signal. `logout` revokes one family (the session tied
+    to the presented refresh token); `logout-all` revokes every family for
+    the user (`auth:userfamilies:<tenantId>:<userId>`).
+  - **`@AllowAnonymous()` vs `@Public()`** — two different decorators for
+    two different exemptions, both in the pipeline above:
+    `@Public()` (0.3) skips tenant resolution entirely (health checks —
+    there's no tenant to bind to). `@AllowAnonymous()` (0.4) still resolves
+    the tenant and opens its transaction, it just skips the JWT check —
+    login/refresh/request-password-reset/reset-password need a tenant to
+    scope the user lookup to, they just don't have a token yet (that's what
+    they're for).
+  - **RBAC is deny-by-default, DB-backed, not enum-backed.** `Role` and
+    `Permission` are ordinary tenant-scoped tables (RLS applies to both,
+    same pattern as every other 0.2 table) — `packages/shared`'s
+    `PERMISSIONS`/`SYSTEM_ROLE_PERMISSIONS` constants are ONLY seed
+    defaults (`packages/db/src/seed-rbac.ts`'s `seedSystemRolesAndPermissions`,
+    called by `prisma/seed.ts` for the demo tenant), never read at
+    enforcement time — a tenant can rename a role or edit its permission
+    set with zero code change, and it takes effect on the next request.
+    Seeded system roles: `TENANT_ADMIN` (all permissions), `HR_MANAGER`,
+    `MANAGER`, `EMPLOYEE` (see the constants for exact defaults).
+  - **`@RequirePermissions(...)` + `PermissionsGuard` — actually an
+    interceptor.** Deny-by-default: missing any listed permission -> 403.
+    Despite the name and `@RequirePermissions()`/`PermissionsGuard` pairing
+    matching what a `CanActivate` guard would look like, `PermissionsGuard`
+    implements `NestInterceptor` and is applied via
+    `@UseInterceptors(PermissionsGuard)`. This is required, not stylistic:
+    Nest runs ALL guards — global or route-scoped — strictly before ANY
+    interceptor, with no exception, and the permission set this checks is
+    loaded by `TenantScopeInterceptor` during the interceptor phase. A real
+    `CanActivate` here would always see an empty permission set and always
+    reject. Reference usage: `GET /auth/rbac-demo` (`role.manage`).
+  - **Branch scoping** extends the same mechanism: a user with zero
+    `UserBranch` rows is unrestricted (every branch in the tenant, as
+    always); one or more rows limits them to exactly those. RLS has no
+    per-branch concept — enforcement is an application-level filter using
+    the request context's `branchIds`, layered ON TOP of tenant RLS, applied
+    per-query by the handler (reference: `GET /tenancy/branches`, which
+    narrows `where.id` to `branchIds` when the caller is restricted).
+    `branchId` (singular) stays in the context too, as the user's first
+    allowed branch, for convenience — `branchIds` is what enforcement
+    should read.
+  - **Field-level permissions — the reusable, declarative pattern (do not
+    reinvent this per module).** A decorator ties a response-DTO field to a
+    required permission; a route interceptor omits ungated fields from
+    nobody, and omits gated fields (not nulls them) for anyone lacking the
+    permission. Built on `class-transformer`'s native `groups` feature
+    rather than hand-rolled reflection — `@Expose({ groups: [permission] })`
+    already implements exactly this semantic (fields with no `groups` are
+    always included; fields with `groups` are included only when a
+    matching group is passed):
+    ```ts
+    // packages/shared: the permission catalog
+    export const PERMISSIONS = { SALARY_VIEW: 'salary.view', /* ... */ } as const;
+
+    // apps/api/src/common/permissions/requires-permission.decorator.ts
+    export const RequiresPermission = (permission: PermissionKey) =>
+      Expose({ groups: [permission] });
+
+    // any future module's response DTO
+    export class EmployeeResponseDto {
+      id!: string;
+      name!: string;
+
+      @RequiresPermission(PERMISSIONS.SALARY_VIEW)
+      salary!: number; // omitted entirely for a caller without salary.view
+    }
+
+    // the route
+    @Get(':id')
+    @UseInterceptors(PermissionSerializerInterceptor) // reads TenantContextService's permissions as `groups`
+    async getEmployee(@Param('id') id: string): Promise<EmployeeResponseDto> {
+      return new EmployeeResponseDto(await this.employees.findOne(id)); // must be a real class instance — plain objects have no gating metadata to apply
+    }
+    ```
+    `PermissionSerializerInterceptor` (`apps/api/src/common/permissions/permission-serializer.interceptor.ts`)
+    is what supplies the caller's current permission set as `groups` — apply
+    it per-route, not globally, since most routes return nothing sensitive
+    to gate. Reference/test endpoint: `GET /tenancy/permission-field-demo`
+    (`apps/api/src/common/permissions/demo/`) — there's no real
+    Employee/Payroll module yet (later phase), so this demo DTO is what
+    proves and tests the pattern until one exists; copy it exactly, don't
+    build a parallel mechanism.
+  - **SSO seam (seam only — no real SSO yet).** `AuthService` depends on
+    the `AUTH_PROVIDER` DI token (`apps/api/src/auth/providers/auth-provider.interface.ts`),
+    not on a concrete implementation. `LocalAuthProvider` (email + password
+    via argon2id, `@node-rs/argon2` — prebuilt native bindings, no
+    node-gyp) is the only binding today
+    (`{ provide: AUTH_PROVIDER, useExisting: LocalAuthProvider }` in
+    `auth.module.ts`). Adding SAML/OIDC later means adding a new
+    `AuthProvider` implementation and changing that one binding (eventually
+    to a per-tenant-configurable selector) — `AuthService` itself shouldn't
+    need to change.
+  - **Audit-event emission points (wiring for 0.9, not persistence yet).**
+    `AuthService`/`TokenService` emit structured `auth.*` domain events via
+    `@nestjs/event-emitter` for every auth-worthy action: `auth.login`,
+    `auth.login_failed`, `auth.logout`, `auth.logout_all`,
+    `auth.password_changed`, `auth.password_reset_requested`,
+    `auth.password_reset_completed`, `auth.refresh_reuse_detected` (see
+    `apps/api/src/auth/auth-events.ts` for the full contract). Consumed
+    today only by `AuditEventsListener`, which just structured-logs them —
+    0.9 replaces that listener with real persistence into the (future,
+    partitioned — see Tenancy model) `audit_log` table without touching
+    `AuthService`. Role-change events are intentionally NOT wired yet: this
+    step has no role-management endpoint (only enforcement + seeding), so
+    there's nothing real to emit from — added when that endpoint lands.
+  - **Security baseline**: all request bodies validated via zod schemas
+    from `packages/shared` through a small `ZodValidationPipe` (the
+    project's one validation paradigm end to end, not a second one
+    alongside class-validator); login/refresh/reset all give the same
+    generic failure message regardless of _why_ (unknown email, wrong
+    password, inactive account, expired/invalid token) — no user
+    enumeration; login/refresh/password-reset-request are Redis-rate-limited
+    per `{tenantId, email}` (`RateLimiterService`, fixed-window `INCR`+`EXPIRE`),
+    reset to zero on a successful login so legitimate rapid use isn't
+    penalized by attempts that came before it succeeded; no secrets appear
+    in code (JWT/DB/Redis secrets are all env-sourced, per existing
+    convention).
+  - Verified end-to-end over real HTTP by `apps/api/test/auth-rbac.e2e-spec.ts`
+    (16 tests: login incl. no-enumeration, refresh rotation + reuse
+    revoking the whole family, logout vs. logout-all, RBAC permit/deny,
+    field-level include/omit, branch-scoping restricted/unrestricted,
+    cross-tenant login rejection + cross-tenant token replay rejection +
+    RLS still holding, rate-limit 429) plus `apps/api/test/tenant-resolution.e2e-spec.ts`
+    (0.3's suite, updated to authenticate now that `/tenancy/*` correctly
+    requires it).
 - **Licensing model** (SaaS vs. on-prem enforcement) — _to be defined in step
   0.6._
 
@@ -406,12 +562,108 @@ config`. Note for future work: ESLint's shareable-config name resolution
     platform route rejected while disabled). Full-repo `pnpm build` (5/5),
     `pnpm lint` (7/7), `pnpm test` (all green — the original 9 RLS DB tests
     plus these 10, 19 total) all pass.
+- **0.4 auth + RBAC — done — 2026-08-24.** Populates the `userId`/`roles`/
+  `permissions`/`branchIds` that 0.3 left nullable. Full design in §
+  Conventions → Auth / RBAC model above — summary: argon2id local auth
+  behind an SSO seam, JWT access + Redis-tracked rotating refresh tokens
+  with family-wide reuse revocation, DB-backed deny-by-default RBAC (roles/
+  permissions are editable data, never hardcoded), branch scoping on top of
+  tenant RLS, and a reusable declarative field-level permission
+  serialization pattern. Files:
+  - `packages/db/prisma/schema.prisma` — `Permission`, `Role`,
+    `RolePermission`, `UserRole`, `UserBranch` (all tenant-scoped, RLS
+    applies), plus `roles`/`userRoles`/`userBranches` relations on
+    `User`/`Tenant`/`Branch`.
+  - `packages/db/prisma/migrations/20260824120000_add_rbac_and_branch_scoping/`
+    — the five tables (generated via `prisma migrate diff` +
+    `migrate deploy`, since `migrate dev` needs a TTY this environment
+    doesn't have — see below).
+  - `packages/db/prisma/migrations/20260824120500_enable_rls_for_rbac_tables/`
+    — `ENABLE`/`FORCE ROW LEVEL SECURITY` + the standard `tenant_isolation`
+    policy on all five, identical pattern to every 0.2 table, applied fresh
+    rather than editing an existing policy.
+  - `packages/db/src/seed-rbac.ts` — `seedSystemRolesAndPermissions(client, tenantId)`,
+    idempotent, shared by `prisma/seed.ts` and this step's test fixtures;
+    the function real tenant provisioning (0.6) should call too.
+  - `packages/shared/src/constants/permissions.ts` — `PERMISSIONS`,
+    `SYSTEM_ROLES`, `SYSTEM_ROLE_PERMISSIONS` (seed defaults only, see
+    Conventions).
+  - `packages/shared/src/validators/auth.validator.ts` — zod schemas/types
+    for login/refresh/change-password/request-reset/reset.
+  - `apps/api/src/redis/` — shared `ioredis` client (`REDIS_CLIENT` token),
+    global module; refresh tokens and rate-limit counters both live here.
+  - `apps/api/src/common/rate-limit/rate-limiter.service.ts` — Redis
+    fixed-window limiter.
+  - `apps/api/src/common/pipes/zod-validation.pipe.ts` — validates request
+    bodies against `packages/shared`'s zod schemas.
+  - `apps/api/src/common/permissions/` — `RequiresPermission()`,
+    `PermissionSerializerInterceptor`, and the `demo/` reference DTO +
+    controller proving the pattern (see Conventions for the full example).
+  - `apps/api/src/auth/` — `AuthService`, `AuthController`
+    (`login`/`refresh`/`logout`/`logout-all`/`me`/`change-password`/
+    `request-password-reset`/`reset-password`/`rbac-demo`), `PasswordService`
+    (argon2id), `TokenService` (JWT + Redis refresh rotation),
+    `load-user-context.util.ts` (shared by `AuthService.login` and the
+    interceptor), `auth-events.ts`, `providers/` (the SSO seam +
+    `LocalAuthProvider`), `decorators/` (`@AllowAnonymous()`,
+    `@RequirePermissions()`), `guards/permissions.guard.ts`,
+    `listeners/audit-events.listener.ts`.
+  - `apps/api/src/tenancy/tenant-context.store.ts` — extended
+    `RequestTenantStore` with `permissions`/`branchIds` (the extension 0.3
+    documented as the sanctioned way to grow this shape).
+  - `apps/api/src/tenancy/tenant-scope.interceptor.ts` — extended (not
+    replaced) with JWT verification + DB-backed context population for
+    every non-`@AllowAnonymous()` request; see Conventions for why this
+    couldn't be a separate interceptor or a `CanActivate` guard.
+  - `apps/api/src/tenancy/tenancy.controller.ts` — `GET /tenancy/branches`
+    now also enforces branch scoping on top of the existing tenant-RLS +
+    crafted-where-clause proof from 0.3.
+  - `apps/api/src/app.module.ts` — added `RedisModule`, `AuthModule`,
+    `EventEmitterModule.forRoot({ wildcard: true })`.
+  - `apps/api/.env` / `.env.example` — added `APP_DATABASE_URL` (apps/api
+    never actually had it despite depending on `@hrm/db` since 0.2 — a dead
+    gap from 0.3, now fixed); no other new vars needed, `JWT_*`/`REDIS_URL`
+    were already documented in 0.1.
+  - `apps/api/jest.config.js` — `testMatch` widened to `test/**/*.e2e-spec.ts`
+    in addition to `src/**/*.spec.ts` (already the case since 0.3; unchanged
+    here, noted for completeness).
+  - `apps/api/tsconfig.json` — no change needed this step; 0.3 already
+    fixed `include` to cover `test/**/*.ts`.
+  - `apps/api/test/auth-rbac.e2e-spec.ts` — 16 new integration tests (see
+    Conventions for the full list).
+  - `apps/api/test/tenant-resolution.e2e-spec.ts` — updated: `/tenancy/*`
+    now correctly requires authentication, so these 0.3 tests mint a JWT
+    directly (bypassing the real login flow, which is this step's concern,
+    not 0.3's) to keep testing tenant resolution specifically. Also fixed a
+    test-teardown leak (`appPrisma` and the app's Redis client were never
+    disconnected, leaving dangling handles) surfaced while adding the new
+    suite's teardown.
+    Note for future work: `prisma migrate dev` refused to run at all in this
+    environment ("non-interactive... not supported" — no TTY), including with
+    `--create-only`. Non-interactive migration authoring uses
+    `prisma migrate diff --from-migrations ./prisma/migrations --to-schema-datamodel ./prisma/schema.prisma --script`
+    (needs a shadow database to already exist — create it by hand first,
+    `CREATE DATABASE hrm_dev_shadow`, if `migrate dev` hasn't already left one
+    around) piped into a manually-created migration folder, then
+    `prisma migrate deploy` to apply it. Same net result as `migrate dev`,
+    just without the interactive confirmation prompt.
+    Also found and fixed a real bug while writing this step's tests: the
+    Redis rate limiter counted successful logins toward the same window as
+    failed ones, so a legitimately-fast sequence of successful test logins
+    for one account tripped 429 partway through — fixed by resetting the
+    counter on success (`RateLimiterService.reset`), which is also the
+    correct security behavior (the window should punish a run of failures,
+    not cap legitimate use).
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379`: all 16 new tests pass, all 10 updated 0.3 tests still
+    pass, all 9 packages/db RLS tests still pass (35 total). Full-repo
+    `pnpm build` (5/5), `pnpm lint` (7/7), `pnpm test` all green.
 
 ## 6. Not yet built
 
 - [x] **0.2** Tenancy model / Row-Level Security (RLS)
 - [x] **0.3** Tenant resolution (request → tenant binding)
-- [ ] **0.4** Auth / RBAC
+- [x] **0.4** Auth / RBAC
 - [ ] **0.5** Country packs
 - [ ] **0.6** Licensing (SaaS vs. lifetime on-prem enforcement)
 - [ ] **0.7** Workflow engine

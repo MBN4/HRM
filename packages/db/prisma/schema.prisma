@@ -75,12 +75,17 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches     Branch[]
-  departments  Department[]
-  designations Designation[]
-  costCenters  CostCenter[]
-  users        User[]
-  domains      TenantDomain[]
+  branches        Branch[]
+  departments     Department[]
+  designations    Designation[]
+  costCenters     CostCenter[]
+  users           User[]
+  domains         TenantDomain[]
+  permissions     Permission[]
+  roles           Role[]
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+  userBranches    UserBranch[]
 
   @@map("tenants")
 }
@@ -125,7 +130,8 @@ model Branch {
   parentBranch  Branch?  @relation("BranchHierarchy", fields: [tenantId, parentBranchId], references: [tenantId, id], onDelete: SetNull)
   childBranches Branch[] @relation("BranchHierarchy")
 
-  departments Department[]
+  departments  Department[]
+  userBranches UserBranch[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -197,9 +203,113 @@ model User {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  roles    UserRole[]
+  branches UserBranch[]
+
   // Per-tenant uniqueness, NOT global: the same email may exist under
   // different tenants as entirely unrelated accounts.
   @@unique([tenantId, email])
+  // Lets UserRole/UserBranch define a composite FK of (tenantId, userId) ->
+  // (tenantId, id) against this table, same pattern as Branch/Role/Permission.
+  @@unique([tenantId, id])
   @@index([tenantId, status])
   @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// RBAC (step 0.4). Both Permission and Role are tenant-scoped — deliberately:
+// the permission catalog and role set are seeded defaults (see
+// packages/shared's PERMISSIONS/SYSTEM_ROLE_PERMISSIONS constants and
+// packages/db/src/seed-rbac.ts), but they are EDITABLE DATA per tenant, not
+// hardcoded enums. A tenant can rename/add roles or (eventually) permissions
+// without a code change or a migration. Enforcement always reads the current
+// DB rows, never the seed constants, so edits take effect immediately.
+// ---------------------------------------------------------------------------
+
+// A granular capability string (e.g. "employee.read", "salary.view"),
+// checked by PermissionsGuard / @RequirePermissions() and by the
+// field-level @RequiresPermission() serialization pattern (see
+// /CLAUDE.md § Conventions → Field-level permissions).
+model Permission {
+  id          String  @id @default(uuid()) @db.Uuid
+  tenantId    String  @map("tenant_id") @db.Uuid
+  key         String
+  description String?
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, key])
+  @@map("permissions")
+}
+
+model Role {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @map("tenant_id") @db.Uuid
+  name     String
+  // Seeded system roles (TENANT_ADMIN/HR_MANAGER/MANAGER/EMPLOYEE) vs. a
+  // tenant's own custom roles — informational only; nothing in this schema
+  // prevents editing a system role's permission set, on purpose.
+  isSystem Boolean @default(false) @map("is_system")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  tenantId     String @map("tenant_id") @db.Uuid
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [tenantId, roleId], references: [tenantId, id], onDelete: Cascade)
+  permission Permission @relation(fields: [tenantId, permissionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([tenantId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  tenantId String @map("tenant_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  roleId   String @map("role_id") @db.Uuid
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+  role   Role   @relation(fields: [tenantId, roleId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([tenantId])
+  @@map("user_roles")
+}
+
+// A user with zero rows here is UNRESTRICTED (sees every branch in their
+// tenant, subject to tenant RLS as always). One or more rows means the user
+// is limited to exactly those branches — enforced in
+// apps/api/src/tenancy/tenant-scope.interceptor.ts by populating
+// `branchIds` in the request context from this table every request; actual
+// filtering happens in application queries (RLS has no per-branch concept,
+// only per-tenant).
+model UserBranch {
+  tenantId String @map("tenant_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+  branchId String @map("branch_id") @db.Uuid
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([userId, branchId])
+  @@index([tenantId])
+  @@map("user_branches")
 }

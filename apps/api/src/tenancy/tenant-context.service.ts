@@ -5,10 +5,10 @@ import { getTenantContextStore, tenantContextStorage, RequestTenantStore } from 
 export type CurrentTenantContext = Omit<RequestTenantStore, 'tx'>;
 
 /**
- * DI-friendly accessor for the current request's tenant context. Backed by
- * `tenantContextStorage` (see tenant-context.store.ts) — this class holds no
- * state of its own, so it's a completely ordinary singleton provider despite
- * every method returning per-request data.
+ * DI-friendly accessor for the current request's tenant/auth context.
+ * Backed by `tenantContextStorage` (see tenant-context.store.ts) — this
+ * class holds no state of its own, so it's a completely ordinary singleton
+ * provider despite every method returning per-request data.
  *
  * Only `TenantScopeInterceptor` should ever call `run()`. Everything else
  * (services, controllers, the `@CurrentTenant()` decorator) should only
@@ -25,18 +25,35 @@ export class TenantContextService {
     return getTenantContextStore();
   }
 
-  /** `{ tenantId, branchId, userId, roles, platform }` — what `@CurrentTenant()` hands to controllers. */
+  /** `{ tenantId, branchId, userId, roles, permissions, branchIds, platform }` — what `@CurrentTenant()` hands to controllers. */
   getContext(): CurrentTenantContext {
-    const { tenantId, branchId, userId, roles, platform } = this.requireStore();
-    return { tenantId, branchId, userId, roles, platform };
+    const { tenantId, branchId, userId, roles, permissions, branchIds, platform } = this.requireStore();
+    return { tenantId, branchId, userId, roles, permissions, branchIds, platform };
   }
 
   get tenantId(): string | null {
     return this.getStore()?.tenantId ?? null;
   }
 
+  get userId(): string | null {
+    return this.getStore()?.userId ?? null;
+  }
+
   get isPlatform(): boolean {
     return this.getStore()?.platform ?? false;
+  }
+
+  getPermissions(): string[] {
+    return this.getStore()?.permissions ?? [];
+  }
+
+  hasPermission(permission: string): boolean {
+    return this.getPermissions().includes(permission);
+  }
+
+  /** null = unrestricted (sees every branch in the tenant). */
+  getBranchIds(): string[] | null {
+    return this.getStore()?.branchIds ?? null;
   }
 
   /**
