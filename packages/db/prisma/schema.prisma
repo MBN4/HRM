@@ -60,7 +60,8 @@ enum TenantEdition {
 // The tenant registry itself. Deliberately NOT tenant-scoped (it has no
 // tenantId — it IS the tenant) and therefore NOT subject to Row-Level
 // Security: resolving "which tenant is this request for" has to happen
-// before a tenant context exists to filter by.
+// before a tenant context exists to filter by. `TenantDomain` below is the
+// only other table with this same exemption, for the same reason.
 model Tenant {
   id                 String        @id @default(uuid()) @db.Uuid
   name               String
@@ -79,8 +80,32 @@ model Tenant {
   designations Designation[]
   costCenters  CostCenter[]
   users        User[]
+  domains      TenantDomain[]
 
   @@map("tenants")
+}
+
+// Custom-domain -> tenant mapping (e.g. "hr.acme-corp.example" -> the "acme"
+// tenant), one of three tenant-resolution strategies used by
+// apps/api's TenantResolutionService (see /CLAUDE.md § Conventions →
+// Tenant resolution). Has a `tenantId` FK like any tenant-owned table, but
+// — like `Tenant` itself — is deliberately EXEMPT from Row-Level Security:
+// resolving a request's tenant from its Host header has to happen before a
+// tenant context exists to filter by. Only `SELECT` is granted to `hrm_app`
+// (see the `add_tenant_domains` migration); managing domain mappings is an
+// admin/platform operation, not a tenant-scoped request, and has no write
+// path yet (lands with the vendor admin console).
+model TenantDomain {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  // Bare hostname, no scheme/port (e.g. "hr.acme-corp.example").
+  domain    String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_domains")
 }
 
 // A tenant may operate branches in different countries — country resolution

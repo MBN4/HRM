@@ -1,0 +1,11 @@
+-- `tenant_domains` is exempt from Row-Level Security, same as `tenants`
+-- (see the comment on the TenantDomain model in schema.prisma): resolving a
+-- request's tenant from its custom domain has to happen before a tenant
+-- context exists to filter by. No ENABLE/FORCE ROW LEVEL SECURITY and no
+-- policy here — that is deliberate, not an oversight.
+--
+-- Only SELECT is granted: managing domain mappings is an admin/platform
+-- write path that doesn't exist yet (lands with the vendor admin console),
+-- so there is no reason for the restricted `hrm_app` role to write this
+-- table today.
+GRANT SELECT ON "tenant_domains" TO hrm_app;

@@ -1,0 +1,25 @@
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import { getTenantContextStore } from './tenant-context.store';
+import type { CurrentTenantContext } from './tenant-context.service';
+
+/**
+ * `{ tenantId, branchId, userId, roles, platform }` for the current
+ * request. `branchId`/`userId`/`roles` are always null until auth (0.4)
+ * populates them — the shape exists now so handlers can start depending on
+ * it. Reads straight from the AsyncLocalStorage store (see
+ * tenant-context.store.ts) rather than through Nest's DI, which is the
+ * standard way custom param decorators access request-scoped data.
+ */
+export const CurrentTenant = createParamDecorator(
+  (_data: unknown, _ctx: ExecutionContext): CurrentTenantContext => {
+    const store = getTenantContextStore();
+    if (!store) {
+      throw new Error(
+        'No request tenant context is active — @CurrentTenant() was used on ' +
+          'a route not covered by TenantScopeInterceptor.',
+      );
+    }
+    const { tenantId, branchId, userId, roles, platform } = store;
+    return { tenantId, branchId, userId, roles, platform };
+  },
+);

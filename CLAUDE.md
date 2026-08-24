@@ -44,14 +44,14 @@ handled by configuration and feature flags, never by branching the code.
 14 App Router (web apps) · Prisma + PostgreSQL 16 · Redis · BullMQ · MinIO
 (S3-compatible object storage, local dev).
 
-| Path              | Purpose                                        |
-| ----------------- | ----------------------------------------------- |
-| `apps/api`        | NestJS backend — all business logic, REST API   |
-| `apps/admin`      | Vendor super-admin console (Next.js App Router) |
-| `apps/portal`     | Tenant org portal (Next.js App Router)          |
-| `packages/db`     | Prisma schema + generated client (`@hrm/db`)    |
+| Path              | Purpose                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `apps/api`        | NestJS backend — all business logic, REST API                 |
+| `apps/admin`      | Vendor super-admin console (Next.js App Router)               |
+| `apps/portal`     | Tenant org portal (Next.js App Router)                        |
+| `packages/db`     | Prisma schema + generated client (`@hrm/db`)                  |
 | `packages/shared` | Shared types, DTOs, zod validators, constants (`@hrm/shared`) |
-| `packages/config` | Shared ESLint / TypeScript / Prettier config (`@hrm/config`) |
+| `packages/config` | Shared ESLint / TypeScript / Prettier config (`@hrm/config`)  |
 
 Infra for local dev: `docker-compose.yml` runs Postgres 16, Redis, and MinIO.
 Every app/package that needs environment variables documents them in its own
@@ -69,9 +69,11 @@ Every app/package that needs environment variables documents them in its own
     `current_setting(...)::uuid` and need the column type to match), a
     composite index/unique constraint leading with `tenantId`, and a foreign
     key to `Tenant.id`. `Tenant` itself has no `tenantId` (it IS the tenant)
-    and is the one table NOT subject to RLS — resolving which tenant a
-    request belongs to has to happen before a tenant context exists to
-    filter by.
+    and is NOT subject to RLS — resolving which tenant a request belongs to
+    has to happen before a tenant context exists to filter by.
+    `TenantDomain` (added in step 0.3, for custom-domain resolution — see
+    Tenant resolution below) is the only other table with this same
+    exemption, for the same reason.
   - Self-relations (`Branch.parentBranchId`, `Department.parentDepartmentId`)
     use a **composite** FK of `(tenantId, parentId) -> (tenantId, id)`, not a
     plain `id -> id` FK. This guarantees a row's parent belongs to the same
@@ -105,7 +107,7 @@ Every app/package that needs environment variables documents them in its own
         in local dev. Used for `prisma migrate`, seeding, and admin/bootstrap
         tooling only.
       - `hrm_app` (`APP_DATABASE_URL`) — plain login role, `NOSUPERUSER
-        NOBYPASSRLS`, created by the RLS migration, granted only
+NOBYPASSRLS`, created by the RLS migration, granted only
         `SELECT/INSERT/UPDATE/DELETE` on tenant-scoped tables and `SELECT`
         on `tenants`. RLS is enforced against this role. **All** tenant-
         scoped, request-time queries must go through it. Every table also
@@ -148,11 +150,80 @@ Every app/package that needs environment variables documents them in its own
   at the **Branch** level (`Branch.countryCode`), not the tenant level — one
   tenant can operate branches in different countries. `Tenant.defaultCountryCode`
   is only a fallback for branches that haven't been assigned one.
-- **Tenant resolution** (how a request is bound to a tenant) — _to be defined
-  in step 0.3._ Whatever resolves the tenant for a request is also
-  responsible for calling `withTenantContext` with that tenant's id — see
-  Tenancy model above.
-- **Auth / RBAC model** — _to be defined in step 0.4._
+- **Tenant resolution** (defined in step 0.3 — `apps/api/src/tenancy`):
+  - `TenantResolutionService` tries strategies **in order** until one
+    matches, configurable via `TENANT_RESOLUTION_STRATEGIES` (comma list;
+    default `subdomain,custom_domain,header`):
+    1. **subdomain** — `acme.<TENANT_BASE_DOMAIN>` → `Tenant.slug = "acme"`.
+       Disabled entirely if `TENANT_BASE_DOMAIN` is unset. Only a single
+       label is matched (`acme`, not `acme.eu`) — a stray dot skips this
+       strategy rather than guessing.
+    2. **custom_domain** — exact `Host` header match against
+       `TenantDomain.domain` (see Tenancy model → `TenantDomain` below).
+    3. **header** — `TENANT_HEADER_NAME` (default `x-tenant-id`) carrying
+       either the tenant's UUID `id` or its `slug`, for mobile/API clients
+       with no per-tenant hostname.
+  - All three query `appPrisma` **directly**, with no `withTenantContext` —
+    `tenants` and `tenant_domains` are both RLS-exempt (see Tenancy model),
+    precisely so resolution can run before a tenant context exists to open
+    one with.
+  - Unresolvable → `401 Unauthorized`. Routes marked `@Public()` (health
+    checks, and eventually login) skip resolution entirely — no tenant, no
+    transaction, and `@CurrentTenant()`/`TenantContextService.getTx()` won't
+    work there. `TENANT_STATUS` (suspended/cancelled tenants) is
+    deliberately **not** checked here — that's a licensing/billing concern
+    for step 0.6, not "can we find this tenant."
+  - **The whole rest of the request runs inside one transaction.**
+    `TenantScopeInterceptor` (a global `APP_INTERCEPTOR`) resolves the
+    tenant, then wraps everything downstream — remaining interceptors,
+    pipes, the controller method — in a single `withTenantContext` call, so
+    every query the handler makes is RLS-enforced, not just ones a
+    developer remembers to wrap. The Observable from `next.handle()` is
+    bridged into the transaction's callback via `firstValueFrom` (awaiting
+    the Observable directly would resolve instantly with the Observable
+    object itself, closing the transaction before the controller ever
+    runs).
+    **Known tradeoff**: this holds one pooled Postgres connection open for
+    the full duration of every non-public request, including any slow I/O
+    the handler does. Deliberate, per this step's brief ("RLS enforced for
+    the whole request lifecycle") — but worth revisiting under 0.10
+    (resilience) if it becomes a real bottleneck.
+  - **Request context propagation is via `AsyncLocalStorage`, not
+    REQUEST-scoped DI.** `tenant-context.store.ts` exports the raw
+    `AsyncLocalStorage<RequestTenantStore>`; `TenantContextService`
+    (injectable) and `@CurrentTenant()` (param decorator) both read from it.
+    Chosen over Nest's REQUEST scope because REQUEST-scoped providers
+    rebuild the whole DI subtree per request — real overhead this avoids —
+    and because a decorator can't receive constructor-injected dependencies
+    anyway. `RequestTenantStore` is per-in-flight-request, never shared or
+    persisted, so it adds no cross-instance state (consistent with the
+    STATELESS requirement — anything that must survive or be shared across
+    requests belongs in Redis, not here).
+  - **Context shape**: `{ tenantId, branchId, userId, roles, platform }`.
+    Only `tenantId`/`platform` are populated today; `branchId`/`userId`/
+    `roles` are wired through and typed now but stay `null` until auth
+    (0.4) populates them — don't add new ad hoc "current user" plumbing
+    later, extend this store instead.
+  - **Platform (no-tenant) context — stub only.** `@PlatformRoute()` marks
+    a route for the future vendor super-admin surface. It is rejected
+    (`403`) unless `PLATFORM_MODE_ENABLED=true` (off by default), and even
+    then `TenantScopeInterceptor` opens **no transaction** for it —
+    `TenantContextService.getTx()` throws unconditionally on a platform
+    request. There is no working tenant-data bypass today, by construction:
+    this step only wires the seam (decorator + config flag + rejection
+    path) so real RBAC- and audit-gated cross-tenant access has somewhere
+    to attach later, without ever weakening a normal tenant request (a
+    route without `@PlatformRoute()` is entirely unaffected by the flag).
+  - Verified end-to-end over real HTTP (not just at the `withTenantContext`
+    helper level) by `apps/api/test/tenant-resolution.e2e-spec.ts`: subdomain
+    and header resolution both isolate tenant A from tenant B, a crafted
+    `?tenantId=B` query param on a tenant-A-scoped request returns zero rows
+    (RLS, not application code, is what blocks it), an unresolvable tenant
+    gets `401`, `/health` works with no tenant, and a platform route is
+    rejected while disabled.
+- **Auth / RBAC model** — _to be defined in step 0.4._ Will populate
+  `branchId`/`userId`/`roles` in the request context above; the shape
+  already exists.
 - **Licensing model** (SaaS vs. on-prem enforcement) — _to be defined in step
   0.6._
 
@@ -172,7 +243,7 @@ entry instead.
   cleanly from a fresh clone (all 6 workspaces: `@hrm/shared`, `@hrm/db`,
   `@hrm/api`, `@hrm/admin`, `@hrm/portal`, `@hrm/config`). `pnpm lint` passes
   across all workspaces. `docker-compose.yml` validated with `docker compose
-  config`. Note for future work: ESLint's shareable-config name resolution
+config`. Note for future work: ESLint's shareable-config name resolution
   mangles scoped-package subpaths (e.g. `@hrm/config/eslint-preset.js` in an
   `extends` array) — every `.eslintrc.js` that extends the shared preset must
   use `require.resolve('@hrm/config/eslint-preset.js')` instead of the bare
@@ -207,15 +278,139 @@ entry instead.
   - `apps/api/package.json` — added `--passWithNoTests` to its `test` script;
     unrelated pre-existing gap from 0.1 (no test files yet) that broke the
     root `pnpm test` once `@hrm/db` gained a real test suite.
-  Verified against local Postgres on `localhost:5433`: both migrations
-  applied cleanly, `pnpm --filter @hrm/db run seed` succeeds, and
-  `pnpm --filter @hrm/db test` passes all 9 tests. Full-repo `pnpm build`,
-  `pnpm lint`, and `pnpm test` all pass.
+    Verified against local Postgres on `localhost:5433`: both migrations
+    applied cleanly, `pnpm --filter @hrm/db run seed` succeeds, and
+    `pnpm --filter @hrm/db test` passes all 9 tests. Full-repo `pnpm build`,
+    `pnpm lint`, and `pnpm test` all pass.
+- **Pre-commit lint tooling fixed — 2026-08-24.** The Husky pre-commit hook
+  was broken: lint-staged's `eslint --fix` failed with "Command not found"
+  because `eslint` was never installed as a root devDependency (only inside
+  individual workspaces), so `pnpm exec eslint` couldn't resolve it from
+  repo root. Fixed by adding `eslint` + `eslint-config-prettier` to root
+  `package.json` and adding a root-level `.eslintrc.js` (`root: true`) as a
+  fallback for plain-JS files with no workspace of their own (root config
+  files, `packages/config`'s own `*.js`, which can't extend the preset they
+  define).
+  That fallback config initially caused a real regression: because none of
+  the existing per-workspace `.eslintrc.js`/`.json` files set `root: true`,
+  ESLint's cascade merged the new root config's `eslint:recommended` (which
+  turns `no-undef` on) into `apps/admin`/`apps/portal`, breaking their build
+  with a false positive on `React.ReactNode` (a type-only reference, not a
+  runtime one) in both `layout.tsx` files. Fixed by adding `root: true` to
+  every workspace's own eslint config (`apps/api`, `apps/admin`,
+  `apps/portal`, `packages/db`, `packages/shared`) so each is fully
+  self-contained and the root config only ever applies to files with no
+  closer config. **Convention going forward: every new workspace's eslint
+  config must set `root: true`.**
+  Verified: `pnpm exec eslint --version` resolves from root; `eslint --fix`
+  runs correctly standalone against files in every workspace type (NestJS,
+  Next.js, plain TS packages, plain JS in `packages/config`); staged a
+  trivially-fixable file (`let` → `prefer-const`, unformatted JSON) and ran
+  `.husky/pre-commit` directly — both `eslint --fix` and `prettier --write`
+  ran and applied their fixes, hook exited 0, no `--no-verify` needed.
+  Full-repo `pnpm build`, `pnpm lint`, and `pnpm test` all still pass.
+- **Pre-commit lint tooling fixed again — config files vs. type-aware
+  parsing — 2026-08-24.** Landing the previous fix's `apps/api/.eslintrc.js`
+  (which sets `parserOptions.project`) broke linting of that same file:
+  `@typescript-eslint/parser` tries to type-check every linted file against
+  `tsconfig.json`, but `.eslintrc.js` isn't part of that tsconfig's
+  `include` (only `src/**/*.ts` is), so parsing failed with "TSConfig does
+  not include .eslintrc.js". Fixed with the standard typescript-eslint
+  pattern: an `overrides` entry in `apps/api/.eslintrc.js` scoped to
+  `files: ['.eslintrc.js']` that sets `parserOptions.project: null`,
+  falling back to plain (non-type-aware) parsing for just that file. Real
+  source under `src/**/*.ts` is untouched — confirmed via `--print-config`
+  that its `parserOptions.project` is unchanged, and that a type-aware rule
+  still fires there.
+  No other workspace's eslint config sets `parserOptions.project` today, so
+  no other file was actually affected — `.prettierrc.js`, `commitlint.config.js`,
+  and both apps' `next.config.js` were already lint-clean (confirmed
+  individually) since none of them go through type-aware parsing.
+  **Convention update (extends the `root: true` note above): any workspace
+  eslint config that sets `parserOptions.project` MUST also add an
+  `overrides` entry disabling `project` (set it to `null`) for that
+  workspace's own non-source config/dot files (`.eslintrc.js` itself, and
+  any other root-level `*.js` config file in that workspace that isn't
+  under its tsconfig's `include`) — otherwise linting that file breaks the
+  moment `project` is set, exactly as happened here.**
+  Verified: staged every config file that could plausibly trip the parser
+  (`.eslintrc.js` at root and in every workspace, `apps/admin`/`apps/portal`
+  `next.config.js`, `.prettierrc.js`, `commitlint.config.js`) together with
+  a real, trivially-fixable `apps/api/src/*.ts` file, and ran
+  `.husky/pre-commit` directly: `eslint --fix` and `prettier --write` both
+  ran, the source file's `let` → `const` fix was applied, no config file
+  errored, hook exited 0, no `--no-verify`. Full-repo `pnpm build` (5/5),
+  `pnpm lint` (7/7), and `pnpm test` (all green, including all 9 RLS
+  integration tests) still pass.
+- **0.3 tenant resolution — done — 2026-08-24.** Every non-public request
+  now resolves its tenant (subdomain → custom domain → header, configurable
+  order) and runs entirely inside `withTenantContext`, so 0.2's RLS is
+  enforced automatically for the whole request — application code never
+  touches the migration client. Full design in § Conventions → Tenant
+  resolution above. Files:
+  - `packages/db/prisma/schema.prisma` — new `TenantDomain` model
+    (custom-domain → tenant mapping), RLS-exempt like `Tenant`, plus a
+    `domains` back-relation on `Tenant`.
+  - `packages/db/prisma/migrations/20260824104404_add_tenant_domains/` —
+    the table.
+  - `packages/db/prisma/migrations/20260824104420_grant_tenant_domains_select/`
+    — `GRANT SELECT ... TO hrm_app` only (no ENABLE/FORCE ROW LEVEL SECURITY,
+    no policy — deliberate).
+  - `apps/api/src/tenancy/tenant-context.store.ts` — the
+    `AsyncLocalStorage<RequestTenantStore>` single source of truth for the
+    request's `{ tenantId, branchId, userId, roles, platform, tx }`.
+  - `apps/api/src/tenancy/tenant-context.service.ts` — injectable
+    `TenantContextService` (`getContext()`, `getTx()`, `run()`).
+  - `apps/api/src/tenancy/current-tenant.decorator.ts` — `@CurrentTenant()`.
+  - `apps/api/src/tenancy/public.decorator.ts` / `platform-route.decorator.ts`
+    — `@Public()`, `@PlatformRoute()`.
+  - `apps/api/src/tenancy/tenant-resolution.service.ts` — the three
+    strategies, all querying `appPrisma` directly (no tenant context needed
+    — see above).
+  - `apps/api/src/tenancy/tenant-scope.interceptor.ts` — the global
+    `APP_INTERCEPTOR` tying resolution, the transaction, and
+    `AsyncLocalStorage` propagation together.
+  - `apps/api/src/tenancy/tenancy.module.ts`, `tenancy.controller.ts`
+    (`GET /tenancy/whoami`, `GET /tenancy/branches` — example protected
+    routes proving the pipeline end to end) — `@Global()` so the service/
+    decorator work from any module.
+  - `apps/api/src/platform/platform.controller.ts` — `GET /platform/ping`,
+    the platform-context seam's minimal proof.
+  - `apps/api/src/app.module.ts` (imports `TenancyModule`),
+    `app.controller.ts` (`/health` now `@Public()`).
+  - `apps/api/.env` / `.env.example` — added `APP_DATABASE_URL` (apps/api
+    never actually had it despite depending on `@hrm/db` since 0.2 — dead
+    gap, now fixed), `TENANT_RESOLUTION_STRATEGIES`, `TENANT_BASE_DOMAIN`,
+    `PLATFORM_MODE_ENABLED`; removed the unused `DEFAULT_TENANT_ID` left
+    over from 0.1.
+  - `apps/api/jest.config.js` / `jest.setup.js` — apps/api had **no** jest
+    config at all before this (only bare devDependencies); added the same
+    `ts-jest` + `dotenv`-preloaded pattern already used by `packages/db`.
+  - `apps/api/test/tenant-resolution.e2e-spec.ts` — 10 integration tests
+    over real HTTP against local Postgres (see below).
+  - `apps/api/tsconfig.json` — widened `include` to also cover
+    `test/**/*.ts` (it previously only covered `src/**/*.ts`, which is what
+    caused the `.eslintrc.js`-style "TSConfig does not include" parsing
+    error to resurface for the new e2e spec file the moment it was added;
+    `tsconfig.build.json` already excludes `test/` and `**/*spec.ts`
+    independently, so the production build is unaffected). **Convention
+    update: test files get real type-aware linting like any other source —
+    they belong in the base tsconfig's `include`, not nulled out via the
+    `.eslintrc.js`-style `overrides` escape hatch, which is reserved for
+    genuinely non-source config/dot files.**
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379`: all 10 new e2e tests pass (subdomain isolation ×2,
+    header isolation by id and by slug, custom-domain resolution, unresolvable
+    → 401, `/health` public with no tenant, crafted `?tenantId=` query param
+    proven blocked by RLS through the HTTP layer, `@CurrentTenant()` shape,
+    platform route rejected while disabled). Full-repo `pnpm build` (5/5),
+    `pnpm lint` (7/7), `pnpm test` (all green — the original 9 RLS DB tests
+    plus these 10, 19 total) all pass.
 
 ## 6. Not yet built
 
 - [x] **0.2** Tenancy model / Row-Level Security (RLS)
-- [ ] **0.3** Tenant resolution (request → tenant binding)
+- [x] **0.3** Tenant resolution (request → tenant binding)
 - [ ] **0.4** Auth / RBAC
 - [ ] **0.5** Country packs
 - [ ] **0.6** Licensing (SaaS vs. lifetime on-prem enforcement)
