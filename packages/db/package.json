@@ -19,6 +19,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@hrm/shared": "workspace:*",
     "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
