@@ -1,0 +1,180 @@
+// Multi-tenancy data model — the isolation backbone for the whole system.
+//
+// Every table except `Tenant` is tenant-scoped: it carries a `tenantId`
+// column, a composite index leading with `tenantId`, and (for self-relations)
+// a composite foreign key back to `Tenant` so a row can never reference a
+// parent belonging to a different tenant even before Row-Level Security is
+// considered. RLS itself is NOT expressed here — Prisma has no RLS DSL — it
+// is enabled by hand-written SQL in
+// `prisma/migrations/<ts>_enable_row_level_security/migration.sql`.
+//
+// See /CLAUDE.md § Conventions → Tenancy model for the full write-up of how
+// tenant context is propagated to Postgres at query time.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Future partitioned tables (not created in this step — tracked in
+// /CLAUDE.md § Not yet built as 0.9 "audit_log" and a later HR phase for
+// "attendance"):
+//
+//   - attendance  — one row per clock-in/out event; extremely high volume.
+//   - audit_log   — one row per mutating action across the whole system.
+//
+// Both MUST be created as PARTITIONED tables from day one — retrofitting
+// partitioning onto a live, non-partitioned table at scale is a painful
+// migration, not a config change. Plan:
+//   - PARTITION BY RANGE on a timestamp column (e.g. occurred_at/created_at),
+//     optionally sub-partitioned BY LIST on tenant_id for very large tenants.
+//   - Postgres requires the partition key to be part of every unique
+//     constraint/PK on a partitioned table, so their primary keys must be
+//     composite from the start, e.g. PRIMARY KEY (id, occurred_at) rather
+//     than PRIMARY KEY (id) alone. Any FK that will point at them (and any
+//     `id` values handed to clients) must be designed compatibly now so
+//     adding the tables later isn't a breaking change to callers.
+//   - Both need RLS enabled + FORCE ROW LEVEL SECURITY + the same
+//     tenant_isolation policy pattern used below for every other
+//     tenant-scoped table.
+// ---------------------------------------------------------------------------
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum TenantEdition {
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+// The tenant registry itself. Deliberately NOT tenant-scoped (it has no
+// tenantId — it IS the tenant) and therefore NOT subject to Row-Level
+// Security: resolving "which tenant is this request for" has to happen
+// before a tenant context exists to filter by.
+model Tenant {
+  id                 String        @id @default(uuid()) @db.Uuid
+  name               String
+  slug               String        @unique
+  status             TenantStatus  @default(TRIAL)
+  edition            TenantEdition @default(STARTER)
+  // ISO 3166-1 alpha-2. Branches resolve their own countryCode; this is only
+  // the fallback used where a branch hasn't been assigned one.
+  defaultCountryCode String        @map("default_country_code") @db.VarChar(2)
+  hostingRegion      String        @map("hosting_region")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  branches     Branch[]
+  departments  Department[]
+  designations Designation[]
+  costCenters  CostCenter[]
+  users        User[]
+
+  @@map("tenants")
+}
+
+// A tenant may operate branches in different countries — country resolution
+// happens at the BRANCH level, not the tenant level (see /CLAUDE.md 0.5).
+model Branch {
+  id             String  @id @default(uuid()) @db.Uuid
+  tenantId       String  @map("tenant_id") @db.Uuid
+  name           String
+  countryCode    String  @map("country_code") @db.VarChar(2)
+  timezone       String
+  parentBranchId String? @map("parent_branch_id") @db.Uuid
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Composite FK back to the SAME tenant: a branch's parent must belong to
+  // the same tenant, enforced at the schema level (not just by RLS).
+  parentBranch  Branch?  @relation("BranchHierarchy", fields: [tenantId, parentBranchId], references: [tenantId, id], onDelete: SetNull)
+  childBranches Branch[] @relation("BranchHierarchy")
+
+  departments Department[]
+
+  // Lets other tenant-scoped tables define a composite FK of
+  // (tenantId, branchId) -> (tenantId, id) against this table.
+  @@unique([tenantId, id])
+  @@unique([tenantId, name])
+  @@index([tenantId, countryCode])
+  @@index([tenantId, parentBranchId])
+  @@map("branches")
+}
+
+model Department {
+  id                 String  @id @default(uuid()) @db.Uuid
+  tenantId           String  @map("tenant_id") @db.Uuid
+  branchId           String  @map("branch_id") @db.Uuid
+  name               String
+  parentDepartmentId String? @map("parent_department_id") @db.Uuid
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  parentDepartment Department?  @relation("DepartmentHierarchy", fields: [tenantId, parentDepartmentId], references: [tenantId, id], onDelete: SetNull)
+  childDepartments Department[] @relation("DepartmentHierarchy")
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, branchId, name])
+  @@index([tenantId, parentDepartmentId])
+  @@map("departments")
+}
+
+model Designation {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  name     String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@map("designations")
+}
+
+model CostCenter {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  name     String
+  code     String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, name])
+  @@map("cost_centers")
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+model User {
+  id             String     @id @default(uuid()) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  email          String
+  hashedPassword String     @map("hashed_password")
+  status         UserStatus @default(PENDING)
+  createdAt      DateTime   @default(now()) @map("created_at")
+  updatedAt      DateTime   @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Per-tenant uniqueness, NOT global: the same email may exist under
+  // different tenants as entirely unrelated accounts.
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@map("users")
+}
