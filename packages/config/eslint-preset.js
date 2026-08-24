@@ -20,4 +20,20 @@ module.exports = {
     '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     '@typescript-eslint/no-explicit-any': 'warn',
   },
+  overrides: [
+    {
+      // Plain-JS config files (.eslintrc.js, jest.config.js, jest.setup.js, etc.)
+      // are CommonJS and aren't part of any tsconfig, so type-aware parsing and
+      // the TS-only require() bans don't apply. Every workspace extending this
+      // preset inherits correct config-file handling automatically.
+      files: ['*.js'],
+      parserOptions: {
+        project: null,
+      },
+      rules: {
+        '@typescript-eslint/no-require-imports': 'off',
+        '@typescript-eslint/no-var-requires': 'off',
+      },
+    },
+  ],
 };
