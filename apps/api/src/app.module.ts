@@ -8,6 +8,7 @@ import { CountryPacksModule } from './country-packs/country-packs.module';
 import { LicensingModule } from './licensing/licensing.module';
 import { RedisModule } from './redis/redis.module';
 import { TenancyModule } from './tenancy/tenancy.module';
+import { WorkflowModule } from './workflow/workflow.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
     AuthModule,
     CountryPacksModule,
     LicensingModule,
+    WorkflowModule,
   ],
   controllers: [AppController],
   providers: [AppService],

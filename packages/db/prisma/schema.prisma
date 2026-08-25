@@ -75,21 +75,26 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches             Branch[]
-  departments          Department[]
-  designations         Designation[]
-  costCenters          CostCenter[]
-  users                User[]
-  domains              TenantDomain[]
-  permissions          Permission[]
-  roles                Role[]
-  rolePermissions      RolePermission[]
-  userRoles            UserRole[]
-  userBranches         UserBranch[]
-  countryOverrides     TenantCountryOverride[]
-  subscription         Subscription?
-  licenses             License[]
-  featureFlagOverrides TenantFeatureFlagOverride[]
+  branches              Branch[]
+  departments           Department[]
+  designations          Designation[]
+  costCenters           CostCenter[]
+  users                 User[]
+  domains               TenantDomain[]
+  permissions           Permission[]
+  roles                 Role[]
+  rolePermissions       RolePermission[]
+  userRoles             UserRole[]
+  userBranches          UserBranch[]
+  countryOverrides      TenantCountryOverride[]
+  subscription          Subscription?
+  licenses              License[]
+  featureFlagOverrides  TenantFeatureFlagOverride[]
+  workflowTemplates     WorkflowTemplate[]
+  workflowSteps         WorkflowStep[]
+  workflowInstances     WorkflowInstance[]
+  workflowInstanceSteps WorkflowInstanceStep[]
+  workflowActions       WorkflowAction[]
 
   @@map("tenants")
 }
@@ -126,6 +131,9 @@ model Branch {
   countryCode    String  @map("country_code") @db.VarChar(2)
   timezone       String
   parentBranchId String? @map("parent_branch_id") @db.Uuid
+  // Seam for the workflow engine's BRANCH_HEAD approver rule (step 0.7) —
+  // see /CLAUDE.md § Conventions → Workflow engine → Approver rules.
+  headUserId     String? @map("head_user_id") @db.Uuid
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -133,6 +141,7 @@ model Branch {
   // the same tenant, enforced at the schema level (not just by RLS).
   parentBranch  Branch?  @relation("BranchHierarchy", fields: [tenantId, parentBranchId], references: [tenantId, id], onDelete: SetNull)
   childBranches Branch[] @relation("BranchHierarchy")
+  headUser      User?    @relation("BranchHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
   departments  Department[]
   userBranches UserBranch[]
@@ -143,6 +152,7 @@ model Branch {
   @@unique([tenantId, name])
   @@index([tenantId, countryCode])
   @@index([tenantId, parentBranchId])
+  @@index([tenantId, headUserId])
   @@map("branches")
 }
 
@@ -152,16 +162,21 @@ model Department {
   branchId           String  @map("branch_id") @db.Uuid
   name               String
   parentDepartmentId String? @map("parent_department_id") @db.Uuid
+  // Seam for the workflow engine's DEPARTMENT_HEAD approver rule (step
+  // 0.7) — see /CLAUDE.md § Conventions → Workflow engine → Approver rules.
+  headUserId         String? @map("head_user_id") @db.Uuid
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
 
   parentDepartment Department?  @relation("DepartmentHierarchy", fields: [tenantId, parentDepartmentId], references: [tenantId, id], onDelete: SetNull)
   childDepartments Department[] @relation("DepartmentHierarchy")
+  headUser         User?        @relation("DepartmentHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
   @@unique([tenantId, id])
   @@unique([tenantId, branchId, name])
   @@index([tenantId, parentDepartmentId])
+  @@index([tenantId, headUserId])
   @@map("departments")
 }
 
@@ -202,21 +217,42 @@ model User {
   email          String
   hashedPassword String     @map("hashed_password")
   status         UserStatus @default(PENDING)
+  // Employee->manager relation SEAM for the workflow engine's MANAGER
+  // approver rule (step 0.7) — modeled here, on User, because the real
+  // Employee module doesn't exist yet (phase 1.1). Once it does, the
+  // MANAGER resolver in apps/api/src/workflow should be repointed at
+  // whatever the Employee model's manager relation turns out to be;
+  // nothing about the workflow engine itself should need to change, only
+  // this one resolution function. See /CLAUDE.md § Conventions → Workflow
+  // engine → Approver rules.
+  managerId      String?    @map("manager_id") @db.Uuid
   createdAt      DateTime   @default(now()) @map("created_at")
   updatedAt      DateTime   @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  // Composite self-relation, same pattern as Branch.parentBranchId /
+  // Department.parentDepartmentId: a manager must belong to the same
+  // tenant, enforced at the schema level in addition to RLS.
+  manager       User?  @relation("UserManager", fields: [tenantId, managerId], references: [tenantId, id], onDelete: SetNull)
+  directReports User[] @relation("UserManager")
+
   roles    UserRole[]
   branches UserBranch[]
+
+  headOfBranches    Branch[]           @relation("BranchHead")
+  headOfDepartments Department[]       @relation("DepartmentHead")
+  workflowRequests  WorkflowInstance[] @relation("WorkflowRequester")
 
   // Per-tenant uniqueness, NOT global: the same email may exist under
   // different tenants as entirely unrelated accounts.
   @@unique([tenantId, email])
-  // Lets UserRole/UserBranch define a composite FK of (tenantId, userId) ->
-  // (tenantId, id) against this table, same pattern as Branch/Role/Permission.
+  // Lets UserRole/UserBranch/the manager self-relation define a composite
+  // FK of (tenantId, userId) -> (tenantId, id) against this table, same
+  // pattern as Branch/Role/Permission.
   @@unique([tenantId, id])
   @@index([tenantId, status])
+  @@index([tenantId, managerId])
   @@map("users")
 }
 
@@ -490,4 +526,221 @@ model TenantFeatureFlagOverride {
   @@unique([tenantId, flagKey])
   @@index([tenantId])
   @@map("tenant_feature_flag_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// Workflow / approval engine (step 0.7). ONE generic engine — leave,
+// expenses, regularizations, offer approvals, and anything else that ever
+// needs an approval chain all consume THIS model. See /CLAUDE.md §
+// Conventions → Workflow engine for the full write-up: approver-rule
+// resolution, conditional branching via the shared sandboxed expression
+// evaluator, and THE RULE that no future module may build its own
+// approval logic.
+// ---------------------------------------------------------------------------
+
+// A named, versioned, tenant-configurable approval process for one
+// `entityType`. `entityType` is a free-form string, NOT a Postgres enum —
+// enforcing a closed catalog here would mean a migration every time a new
+// consuming module (leave, expenses, ...) is added, defeating the point of
+// a generic engine. Versioned + `isActive` the same way `CountryPack` is
+// (0.5): multiple versions may exist; resolution picks the active one with
+// the highest version for a given `(tenantId, entityType)`.
+model WorkflowTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  entityType  String   @map("entity_type")
+  version     Int      @default(1)
+  isActive    Boolean  @default(true) @map("is_active")
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  steps     WorkflowStep[]
+  instances WorkflowInstance[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, entityType, version])
+  @@index([tenantId, entityType, isActive])
+  @@map("workflow_templates")
+}
+
+// One step in a template's approval chain. Steps sharing the same `order`
+// within a template form a PARALLEL group — every one of them must reach
+// APPROVED before the instance advances past that `order`; steps with
+// different `order` values run SEQUENTIALLY. `approverRule` is a JSON
+// `ApproverRule` (`@hrm/shared`) — SPECIFIC_USER/ROLE/MANAGER/BRANCH_HEAD/
+// DEPARTMENT_HEAD, optionally wrapped in a CONDITIONAL that picks between
+// two sub-rules — validated on every write AND read, same "JSON column
+// has no schema-level guarantee of its own" posture as 0.5's CountryPack.
+// `condition` (nullable) gates whether this step applies to a given
+// instance AT ALL — this is the CONDITIONAL BRANCHING mechanism (e.g. "add
+// a step only when amount > threshold"), evaluated against the instance's
+// `dataSnapshot` via the workflow condition sandbox (see Conventions);
+// null = always applies. `autoApproveCondition` (nullable) lets a step
+// resolve to APPROVED with no human action when true (e.g. small
+// low-risk amounts) — a DIFFERENT mechanism from `condition`: `condition`
+// decides whether the step exists at all for this instance; here the step
+// exists but needs nobody to click anything.
+model WorkflowStep {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @map("tenant_id") @db.Uuid
+  templateId             String   @map("template_id") @db.Uuid
+  name                   String
+  order                  Int
+  approverRule           Json     @map("approver_rule")
+  condition              Json?    @map("condition")
+  autoApproveCondition   Json?    @map("auto_approve_condition")
+  // Minutes after activation before this step escalates. Null = never.
+  escalationAfterMinutes Int?     @map("escalation_after_minutes")
+  // ApproverRule (JSON) — who an overdue step escalates to. Required
+  // whenever `escalationAfterMinutes` is set (validated at the app layer,
+  // not the DB — same "shape validated outside the JSON column" posture
+  // as everything else here).
+  escalationRule         Json?    @map("escalation_rule")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template      WorkflowTemplate       @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Cascade)
+  instanceSteps WorkflowInstanceStep[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, templateId, order])
+  @@map("workflow_steps")
+}
+
+enum WorkflowInstanceStatus {
+  PENDING
+  IN_STEP
+  APPROVED
+  REJECTED
+  CANCELED
+  ESCALATED
+}
+
+// A running approval for ANY entity — POLYMORPHIC via `entityType` +
+// `entityId` (the id of a row in whatever future module owns it — leave
+// request, expense claim, ...; this table has no FK to it, deliberately,
+// since that row's table doesn't exist yet for most consumers and never
+// should be a hard dependency of the generic engine). `dataSnapshot` is
+// the JSON the engine's condition/auto-approve/escalation expressions
+// evaluate against (e.g. `{ amount, leaveType, days }`) — captured once at
+// submission time, not re-read from the owning module later, so an
+// approval chain already in flight is unaffected by the source record
+// changing underneath it.
+model WorkflowInstance {
+  id           String                 @id @default(uuid()) @db.Uuid
+  tenantId     String                 @map("tenant_id") @db.Uuid
+  templateId   String                 @map("template_id") @db.Uuid
+  entityType   String                 @map("entity_type")
+  entityId     String                 @map("entity_id")
+  requesterId  String                 @map("requester_id") @db.Uuid
+  dataSnapshot Json                   @map("data_snapshot")
+  status       WorkflowInstanceStatus @default(PENDING)
+  // The `order` value currently active; null once the instance is terminal.
+  currentOrder Int?                   @map("current_order")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+  completedAt  DateTime?              @map("completed_at")
+
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  template  WorkflowTemplate       @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Cascade)
+  requester User                   @relation("WorkflowRequester", fields: [tenantId, requesterId], references: [tenantId, id], onDelete: Cascade)
+  steps     WorkflowInstanceStep[]
+  actions   WorkflowAction[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, requesterId, status])
+  @@map("workflow_instances")
+}
+
+enum WorkflowStepStatus {
+  PENDING
+  SKIPPED
+  ACTIVE
+  APPROVED
+  REJECTED
+  ESCALATED
+}
+
+// The per-instance materialization of one template step — which lets the
+// same template be reused across many instances while each instance
+// tracks its OWN resolved approvers and progress independently.
+// `eligibleApproverIds` is a snapshot (JSON string[]) of who could act
+// when this step activated, resolved by apps/api's approver-rule
+// resolvers — captured at activation time so a later org-chart change
+// (a new manager, a reassigned branch head) never rewrites history on an
+// approval already in flight. `delegatedToUserId`/`escalatedToUserId` are
+// plain UUID columns with no FK relation (an audit/tracking reference,
+// the same class of "just a user id" field `auth-events.ts`'s
+// `AuthEventPayload.userId` already is elsewhere in this codebase) —
+// deliberately, to avoid yet another named back-relation on `User` for
+// what is fundamentally a log fact, not a structural relationship.
+model WorkflowInstanceStep {
+  id                  String             @id @default(uuid()) @db.Uuid
+  tenantId            String             @map("tenant_id") @db.Uuid
+  instanceId          String             @map("instance_id") @db.Uuid
+  templateStepId      String             @map("template_step_id") @db.Uuid
+  name                String
+  // Copied from the template step at activation time so ordering stays
+  // stable even if the template is edited later.
+  order               Int
+  status              WorkflowStepStatus @default(PENDING)
+  eligibleApproverIds Json               @map("eligible_approver_ids")
+  delegatedToUserId   String?            @map("delegated_to_user_id") @db.Uuid
+  escalatedToUserId   String?            @map("escalated_to_user_id") @db.Uuid
+  activatedAt         DateTime?          @map("activated_at")
+  // activatedAt + the template step's escalationAfterMinutes; null if
+  // that step has no escalation rule.
+  dueAt               DateTime?          @map("due_at")
+  decidedAt           DateTime?          @map("decided_at")
+  decidedByUserId     String?            @map("decided_by_user_id") @db.Uuid
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instance     WorkflowInstance @relation(fields: [tenantId, instanceId], references: [tenantId, id], onDelete: Cascade)
+  templateStep WorkflowStep     @relation(fields: [tenantId, templateStepId], references: [tenantId, id], onDelete: Cascade)
+  actions      WorkflowAction[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, instanceId, order])
+  @@index([tenantId, status, dueAt])
+  @@map("workflow_instance_steps")
+}
+
+enum WorkflowActionType {
+  APPROVE
+  REJECT
+  DELEGATE
+  COMMENT
+  ESCALATE
+  AUTO_APPROVE
+  CANCEL
+}
+
+// The audit trail: one row per approve/reject/delegate/comment/escalate/
+// auto-approve/cancel, who (if anyone — ESCALATE and AUTO_APPROVE are
+// system-initiated, `actorUserId` is null for those) and when. Never
+// updated or deleted once written. `actorUserId`/`delegatedToUserId` are
+// plain UUID columns with no FK relation, same reasoning as
+// `WorkflowInstanceStep`'s equivalents above.
+model WorkflowAction {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  instanceId        String             @map("instance_id") @db.Uuid
+  instanceStepId    String?            @map("instance_step_id") @db.Uuid
+  actionType        WorkflowActionType @map("action_type")
+  actorUserId       String?            @map("actor_user_id") @db.Uuid
+  delegatedToUserId String?            @map("delegated_to_user_id") @db.Uuid
+  comment           String?
+  createdAt         DateTime           @default(now()) @map("created_at")
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instance     WorkflowInstance      @relation(fields: [tenantId, instanceId], references: [tenantId, id], onDelete: Cascade)
+  instanceStep WorkflowInstanceStep? @relation(fields: [tenantId, instanceStepId], references: [tenantId, id], onDelete: SetNull)
+
+  @@index([tenantId, instanceId])
+  @@map("workflow_actions")
 }

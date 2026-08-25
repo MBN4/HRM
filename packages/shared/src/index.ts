@@ -8,3 +8,4 @@ export * from './validators/auth.validator';
 export * from './validators/rules-engine.validator';
 export * from './validators/country-pack.validator';
 export * from './validators/license.validator';
+export * from './validators/workflow.validator';
