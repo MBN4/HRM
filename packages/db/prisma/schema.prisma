@@ -75,18 +75,21 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches         Branch[]
-  departments      Department[]
-  designations     Designation[]
-  costCenters      CostCenter[]
-  users            User[]
-  domains          TenantDomain[]
-  permissions      Permission[]
-  roles            Role[]
-  rolePermissions  RolePermission[]
-  userRoles        UserRole[]
-  userBranches     UserBranch[]
-  countryOverrides TenantCountryOverride[]
+  branches             Branch[]
+  departments          Department[]
+  designations         Designation[]
+  costCenters          CostCenter[]
+  users                User[]
+  domains              TenantDomain[]
+  permissions          Permission[]
+  roles                Role[]
+  rolePermissions      RolePermission[]
+  userRoles            UserRole[]
+  userBranches         UserBranch[]
+  countryOverrides     TenantCountryOverride[]
+  subscription         Subscription?
+  licenses             License[]
+  featureFlagOverrides TenantFeatureFlagOverride[]
 
   @@map("tenants")
 }
@@ -379,4 +382,112 @@ model TenantCountryOverride {
   @@unique([tenantId, countryCode])
   @@index([tenantId])
   @@map("tenant_country_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// Licensing / feature flags (step 0.6). See /CLAUDE.md § Conventions →
+// Licensing / feature flags for the full write-up of the two delivery
+// modes, the license file format, key handling, and seat-cap enforcement.
+// ---------------------------------------------------------------------------
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+// SaaS-mode (LICENSE_MODE=saas) entitlement source — a stand-in for real
+// billing (Stripe integration is Phase 4.2). `edition` here, NOT
+// `Tenant.edition`, is what FeatureFlagResolutionService reads in SaaS
+// mode: a subscription's plan is naturally what a real billing system
+// attaches edition/seat data to, and keeping a single field as
+// resolution's source of truth avoids two columns drifting out of sync.
+// `Tenant.edition` (0.2) keeps its original display/legacy role. `seatCap`
+// is nullable: SaaS-mode seat-cap enforcement is "flagged" (audited), not
+// blocking (see Seat-cap enforcement in Conventions) — a null cap means
+// the check is skipped entirely for that tenant.
+model Subscription {
+  id               String             @id @default(uuid()) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  edition          TenantEdition
+  status           SubscriptionStatus @default(TRIAL)
+  seatCap          Int?               @map("seat_cap")
+  currentPeriodEnd DateTime?          @map("current_period_end")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // At most one subscription per tenant.
+  @@unique([tenantId])
+  @@map("subscriptions")
+}
+
+enum LicenseStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+  SUPERSEDED
+}
+
+// Lifetime/on-prem-mode (LICENSE_MODE=lifetime) entitlement source: the
+// DB-side record of a signed license FILE after activation. `signedToken`
+// is kept (not just its decoded snapshot) so the signature can be
+// RE-VERIFIED against the RS256 public key on every entitlement
+// resolution, not just trusted from `enabledFlags`/`seatCap`/`expiresAt`
+// once at activation time — this is what satisfies "verify on boot and
+// periodically" without a separate scheduler (see Conventions). At most
+// one row per tenant should be ACTIVE at a time; activating a new license
+// moves the previous ACTIVE row to SUPERSEDED (enforced in application
+// code, not a DB constraint — history is kept intentionally, for audit).
+model License {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @map("tenant_id") @db.Uuid
+  edition      TenantEdition
+  // Snapshot of the signed payload's enabled-flags list, for fast reads —
+  // always re-validated against `signedToken`'s signature before being
+  // trusted (see LicenseResolutionService).
+  enabledFlags Json          @map("enabled_flags")
+  seatCap      Int           @map("seat_cap")
+  signedToken  String        @map("signed_token") @db.Text
+  issuedAt     DateTime      @map("issued_at")
+  expiresAt    DateTime?     @map("expires_at")
+  status       LicenseStatus @default(ACTIVE)
+  activatedAt  DateTime?     @map("activated_at")
+  revokedAt    DateTime?     @map("revoked_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("licenses")
+}
+
+// A tenant-specific grant OR revocation of one feature flag, layered on
+// top of whatever the edition/subscription (SaaS) or license (lifetime)
+// would otherwise resolve to — the platform-admin lever for "give this
+// tenant early access to X" or "turn off Y for this tenant specifically"
+// without touching their edition/license. `enabled: true` grants the flag
+// even if their edition/license wouldn't otherwise include it; `enabled:
+// false` revokes it even if their edition/license would. Tenant-scoped:
+// ordinary RLS applies, identical pattern to every other tenant-owned
+// table — reads happen inside a normal tenant request's transaction,
+// writes happen only through the platform-context admin endpoints (see
+// Conventions), which use the owner/admin client directly since a
+// platform request opens no tenant-scoped transaction (see Platform
+// context in Conventions).
+model TenantFeatureFlagOverride {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  flagKey   String   @map("flag_key")
+  enabled   Boolean
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, flagKey])
+  @@index([tenantId])
+  @@map("tenant_feature_flag_overrides")
 }

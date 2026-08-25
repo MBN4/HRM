@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CountryPacksModule } from './country-packs/country-packs.module';
+import { LicensingModule } from './licensing/licensing.module';
 import { RedisModule } from './redis/redis.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 
@@ -19,6 +20,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
     TenancyModule,
     AuthModule,
     CountryPacksModule,
+    LicensingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

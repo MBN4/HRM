@@ -37,3 +37,10 @@ coverage/
 
 # Docker volumes (local dev data, not code)
 .docker-data/
+
+# Licensing: the RS256 PRIVATE signing key must NEVER be committed or ship in
+# an on-prem build — only the public verification key does. See /CLAUDE.md
+# § Conventions → Licensing / feature flags for the full key-handling rule.
+# `*-private*.pem` (not a bare `*.pem`) so the public key committed alongside
+# it in apps/api/keys/ is unaffected.
+apps/api/keys/*private*.pem

@@ -19,6 +19,7 @@ export const PERMISSIONS = {
   ROLE_MANAGE: 'role.manage',
   USER_MANAGE: 'user.manage',
   COUNTRY_PACK_OVERRIDE_MANAGE: 'country_pack.override.manage',
+  LICENSE_MANAGE: 'license.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
