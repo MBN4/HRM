@@ -18,6 +18,7 @@ export const PERMISSIONS = {
   BRANCH_MANAGE: 'branch.manage',
   ROLE_MANAGE: 'role.manage',
   USER_MANAGE: 'user.manage',
+  COUNTRY_PACK_OVERRIDE_MANAGE: 'country_pack.override.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -42,6 +43,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.PAYROLL_RUN,
     PERMISSIONS.SALARY_VIEW,
     PERMISSIONS.USER_MANAGE,
+    PERMISSIONS.COUNTRY_PACK_OVERRIDE_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [PERMISSIONS.EMPLOYEE_READ, PERMISSIONS.EMPLOYEE_WRITE],
   [SYSTEM_ROLES.EMPLOYEE]: [PERMISSIONS.EMPLOYEE_READ],

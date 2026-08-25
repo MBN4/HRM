@@ -145,11 +145,128 @@ NOBYPASSRLS`, created by the RLS migration, granted only
     tables from day one (partition key must be part of every PK/unique
     constraint — see the comment block above the `Tenant` model in
     `schema.prisma`), and the same RLS pattern applies to them.
-- **Country resolution** — _to be defined in step 0.5 (country packs), in
-  coordination with step 0.3 (tenant resolution)._ Note: country is resolved
-  at the **Branch** level (`Branch.countryCode`), not the tenant level — one
-  tenant can operate branches in different countries. `Tenant.defaultCountryCode`
-  is only a fallback for branches that haven't been assigned one.
+- **Country packs** (defined in step 0.5 — `packages/db`, `packages/shared`,
+  `apps/api/src/country-packs`):
+  - **THE RULE.** No module may ever branch on a country code
+    (`if (countryCode === 'US')` or equivalent). Every behavior that
+    legally/culturally differs by country — currency, weekend days, leave
+    entitlements, public holidays, income tax, statutory contributions,
+    required employee fields, payslip layout, payroll mode — must be read
+    from `CountryPackResolutionService`'s resolved effective config, never
+    hardcoded elsewhere. The two reference packs (USA, Qatar — see below)
+    exist specifically to prove this: same code path, opposite behavior,
+    driven entirely by data.
+  - **Schema** (`packages/shared/src/validators/country-pack.validator.ts`,
+    `countryPackConfigSchema`): `locale` (currencyCode/currencySymbol/
+    numberFormat/dateFormat/defaultLanguage/rtl/firstDayOfWeek),
+    `workingTime` (standardWeeklyHours/weekendDays[]/overtimeRules),
+    `leaveDefaults` (annual/sick/maternity/paternity day counts),
+    `publicHolidays` (a calendar keyed by 4-digit year, seedable one year at
+    a time), `tax` (`{ layers: TaxLayer[] }` — see Rules engine below;
+    empty array is valid and means "no income tax", e.g. Qatar — this is a
+    data state, not a special-cased skip), `statutory` (`{ components:
+StatutoryComponent[] }`), `requiredEmployeeFields` (opaque string keys,
+    e.g. `["SSN","W4"]` / `["QATAR_ID","VISA_SPONSORSHIP"]` — meaning lives
+    in the future employee-fields module, not here), `payslipTemplate`
+    (language + ordered line items), `payrollMode` (`CALCULATE` |
+    `DELEGATE`), `hostingRegionHint` (advisory only, never a hard
+    data-residency enforcement by this schema alone).
+  - **Rules engine — the SAFE evaluator (SECURITY BOUNDARY).**
+    `tax.layers`/`statutory.components` entries with `kind: 'FORMULA'`
+    carry an `Expr` value — a fixed, whitelisted JSON AST (`{type:'const'|
+'var'|'binary'|'clamp', ...}`, `@hrm/shared`'s `exprSchema`/
+    `ALLOWED_EXPR_VARIABLES`/`ALLOWED_EXPR_OPERATORS`) — **never** a string
+    to be parsed or `eval`'d, and there is no mechanism anywhere in this
+    system for a pack/override to carry executable code. `apps/api/src/
+country-packs/rules-engine/expression-evaluator.ts`'s `evaluateExpression`
+    is the ONLY function that executes it: a structural tree-walking
+    interpreter that matches every node/operator/variable against that
+    same fixed whitelist and throws `UnsafeExpressionError` on anything
+    else. This is validated on TWO independent layers — `exprSchema` at
+    every pack/override write AND read, and the evaluator's own runtime
+    check — consistent with this project's "no single layer of security is
+    trusted alone" posture; extending the whitelist (a new operator/
+    variable) is a deliberate, reviewed code change, never a runtime
+    config option. `PROGRESSIVE_BRACKETS`/`FLAT_RATE` (tax) and
+    `PERCENTAGE`/`TIERED_BY_YEARS_OF_SERVICE` (statutory) are fixed, generic
+    algorithms parameterized entirely by pack data — `FORMULA` exists only
+    for what those shapes can't express. `apps/api/src/country-packs/
+rules-engine/{tax-calculator,statutory-calculator}.ts` compute layers/
+    components from this data; the SAME function computes every country's
+    result, e.g. `computeMultiLayerTax(pack.tax.layers, variables)` for
+    both a 4-layer US pack and Qatar's `layers: []`.
+  - **Country resolution.** `CountryPackResolutionService.
+resolveCountryCodeForBranch(branchId)`: `Branch.countryCode` (required
+    at the DB level today) is the primary source; `Tenant.defaultCountryCode`
+    is only a fallback for a branch without one — defensive/forward-looking
+    given the current NOT NULL column, per this note's original placeholder
+    here since 0.2/0.3. `resolveEffectiveConfig(countryCode)` then loads
+    the active `CountryPack` (`isActive: true`, highest `version`) — no
+    active pack for a country is a loud `404` (`CountryPackNotFoundError`),
+    never a silent generic default, consistent with the RLS
+    "no `missing_ok`" philosophy elsewhere in this file.
+  - **Two-layer override model.** `CountryPack.config` (system-owned legal/
+    cultural defaults, versioned per country) merged with an optional
+    `TenantCountryOverride.overrides` (a tenant's diff on top, e.g. "25
+    days annual leave vs. the pack's 21-day legal floor") =
+    `mergeCountryPackConfig()`'s effective config
+    (`apps/api/src/country-packs/country-pack-override.util.ts`). Only
+    `leaveDefaults`/`workingTime`/`requiredEmployeeFields`/`payslipTemplate`
+    are ever tenant-overridable — `tenantCountryOverrideSchema` is `.strict()`,
+    so an override payload naming `tax`/`statutory`/`locale`/`payrollMode`
+    fails validation outright; a tenant can never weaken a legal/compliance
+    default. Bounds are enforced where sensible, e.g. `leaveDefaults`: a
+    tenant may only grant MORE than the pack's legal floor, never less
+    (`assertLeaveBoundsRespected`, a `400` at override write-time via `PUT
+/country-packs/overrides/:countryCode`) — and defensively clamped UP to
+    the floor again at every resolution (`mergeCountryPackConfig`), in case
+    a later CountryPack version raises the floor after the override was
+    written.
+  - **Tenancy of the two tables**: `CountryPack` has NO `tenantId` — it is
+    global, system-owned reference data every tenant's branches resolve
+    against, so (like `Tenant`/`TenantDomain`) it is NOT subject to RLS;
+    `hrm_app` is granted `SELECT` only (writable today only via the owner
+    role, i.e. seeding — a real admin-editable UI is later work, tracked in
+    § Not yet built). `TenantCountryOverride` IS tenant-scoped — ordinary
+    RLS applies, identical `tenant_isolation` policy pattern to every other
+    tenant-owned table in this schema.
+  - **Reference packs — USA and Qatar** (`packages/db/src/
+seed-country-packs.ts`, `seedCountryPacks()`, called by `prisma/seed.ts`;
+    figures are illustrative/rounded for a reference implementation, not
+    certified legal/tax guidance — a real deployment needs its packs
+    authored/reviewed by whoever owns payroll compliance for that market):
+    USD/Sat-Sun weekend/LTR English/4-layer tax (federal progressive
+    brackets + a flat illustrative state rate + FICA social security with a
+    wage-base cap + FICA medicare uncapped) + FUTA as an employer statutory
+    component/`["SSN","W4"]` required, vs. QAR/Fri-Sat weekend/RTL Arabic/
+    `tax.layers: []` (no income tax) + a tiered-by-years-of-service
+    end-of-service gratuity as the statutory component/
+    `["QATAR_ID","VISA_SPONSORSHIP"]` required — proving the identical
+    schema and resolution/merge/rules-engine code drives opposite real
+    behavior.
+  - **Demo endpoints** (`apps/api/src/country-packs/country-packs.controller.ts`):
+    `GET /country-packs/effective?branchId=` (defaults to the caller's
+    context branch) is this step's required proof endpoint; `GET
+/country-packs/effective/:countryCode` resolves directly by country;
+    `PUT /country-packs/overrides/:countryCode` is the write side of the
+    two-layer model, deny-by-default behind a new permission,
+    `country_pack.override.manage` (seeded onto `TENANT_ADMIN` via
+    `ALL_PERMISSIONS` and explicitly onto `HR_MANAGER` — see
+    `packages/shared/src/constants/permissions.ts`), same
+    `@RequirePermissions()` + `PermissionsGuard`-as-interceptor pattern as
+    the rest of RBAC.
+  - Verified by `apps/api/src/country-packs/rules-engine/*.spec.ts` (unit:
+    the evaluator's whitelist rejects out-of-whitelist nodes/operators/
+    variables; `exprSchema` rejects the same independently; a real
+    multi-layer US tax example and a real Qatar end-of-service example
+    computed from the actual seeded pack data) and
+    `apps/api/test/country-packs.e2e-spec.ts` (e2e over real HTTP: a US
+    branch and a QA branch resolving opposite behavior through the same
+    endpoint, the override layering over and being clamped/rejected against
+    the pack's leave floor, an override payload naming a non-overridable
+    section rejected, deny-by-default RBAC on the write route, and — the
+    RLS proof — tenant A's override never leaking into tenant B's
+    resolution of the same country).
 - **Tenant resolution** (defined in step 0.3 — `apps/api/src/tenancy`):
   - `TenantResolutionService` tries strategies **in order** until one
     matches, configurable via `TENANT_RESOLUTION_STRATEGIES` (comma list;
@@ -658,13 +775,84 @@ config`. Note for future work: ESLint's shareable-config name resolution
     `localhost:6379`: all 16 new tests pass, all 10 updated 0.3 tests still
     pass, all 9 packages/db RLS tests still pass (35 total). Full-repo
     `pnpm build` (5/5), `pnpm lint` (7/7), `pnpm test` all green.
+- **0.5 country packs — done — 2026-08-25.** The keystone customization
+  system: a versioned, system-owned `CountryPack` per country plus an
+  optional per-tenant `TenantCountryOverride` diff, resolved via
+  `Branch.countryCode` (falling back to `Tenant.defaultCountryCode`), and a
+  sandboxed rules engine that evaluates tax/statutory pack data instead of
+  ever branching on a country code. Full design in § Conventions → Country
+  packs above. Files:
+  - `packages/db/prisma/schema.prisma` — `CountryPack` (no `tenantId` —
+    global, RLS-exempt like `Tenant`/`TenantDomain`) and
+    `TenantCountryOverride` (tenant-scoped, ordinary RLS), plus a
+    `countryOverrides` back-relation on `Tenant`.
+  - `packages/db/prisma/migrations/20260825090000_add_country_packs/` —
+    both tables (generated via `prisma migrate diff` + `migrate deploy`,
+    same non-interactive method 0.4 documented — no TTY in this
+    environment for `migrate dev`).
+  - `packages/db/prisma/migrations/20260825090500_enable_rls_for_country_overrides/`
+    — `GRANT SELECT` only on `country_packs` (no RLS — no `tenant_id`
+    column to filter on); `ENABLE`/`FORCE ROW LEVEL SECURITY` + the
+    standard `tenant_isolation` policy on `tenant_country_overrides`,
+    identical pattern to every other tenant-owned table.
+  - `packages/shared/src/validators/rules-engine.validator.ts` — `Expr`
+    (the whitelisted formula AST) + `exprSchema`, `TaxLayer`/
+    `taxLayerSchema` (`PROGRESSIVE_BRACKETS`/`FLAT_RATE`/`FORMULA`),
+    `StatutoryComponent`/`statutoryComponentSchema`
+    (`PERCENTAGE`/`TIERED_BY_YEARS_OF_SERVICE`/`FORMULA`).
+  - `packages/shared/src/validators/country-pack.validator.ts` —
+    `countryPackConfigSchema` (the full pack shape) and
+    `tenantCountryOverrideSchema` (the `.strict()`, override-only-safe
+    subset).
+  - `packages/shared/src/constants/permissions.ts` — new
+    `COUNTRY_PACK_OVERRIDE_MANAGE` (`country_pack.override.manage`)
+    permission, granted to `HR_MANAGER` explicitly (and to `TENANT_ADMIN`
+    implicitly via `ALL_PERMISSIONS`).
+  - `packages/db/src/seed-country-packs.ts` — `seedCountryPacks()` +
+    the exported `USA_PACK`/`QATAR_PACK` reference configs (see
+    Conventions for what each encodes), called by `prisma/seed.ts`.
+  - `apps/api/src/country-packs/rules-engine/expression-evaluator.ts` —
+    `evaluateExpression`, the sandboxed interpreter (the actual security
+    boundary — see Conventions), and `UnsafeExpressionError`.
+  - `apps/api/src/country-packs/rules-engine/tax-calculator.ts` /
+    `statutory-calculator.ts` — the generic, data-driven algorithms for
+    each `kind`, plus the `FORMULA` delegation to the evaluator.
+  - `apps/api/src/country-packs/country-pack-override.util.ts` —
+    `mergeCountryPackConfig` (the two-layer merge) and
+    `assertLeaveBoundsRespected` (the leave-floor bound).
+  - `apps/api/src/country-packs/country-pack-resolution.service.ts` —
+    `CountryPackResolutionService` (branch → country code →
+    pack-merged-with-override), re-validating both the pack's `config` and
+    the override's `overrides` against the shared schemas on every read,
+    not just at write time.
+  - `apps/api/src/country-packs/country-packs.controller.ts` /
+    `country-packs.module.ts` — the three routes (see Conventions),
+    registered in `apps/api/src/app.module.ts`.
+  - `apps/api/src/country-packs/rules-engine/expression-evaluator.spec.ts`
+    / `tax-calculator.spec.ts` / `statutory-calculator.spec.ts` /
+    `pack-schema-sandbox.spec.ts` — 33 unit tests: the evaluator's
+    whitelist rejecting every out-of-whitelist shape, `exprSchema`
+    rejecting the same independently (the schema has no jest setup of its
+    own — see that file's header comment for why these live in
+    `apps/api` instead), and real US multi-layer-tax / Qatar
+    end-of-service-gratuity computations against the actual seeded pack
+    constants.
+  - `apps/api/test/country-packs.e2e-spec.ts` — 9 integration tests over
+    real HTTP (see Conventions for the full list); mints a JWT directly
+    rather than exercising the real login flow, same rationale
+    `tenant-resolution.e2e-spec.ts` documented in 0.3/0.4.
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379`: all new tests pass (42 new: 33 unit + 9 e2e), all 26
+    existing `apps/api` e2e tests still pass, all 9 `packages/db` RLS tests
+    still pass (77 total). Full-repo `pnpm build` (5/5), `pnpm lint` (7/7),
+    `pnpm test` all green.
 
 ## 6. Not yet built
 
 - [x] **0.2** Tenancy model / Row-Level Security (RLS)
 - [x] **0.3** Tenant resolution (request → tenant binding)
 - [x] **0.4** Auth / RBAC
-- [ ] **0.5** Country packs
+- [x] **0.5** Country packs
 - [ ] **0.6** Licensing (SaaS vs. lifetime on-prem enforcement)
 - [ ] **0.7** Workflow engine
 - [ ] **0.8** Notifications

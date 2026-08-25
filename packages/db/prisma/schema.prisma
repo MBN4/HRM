@@ -75,17 +75,18 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches        Branch[]
-  departments     Department[]
-  designations    Designation[]
-  costCenters     CostCenter[]
-  users           User[]
-  domains         TenantDomain[]
-  permissions     Permission[]
-  roles           Role[]
-  rolePermissions RolePermission[]
-  userRoles       UserRole[]
-  userBranches    UserBranch[]
+  branches         Branch[]
+  departments      Department[]
+  designations     Designation[]
+  costCenters      CostCenter[]
+  users            User[]
+  domains          TenantDomain[]
+  permissions      Permission[]
+  roles            Role[]
+  rolePermissions  RolePermission[]
+  userRoles        UserRole[]
+  userBranches     UserBranch[]
+  countryOverrides TenantCountryOverride[]
 
   @@map("tenants")
 }
@@ -312,4 +313,70 @@ model UserBranch {
   @@id([userId, branchId])
   @@index([tenantId])
   @@map("user_branches")
+}
+
+// ---------------------------------------------------------------------------
+// Country packs (step 0.5). See /CLAUDE.md § Conventions → Country packs for
+// the full write-up of the schema shape, resolution order, and the two-layer
+// override model.
+// ---------------------------------------------------------------------------
+
+// A versioned, system-owned bundle of legal/cultural defaults for one
+// country (locale, working time, leave, public holidays, tax, statutory
+// contributions, required employee fields, payslip template, payroll mode).
+// Deliberately NOT tenant-scoped — there is no `tenantId` column, this is
+// global reference data the vendor maintains, not per-tenant data — and
+// therefore NOT subject to Row-Level Security, the same exemption reasoning
+// as `Tenant`/`TenantDomain` (there is no tenant_id for a policy to filter
+// on). `config` is validated against `@hrm/shared`'s `countryPackConfigSchema`
+// before every write AND re-validated on every read (see
+// CountryPackResolutionService) — a JSON column has no schema-level
+// guarantee, so both directions are checked, consistent with this project's
+// "no single layer is trusted alone" security posture.
+//
+// Writable only through the owner/admin role today (seeded — see
+// `packages/db/src/seed-country-packs.ts`), the same as the RBAC permission
+// catalog: a real admin-editable UI is a later phase, tracked as "not yet
+// built" work, not implied by this model existing.
+model CountryPack {
+  id          String   @id @default(uuid()) @db.Uuid
+  countryCode String   @map("country_code") @db.VarChar(2)
+  version     Int      @default(1)
+  // Whether resolution should consider this version current for the
+  // country. Lets a new version be seeded and activated without deleting
+  // the previous one (useful for legal-change audit history later).
+  isActive    Boolean  @default(true) @map("is_active")
+  config      Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([countryCode, version])
+  @@index([countryCode, isActive])
+  @@map("country_packs")
+}
+
+// A tenant's diff on top of one country's CountryPack — e.g. "25 days
+// annual leave instead of the legal default of 20". Tenant-scoped: ordinary
+// Row-Level Security applies, identical pattern to every other tenant-owned
+// table in this schema. `overrides` is validated against
+// `tenantCountryOverrideSchema` (a `.strict()` schema covering only the
+// sections that are legally/culturally safe for a tenant to adjust —
+// leaveDefaults, workingTime, requiredEmployeeFields, payslipTemplate; tax
+// and statutory contributions are never tenant-overridable) and, where
+// sensible, against bounds derived from the pack itself (e.g. a tenant may
+// only grant MORE leave than the legal floor, never less) — see
+// CountryPackResolutionService.
+model TenantCountryOverride {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  countryCode String   @map("country_code") @db.VarChar(2)
+  overrides   Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, countryCode])
+  @@index([tenantId])
+  @@map("tenant_country_overrides")
 }

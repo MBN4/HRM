@@ -10,6 +10,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import { seedSystemRolesAndPermissions } from '../src/seed-rbac';
+import { seedCountryPacks } from '../src/seed-country-packs';
 
 const prisma = new PrismaClient();
 
@@ -50,6 +51,7 @@ async function main() {
   });
 
   await seedSystemRolesAndPermissions(prisma, tenant.id);
+  await seedCountryPacks(prisma);
 
   console.log('Seeded tenant:', { id: tenant.id, slug: tenant.slug });
   console.log('Seeded branches:', [
@@ -57,6 +59,7 @@ async function main() {
     { id: qaBranch.id, name: qaBranch.name, countryCode: qaBranch.countryCode },
   ]);
   console.log('Seeded system roles + permission catalog for tenant', tenant.slug);
+  console.log('Seeded country packs: US, QA');
 }
 
 main()

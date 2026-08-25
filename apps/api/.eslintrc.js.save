@@ -1,0 +1,24 @@
+module.exports = {
+  root: true,
+  extends: [require.resolve('@hrm/config/eslint-preset.js')],
+  parserOptions: {
+    project: './tsconfig.json',
+    tsconfigRootDir: __dirname,
+  },
+  overrides: [
+    {
+      // Config/dot files at the workspace root (e.g. this file itself)
+      // aren't part of tsconfig.json's `include`, so they can't be
+      // type-checked against it. Disabling `project` for just these files
+      // falls back to plain (non-type-aware) parsing — real source under
+      // src/**/*.ts keeps full type-aware linting via the base config
+      // above. Standard typescript-eslint fix for "TSConfig does not
+      // include <file>" on the eslintrc file itself.
+      files: ['*.js'],
+      parserOptions: {
+        project: null,
+      },
+
+    },
+  ],
+};
