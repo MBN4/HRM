@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@hrm/db';
 import type { Redis } from 'ioredis';
@@ -32,15 +31,12 @@ export interface AuthenticatedSession {
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-
   constructor(
     @Inject(AUTH_PROVIDER) private readonly authProvider: AuthProvider,
     private readonly password: PasswordService,
     private readonly tokens: TokenService,
     private readonly rateLimiter: RateLimiterService,
     private readonly eventEmitter: EventEmitter2,
-    private readonly config: ConfigService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -130,13 +126,12 @@ export class AuthService {
         PASSWORD_RESET_TTL_SECONDS,
       );
 
-      this.emit(AUTH_EVENTS.PASSWORD_RESET_REQUESTED, tenantId, { userId: user.id, email: input.email });
-
-      // Email delivery is stubbed until 0.8 — log the token in dev so the
-      // flow is exercisable without an inbox. Never logged in production.
-      if (this.config.get<string>('NODE_ENV') !== 'production') {
-        this.logger.log(`Password reset token for ${input.email} (tenant ${tenantId}): ${token}`);
-      }
+      // `token` reaches the notification hub (0.8) through this same
+      // event — NotificationDispatchListener maps PASSWORD_RESET_REQUESTED
+      // to an EMAIL+IN_APP notification whose template renders it. See
+      // auth-events.ts's doc comment on `token` for why this field is
+      // sensitive and must never be persisted unredacted by 0.9.
+      this.emit(AUTH_EVENTS.PASSWORD_RESET_REQUESTED, tenantId, { userId: user.id, email: input.email, token });
     }
   }
 

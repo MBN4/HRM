@@ -9,3 +9,8 @@ export * from './validators/rules-engine.validator';
 export * from './validators/country-pack.validator';
 export * from './validators/license.validator';
 export * from './validators/workflow.validator';
+export * from './validators/notification.validator';
+export * from './notifications/channel';
+export * from './notifications/event-notification-mapping';
+export * from './notifications/provider.interface';
+export * from './notifications/rtl-languages';

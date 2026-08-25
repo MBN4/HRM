@@ -12,6 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { seedSystemRolesAndPermissions } from '../src/seed-rbac';
 import { seedCountryPacks } from '../src/seed-country-packs';
 import { seedDemoSubscription } from '../src/seed-licensing';
+import { seedNotificationTemplates } from '../src/seed-notification-templates';
 
 const prisma = new PrismaClient();
 
@@ -54,6 +55,7 @@ async function main() {
   await seedSystemRolesAndPermissions(prisma, tenant.id);
   await seedCountryPacks(prisma);
   await seedDemoSubscription(prisma, tenant.id);
+  await seedNotificationTemplates(prisma);
 
   console.log('Seeded tenant:', { id: tenant.id, slug: tenant.slug });
   console.log('Seeded branches:', [
@@ -63,6 +65,7 @@ async function main() {
   console.log('Seeded system roles + permission catalog for tenant', tenant.slug);
   console.log('Seeded country packs: US, QA');
   console.log('Seeded demo subscription: PROFESSIONAL / ACTIVE');
+  console.log('Seeded notification templates (en, ar)');
 }
 
 main()

@@ -23,4 +23,16 @@ export interface AuthEventPayload {
   tenantId: string;
   userId?: string;
   email?: string;
+  /**
+   * The one-time password-reset token — present ONLY on
+   * `PASSWORD_RESET_REQUESTED`, so the notification hub (0.8) can render
+   * it into the reset email without owning the Redis key scheme
+   * `AuthService`/`TokenService` store it under. SENSITIVE: this field
+   * carries a live credential-reset secret. 0.9's real audit-log
+   * persistence (which replaces `AuditEventsListener`'s current
+   * structured-log placeholder) MUST redact it before writing any
+   * `auth.*` event to durable storage — do not carry it forward
+   * unredacted when that lands.
+   */
+  token?: string;
 }

@@ -6,6 +6,8 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CountryPacksModule } from './country-packs/country-packs.module';
 import { LicensingModule } from './licensing/licensing.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { WorkflowModule } from './workflow/workflow.module';
@@ -18,11 +20,13 @@ import { WorkflowModule } from './workflow/workflow.module';
     // wildcard: true is required for AuditEventsListener's `@OnEvent('auth.*')`.
     EventEmitterModule.forRoot({ wildcard: true }),
     RedisModule,
+    QueueModule,
     TenancyModule,
     AuthModule,
     CountryPacksModule,
     LicensingModule,
     WorkflowModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

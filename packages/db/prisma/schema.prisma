@@ -75,26 +75,29 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches              Branch[]
-  departments           Department[]
-  designations          Designation[]
-  costCenters           CostCenter[]
-  users                 User[]
-  domains               TenantDomain[]
-  permissions           Permission[]
-  roles                 Role[]
-  rolePermissions       RolePermission[]
-  userRoles             UserRole[]
-  userBranches          UserBranch[]
-  countryOverrides      TenantCountryOverride[]
-  subscription          Subscription?
-  licenses              License[]
-  featureFlagOverrides  TenantFeatureFlagOverride[]
-  workflowTemplates     WorkflowTemplate[]
-  workflowSteps         WorkflowStep[]
-  workflowInstances     WorkflowInstance[]
-  workflowInstanceSteps WorkflowInstanceStep[]
-  workflowActions       WorkflowAction[]
+  branches                Branch[]
+  departments             Department[]
+  designations            Designation[]
+  costCenters             CostCenter[]
+  users                   User[]
+  domains                 TenantDomain[]
+  permissions             Permission[]
+  roles                   Role[]
+  rolePermissions         RolePermission[]
+  userRoles               UserRole[]
+  userBranches            UserBranch[]
+  countryOverrides        TenantCountryOverride[]
+  subscription            Subscription?
+  licenses                License[]
+  featureFlagOverrides    TenantFeatureFlagOverride[]
+  workflowTemplates       WorkflowTemplate[]
+  workflowSteps           WorkflowStep[]
+  workflowInstances       WorkflowInstance[]
+  workflowInstanceSteps   WorkflowInstanceStep[]
+  workflowActions         WorkflowAction[]
+  notifications           Notification[]
+  notificationDeliveries  NotificationDelivery[]
+  notificationPreferences NotificationPreference[]
 
   @@map("tenants")
 }
@@ -212,11 +215,11 @@ enum UserStatus {
 }
 
 model User {
-  id             String     @id @default(uuid()) @db.Uuid
-  tenantId       String     @map("tenant_id") @db.Uuid
-  email          String
-  hashedPassword String     @map("hashed_password")
-  status         UserStatus @default(PENDING)
+  id                String     @id @default(uuid()) @db.Uuid
+  tenantId          String     @map("tenant_id") @db.Uuid
+  email             String
+  hashedPassword    String     @map("hashed_password")
+  status            UserStatus @default(PENDING)
   // Employee->manager relation SEAM for the workflow engine's MANAGER
   // approver rule (step 0.7) — modeled here, on User, because the real
   // Employee module doesn't exist yet (phase 1.1). Once it does, the
@@ -225,9 +228,14 @@ model User {
   // nothing about the workflow engine itself should need to change, only
   // this one resolution function. See /CLAUDE.md § Conventions → Workflow
   // engine → Approver rules.
-  managerId      String?    @map("manager_id") @db.Uuid
-  createdAt      DateTime   @default(now()) @map("created_at")
-  updatedAt      DateTime   @updatedAt @map("updated_at")
+  managerId         String?    @map("manager_id") @db.Uuid
+  // Per-user notification-language override (BCP-47, e.g. "en", "ar") — seam
+  // for the notification hub (step 0.8). Null = fall back to the recipient's
+  // resolved branch's Country Pack `locale.defaultLanguage`. See
+  // /CLAUDE.md § Conventions → Notifications → Recipient locale resolution.
+  preferredLanguage String?    @map("preferred_language")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -743,4 +751,152 @@ model WorkflowAction {
 
   @@index([tenantId, instanceId])
   @@map("workflow_actions")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications hub (step 0.8). See /CLAUDE.md § Conventions → Notifications
+// for the full write-up: the async BullMQ delivery pipeline, the swappable
+// per-channel provider seam, the event -> notification mapping layer, and
+// recipient-locale-driven template rendering. This is the delivery layer the
+// domain events already emitted by auth (0.4), licensing (0.6), and workflow
+// (0.7) have been waiting for — those modules are untouched by this step
+// (beyond auth's password-reset event gaining a `token` field), they already
+// emit everything this hub needs.
+// ---------------------------------------------------------------------------
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  DEAD_LETTER
+}
+
+// One row per notification GENERATED for one recipient from one domain
+// event — channel-agnostic. `payload` is the triggering domain event's
+// payload (see auth-events.ts/licensing-events.ts/workflow-events.ts),
+// kept so a delivery can be re-rendered (retry, or a future "resend")
+// without re-deriving it from the source event, which by then may no
+// longer be in flight. `eventType` is a free-form string (e.g.
+// "workflow.approved"), NOT a Postgres enum — same reasoning as
+// `WorkflowInstance.entityType`: a closed catalog here would mean a
+// migration every time a new consuming module's event gets mapped to a
+// notification.
+model Notification {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  recipientUserId String   @map("recipient_user_id") @db.Uuid
+  eventType       String   @map("event_type")
+  payload         Json
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, recipientUserId, createdAt])
+  @@map("notifications")
+}
+
+// One row per CHANNEL a Notification is delivered through — the unit of
+// work a BullMQ job processes (job data is just `{ tenantId,
+// notificationDeliveryId }`; everything else is loaded fresh from this row
+// inside the worker, so a retried job always sees current state). `status`
+// starts PENDING at enqueue time; the worker moves it to SENT on success,
+// or — on failure — FAILED (more retries remain, BullMQ will re-attempt
+// per the job's `attempts`/`backoff` options) or DEAD_LETTER (this was the
+// final attempt; `lastError` holds why). `readAt` is only ever set for
+// `IN_APP` deliveries (mark-read) — left null and unused for every other
+// channel, simpler than a separate one-row-per-channel-family schema for
+// what's otherwise an identical shape. `renderedSubject`/`renderedBody`
+// are the actual rendered-in-the-recipient's-locale strings, captured at
+// send time so a user's in-app notification list reads correctly even if
+// the underlying NotificationTemplate is edited/re-versioned later.
+model NotificationDelivery {
+  id              String                     @id @default(uuid()) @db.Uuid
+  tenantId        String                     @map("tenant_id") @db.Uuid
+  notificationId  String                     @map("notification_id") @db.Uuid
+  channel         NotificationChannel
+  status          NotificationDeliveryStatus @default(PENDING)
+  attempts        Int                        @default(0)
+  lastError       String?                    @map("last_error")
+  renderedSubject String?                    @map("rendered_subject")
+  renderedBody    String?                    @map("rendered_body")
+  sentAt          DateTime?                  @map("sent_at")
+  readAt          DateTime?                  @map("read_at")
+  createdAt       DateTime                   @default(now()) @map("created_at")
+  updatedAt       DateTime                   @updatedAt @map("updated_at")
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notification Notification @relation(fields: [tenantId, notificationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, notificationId])
+  @@index([tenantId, status])
+  @@map("notification_deliveries")
+}
+
+// Per-user, per-event-type, per-channel opt-in/opt-out — tenant-scoped,
+// ordinary RLS. Absence of a row for a given (userId, eventType, channel)
+// means "use the default" (`@hrm/shared`'s `DEFAULT_NOTIFICATION_CHANNELS`
+// for that event type) — a row only needs to exist when a user has
+// explicitly diverged from the default in either direction (opted into a
+// channel that isn't on by default, or opted out of one that is). See
+// NotificationPreferenceService.resolveEnabledChannels.
+model NotificationPreference {
+  id        String              @id @default(uuid()) @db.Uuid
+  tenantId  String              @map("tenant_id") @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  eventType String              @map("event_type")
+  channel   NotificationChannel
+  enabled   Boolean
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, eventType, channel])
+  @@index([tenantId, userId])
+  @@map("notification_preferences")
+}
+
+// A versioned, system-owned notification copy template for one
+// `(eventType, channel, locale)` — the SAME "global reference data,
+// seeded, versioned, `isActive`" shape as `CountryPack` (0.5), for the
+// same reason: this is vendor-authored copy, not per-tenant data, and
+// deliberately NOT tenant-scoped (no `tenantId` column) and therefore NOT
+// subject to Row-Level Security, the same exemption reasoning as
+// `Tenant`/`TenantDomain`/`CountryPack`. `subject` is only meaningful for
+// channels that have one (EMAIL); null for IN_APP/SMS/PUSH. `body`
+// contains `{{placeholder}}` tokens substituted from the triggering
+// event's payload by NotificationTemplateRenderer — this is what
+// satisfies "externalize all template strings": no notification copy is
+// ever hardcoded into `apps/api` service code, it all lives here (seeded
+// from `packages/db/src/seed-notification-templates.ts`, the same
+// seeded-but-DB-stored pattern `seed-country-packs.ts` already
+// established). Writable only through the owner/admin role today, same as
+// `CountryPack` — a real admin-editable UI is later work.
+model NotificationTemplate {
+  id        String              @id @default(uuid()) @db.Uuid
+  eventType String              @map("event_type")
+  channel   NotificationChannel
+  // BCP-47 language tag, e.g. "en", "ar" — matches CountryPack locale's
+  // `defaultLanguage` / `User.preferredLanguage`.
+  locale    String
+  version   Int                 @default(1)
+  isActive  Boolean             @default(true) @map("is_active")
+  subject   String?
+  body      String
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  @@unique([eventType, channel, locale, version])
+  @@index([eventType, channel, locale, isActive])
+  @@map("notification_templates")
 }
