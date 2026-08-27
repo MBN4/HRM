@@ -858,3 +858,128 @@ lint` both green across all 7 workspaces.
   Verified: `pnpm build` (5/5 tasks), `pnpm lint` (7/7 tasks), and `pnpm
 test` (all green, 175/175 — 161 `apps/api` + 14 `packages/db`, unchanged
   from before the reorg, since nothing but docs moved) all pass.
+- **1.1 Employee module — done — 2026-08-27.** The first Phase 1 module —
+  the core HR entity leave/attendance/payroll/performance/ESS-MSS will all
+  reference. Full design in
+  [`docs/conventions/employee.md`](./conventions/employee.md), including
+  the workflow approver-rule seams it now feeds real data (the change
+  0.7's own doc comment predicted). Files:
+  - `packages/db/prisma/schema.prisma` — `Employee` (tenant-scoped, RLS;
+    `userId` nullable/per-tenant-unique link to `User`; composite
+    self-relation `managerId`; encrypted-at-rest
+    `bankAccountNumberEncrypted`/`bankNameEncrypted`/
+    `bankRoutingCodeEncrypted`/`baseSalaryEncrypted`; `statutoryFields`
+    JSON map), `EmployeeDependent`, `EmployeeEmergencyContact`,
+    `EmployeeDocument` (+ `EmployeeDocumentType` enum — metadata only, S3/
+    MinIO holds the bytes), `EmployeeImportJob` (+ `EmployeeImportStatus`
+    enum — bulk-import tracking), `EmploymentType`/`EmployeeStatus`/
+    `Gender` enums, plus back-relations on `Tenant`/`User`/`Branch`/
+    `Department`/`Designation` and a new `@@unique([tenantId, id])` on
+    `Designation` (needed for the new composite FK from `Employee`, and
+    the one gap left in that table's composite-FK-enabling-unique
+    coverage since 0.2).
+  - `packages/db/prisma/migrations/20260827125616_add_employee_module/` —
+    the six enums and five tables (generated via `prisma migrate diff` +
+    `migrate deploy`, same non-interactive method every prior step since
+    0.4 documented; one empty stray migration folder from an aborted
+    first attempt was created, applied, and then cleanly removed — folder
+    deleted and its `_prisma_migrations` tracking row deleted directly —
+    before this real migration was written, so the final migration
+    history has no gap).
+  - `packages/db/prisma/migrations/20260827125700_enable_rls_for_employee_module/`
+    — `ENABLE`/`FORCE ROW LEVEL SECURITY` + the standard `tenant_isolation`
+    policy on all five new tables, identical pattern to every other
+    tenant-owned table (no exemption needed — an `Employee` row always
+    belongs to exactly one tenant, nothing about resolving it needs to
+    run before a tenant context exists).
+  - `packages/shared/src/validators/employee.validator.ts` —
+    `createEmployeeSchema`/`updateEmployeeSchema` (the first genuinely
+    PARTIAL-update schema in this codebase — every prior PUT-style config
+    used full-replace instead), `statutoryFieldsSchema`, `bankDetailsSchema`/
+    `compensationSchema` (plaintext at the API boundary only),
+    `employeeDependentSchema`/`employeeEmergencyContactSchema`,
+    `employeeImportRequestSchema`, plus the
+    `EMPLOYMENT_TYPES`/`EMPLOYEE_STATUSES`/`GENDERS`/
+    `EMPLOYEE_DOCUMENT_TYPES` const-array/type-key pairs.
+  - `packages/shared/src/audit/redact.ts` — `REDACTED_KEY_PATTERN`
+    extended to also match `bankDetails`/`compensation` (whole container
+    keys, not each leaf field) so a salary CHANGE is auditable without the
+    actual value ever reaching `audit_log`.
+  - `apps/api/src/common/encryption/encryption.service.ts` /
+    `encryption.module.ts` — `EncryptionService` (AES-256-GCM,
+    `FIELD_ENCRYPTION_KEY`-keyed), `@Global()` new reusable infra module,
+    same posture as `QueueModule`/`AuditModule`.
+  - `apps/api/src/storage/storage.service.ts` / `storage.module.ts` —
+    `StorageService` (S3/MinIO client via `@aws-sdk/client-s3`), the FIRST
+    real use of the `S3_*` env vars documented since 0.1; `@Global()`, same
+    reusable-infra posture.
+  - `apps/api/src/employees/` — `employee.service.ts` (`EmployeeService`,
+    the CRUD + business-rule core, `tx`/`tenantId` taken explicitly so it
+    works from both an HTTP request and the bulk-import worker),
+    `employee-mapper.ts` (`EmployeeMapper`, assembles the full response
+    DTO — decrypt, dependents/contacts, custom field values),
+    `employee-response.dto.ts` (`EmployeeResponseDto`, `compensation`
+    gated behind `salary.view` via `@RequiresPermission()` — the real,
+    primary use of the pattern 0.4 built as a demo),
+    `employee-country-pack.util.ts` (`resolveRequiredEmployeeFields`, the
+    explicit-`tx` duplicate of `CountryPackResolutionService`'s
+    branch→pack→override resolution), `org-chart.service.ts`
+    (`OrgChartService`), `employee.constants.ts`, `employees.controller.ts`
+    (`EmployeesController`, the full REST surface — see
+    docs/conventions/employee.md § API surface), `employees.module.ts`;
+    `documents/employee-documents.service.ts` /
+    `employee-documents.controller.ts` (`EmployeeDocumentsService`/
+    `EmployeeDocumentsController`, multipart upload via `FileInterceptor`,
+    streamed download via `StreamableFile`); `import/csv-row.util.ts`
+    (`parseEmployeeImportCsv`, reuses `createEmployeeSchema` per row),
+    `employee-import.service.ts` (`EmployeeImportService`, the BullMQ
+    producer — mirrors `NotificationsService.handleDomainEvent`'s shape),
+    `employee-import.processor.ts` (`EmployeeImportProcessor`, the worker
+    — one `withTenantContext` transaction PER ROW for genuine row-level
+    isolation).
+  - `apps/api/src/queue/queue.constants.ts` — new `EMPLOYEE_IMPORT_QUEUE`
+    constant, registered via `BullModule.registerQueue()` in
+    `employees.module.ts`, the same reusable pattern 0.8 established.
+  - `apps/api/src/workflow/approver-resolver.service.ts` — `MANAGER`/
+    `resolveRequesterBranchId`/`resolveRequesterDepartmentId` now query
+    the real `Employee` org chart first, falling back to the legacy 0.7
+    seams (`User.managerId`/the requester's sole `UserBranch` row) only
+    for a requester with no `Employee` record at all — see
+    docs/conventions/employee.md § Feeding the workflow engine for the
+    exact before/after and why nothing that worked pre-1.1 regresses.
+  - `apps/api/src/app.module.ts` — registers `EncryptionModule`,
+    `StorageModule`, `EmployeesModule`.
+  - `apps/api/package.json` — added `@aws-sdk/client-s3` (MinIO/S3
+    client), `csv-parse` (bulk-import CSV parsing), `@types/multer` (dev,
+    for `Express.Multer.File` typings needed by document upload) — none of
+    these existed anywhere in the repo before this step.
+  - `apps/api/.env` / `.env.example` — added `FIELD_ENCRYPTION_KEY`
+    (base64-encoded 32-byte AES-256 key; a real local-dev value generated
+    and committed to `.env`, consistent with this repo's other plaintext
+    dev secrets — `.env.example` documents the var with an empty value and
+    the regeneration command).
+  - `apps/api/test/employees.e2e-spec.ts` — 15 integration tests over real
+    HTTP, including real MinIO for document upload/download (not a mock)
+    — see docs/conventions/employee.md § Verified-by for the full list.
+    **Two real bugs caught and fixed while landing this step**: (1)
+    spreading a `Partial<Prisma.EmployeeUpdateInput>`-typed helper's return
+    value into a `create()` call's `data` object literal made TypeScript
+    infer the WHOLE literal against Prisma's branded `X |
+XFieldUpdateOperationsInput` union (Prisma's `{set: X}` update-operation
+    syntax), breaking type-checking on every OTHER field in that object
+    too — fixed by typing the shared encryption helper's return value as a
+    plain, non-Prisma-branded interface instead of borrowing
+    `Prisma.EmployeeUpdateInput`. (2) An update-path "is this `userId`
+    already linked to a different employee" check had no way to
+    distinguish "linked to THIS employee already" (fine, no-op) from
+    "linked to a genuinely different one" (a real conflict), so
+    re-submitting a `PATCH` with an employee's own already-linked `userId`
+    unchanged would have falsely rejected — fixed by passing the
+    in-progress update's own employee id through to that check so it can
+    exclude itself.
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379` / MinIO on `localhost:9000`: all 15 new tests pass,
+    all 161 pre-existing `apps/api` tests still pass with no behavior
+    change (176 total in `apps/api`; 190 including `packages/db`'s 14).
+    Full-repo `pnpm build` (5/5), `pnpm lint` (7/7), `pnpm test` (4/4
+    tasks) all green.

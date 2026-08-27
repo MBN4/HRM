@@ -14,18 +14,19 @@ export interface ApproverResolutionContext {
  * tenant-scoped transaction (RLS-enforced, same as every other tenant-
  * aware service). Only `ACTIVE` users are ever returned.
  *
- * `MANAGER`/`BRANCH_HEAD`/`DEPARTMENT_HEAD` are PLUGGABLE SEAMS — see
- * /CLAUDE.md § Conventions → Workflow engine → Approver rules. They
- * resolve today against `User.managerId` / `Branch.headUserId` /
- * `Department.headUserId` (added this step specifically to make these
- * rules resolvable at all) and, for "which branch/department is this
- * request even about", against the instance's own `dataSnapshot` first
- * and the requester's sole `UserBranch` row as a fallback — there is no
- * real Employee model yet (phase 1.1) to ask "what is this person's
- * branch/department" directly. When 1.1 lands, only the two private
- * `resolveRequesterBranchId`/`resolveRequesterDepartmentId` helpers below
- * should need to change to query real employee data — the engine, the
- * `ApproverRule` type, and every other rule kind are unaffected.
+ * `MANAGER`/`BRANCH_HEAD`/`DEPARTMENT_HEAD` were PLUGGABLE SEAMS as of 0.7
+ * — see docs/conventions/workflow.md → Approver rules. As of step 1.1 (the
+ * real Employee module, see docs/conventions/employee.md), they now resolve
+ * PRIMARILY against the real org chart (`Employee.managerId`/`branchId`/
+ * `departmentId`), falling back to the legacy 0.7 seams
+ * (`User.managerId`/the requester's sole `UserBranch` row) only for a
+ * requester with NO `Employee` record at all (e.g. an admin-only account
+ * never onboarded as an employee) — this is exactly the change 0.7's own
+ * doc comment predicted: "only the two private
+ * `resolveRequesterBranchId`/`resolveRequesterDepartmentId` helpers [plus,
+ * as it turned out, the `MANAGER` case itself] should need to change to
+ * query real employee data — the engine, the `ApproverRule` type, and
+ * every other rule kind are unaffected."
  */
 @Injectable()
 export class ApproverResolverService {
@@ -47,11 +48,11 @@ export class ApproverResolverService {
       }
 
       case 'MANAGER': {
-        const requester = await tx.user.findUnique({ where: { id: context.requesterId }, select: { managerId: true } });
-        if (!requester?.managerId) {
+        const managerUserId = await this.resolveRequesterManagerUserId(tx, context.requesterId);
+        if (!managerUserId) {
           return [];
         }
-        return this.filterActive(tx, [requester.managerId]);
+        return this.filterActive(tx, [managerUserId]);
       }
 
       case 'BRANCH_HEAD': {
@@ -67,7 +68,7 @@ export class ApproverResolverService {
       }
 
       case 'DEPARTMENT_HEAD': {
-        const departmentId = this.resolveRequesterDepartmentId(context);
+        const departmentId = await this.resolveRequesterDepartmentId(tx, context);
         if (!departmentId) {
           return [];
         }
@@ -85,20 +86,60 @@ export class ApproverResolverService {
     }
   }
 
-  /** Explicit `dataSnapshot.branchId` wins (the submitting module usually knows); otherwise the requester's sole `UserBranch` row, if exactly one exists — see the class doc for why this heuristic exists. */
+  /**
+   * Prefers the real Employee org chart (`Employee.managerId`, resolved to
+   * that manager's linked `User` account) — the seam this rule was always
+   * meant to resolve against once the Employee module (1.1) landed, see
+   * docs/conventions/employee.md. Falls back to the legacy `User.managerId`
+   * seam column (0.7) for a requester with no `Employee` record at all, so
+   * nothing that worked before 1.1 regresses.
+   */
+  private async resolveRequesterManagerUserId(tx: Prisma.TransactionClient, requesterId: string): Promise<string | null> {
+    const employee = await tx.employee.findFirst({ where: { userId: requesterId }, select: { managerId: true } });
+    if (employee) {
+      if (!employee.managerId) {
+        return null;
+      }
+      const manager = await tx.employee.findUnique({ where: { id: employee.managerId }, select: { userId: true } });
+      return manager?.userId ?? null;
+    }
+    const requester = await tx.user.findUnique({ where: { id: requesterId }, select: { managerId: true } });
+    return requester?.managerId ?? null;
+  }
+
+  /**
+   * Explicit `dataSnapshot.branchId` wins (the submitting module usually
+   * knows); otherwise the requester's `Employee.branchId`, if they have an
+   * Employee record; otherwise the requester's sole `UserBranch` row, if
+   * exactly one exists — the original 0.7 heuristic, kept as a last-resort
+   * fallback for a requester with no Employee record.
+   */
   private async resolveRequesterBranchId(tx: Prisma.TransactionClient, context: ApproverResolutionContext): Promise<string | null> {
     const explicit = context.dataSnapshot.branchId;
     if (typeof explicit === 'string' && explicit.length > 0) {
       return explicit;
     }
+    const employee = await tx.employee.findFirst({ where: { userId: context.requesterId }, select: { branchId: true } });
+    if (employee?.branchId) {
+      return employee.branchId;
+    }
     const userBranches = await tx.userBranch.findMany({ where: { userId: context.requesterId }, select: { branchId: true } });
     return userBranches.length === 1 ? userBranches[0].branchId : null;
   }
 
-  /** No existing "requester's department" data source at all yet — explicit `dataSnapshot.departmentId` only. */
-  private resolveRequesterDepartmentId(context: ApproverResolutionContext): string | null {
+  /**
+   * Explicit `dataSnapshot.departmentId` wins; otherwise the requester's
+   * `Employee.departmentId` — the real fallback 0.7's own doc comment noted
+   * DEPARTMENT_HEAD had no equivalent of (there was no "requester's
+   * department" data source at all before the Employee module existed).
+   */
+  private async resolveRequesterDepartmentId(tx: Prisma.TransactionClient, context: ApproverResolutionContext): Promise<string | null> {
     const explicit = context.dataSnapshot.departmentId;
-    return typeof explicit === 'string' && explicit.length > 0 ? explicit : null;
+    if (typeof explicit === 'string' && explicit.length > 0) {
+      return explicit;
+    }
+    const employee = await tx.employee.findFirst({ where: { userId: context.requesterId }, select: { departmentId: true } });
+    return employee?.departmentId ?? null;
   }
 
   private async filterActive(tx: Prisma.TransactionClient, userIds: string[]): Promise<string[]> {

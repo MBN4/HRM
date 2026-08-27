@@ -21,3 +21,4 @@ export * from './i18n';
 export * from './constants/rate-limits';
 export * from './resilience';
 export * from './validators/idempotency.validator';
+export * from './validators/employee.validator';

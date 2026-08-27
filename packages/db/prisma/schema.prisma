@@ -76,32 +76,37 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches                Branch[]
-  departments             Department[]
-  designations            Designation[]
-  costCenters             CostCenter[]
-  users                   User[]
-  domains                 TenantDomain[]
-  permissions             Permission[]
-  roles                   Role[]
-  rolePermissions         RolePermission[]
-  userRoles               UserRole[]
-  userBranches            UserBranch[]
-  countryOverrides        TenantCountryOverride[]
-  subscription            Subscription?
-  licenses                License[]
-  featureFlagOverrides    TenantFeatureFlagOverride[]
-  workflowTemplates       WorkflowTemplate[]
-  workflowSteps           WorkflowStep[]
-  workflowInstances       WorkflowInstance[]
-  workflowInstanceSteps   WorkflowInstanceStep[]
-  workflowActions         WorkflowAction[]
-  notifications           Notification[]
-  notificationDeliveries  NotificationDelivery[]
-  notificationPreferences NotificationPreference[]
-  auditLogs               AuditLog[]
-  customFieldDefinitions  CustomFieldDefinition[]
-  customFieldValueSets    CustomFieldValueSet[]
+  branches                  Branch[]
+  departments               Department[]
+  designations              Designation[]
+  costCenters               CostCenter[]
+  users                     User[]
+  domains                   TenantDomain[]
+  permissions               Permission[]
+  roles                     Role[]
+  rolePermissions           RolePermission[]
+  userRoles                 UserRole[]
+  userBranches              UserBranch[]
+  countryOverrides          TenantCountryOverride[]
+  subscription              Subscription?
+  licenses                  License[]
+  featureFlagOverrides      TenantFeatureFlagOverride[]
+  workflowTemplates         WorkflowTemplate[]
+  workflowSteps             WorkflowStep[]
+  workflowInstances         WorkflowInstance[]
+  workflowInstanceSteps     WorkflowInstanceStep[]
+  workflowActions           WorkflowAction[]
+  notifications             Notification[]
+  notificationDeliveries    NotificationDelivery[]
+  notificationPreferences   NotificationPreference[]
+  auditLogs                 AuditLog[]
+  customFieldDefinitions    CustomFieldDefinition[]
+  customFieldValueSets      CustomFieldValueSet[]
+  employees                 Employee[]
+  employeeDependents        EmployeeDependent[]
+  employeeEmergencyContacts EmployeeEmergencyContact[]
+  employeeDocuments         EmployeeDocument[]
+  employeeImportJobs        EmployeeImportJob[]
 
   @@map("tenants")
 }
@@ -152,6 +157,7 @@ model Branch {
 
   departments  Department[]
   userBranches UserBranch[]
+  employees    Employee[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -180,6 +186,8 @@ model Department {
   childDepartments Department[] @relation("DepartmentHierarchy")
   headUser         User?        @relation("DepartmentHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
+  employees Employee[]
+
   @@unique([tenantId, id])
   @@unique([tenantId, branchId, name])
   @@index([tenantId, parentDepartmentId])
@@ -194,6 +202,12 @@ model Designation {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  employees Employee[]
+
+  // Lets Employee.designation define a composite FK of
+  // (tenantId, designationId) -> (tenantId, id) against this table, same
+  // pattern as Branch/Department/User/Role/Permission.
+  @@unique([tenantId, id])
   @@unique([tenantId, name])
   @@map("designations")
 }
@@ -255,6 +269,7 @@ model User {
   headOfBranches    Branch[]           @relation("BranchHead")
   headOfDepartments Department[]       @relation("DepartmentHead")
   workflowRequests  WorkflowInstance[] @relation("WorkflowRequester")
+  employeeProfile   Employee?
 
   // Per-tenant uniqueness, NOT global: the same email may exist under
   // different tenants as entirely unrelated accounts.
@@ -927,28 +942,28 @@ model NotificationTemplate {
 // reasoning as `WorkflowInstance.entityType`/`Notification.eventType`: a
 // closed catalog here would mean a migration for every new audited action.
 model AuditLog {
-  id         String   @default(uuid()) @db.Uuid
-  tenantId   String   @map("tenant_id") @db.Uuid
-  occurredAt DateTime @default(now()) @map("occurred_at")
+  id            String   @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  occurredAt    DateTime @default(now()) @map("occurred_at")
   // Null when the action was system/platform-initiated (no authenticated
   // user in the request context) — same "nullable system actor" convention
   // as WorkflowAction.actorUserId for ESCALATE/AUTO_APPROVE.
-  actorUserId String? @map("actor_user_id") @db.Uuid
+  actorUserId   String?  @map("actor_user_id") @db.Uuid
   // True when the action came through an unauthenticated @PlatformRoute()
   // (see /CLAUDE.md § Conventions → Platform context) — there is no
   // per-user actor to attach in that case, only "this was a platform
   // operation".
-  actorPlatform Boolean @default(false) @map("actor_platform")
+  actorPlatform Boolean  @default(false) @map("actor_platform")
   action        String
-  entityType    String  @map("entity_type")
-  entityId      String? @map("entity_id")
+  entityType    String   @map("entity_type")
+  entityId      String?  @map("entity_id")
   // Redacted (see @hrm/shared's `redactAuditPayload`) before ever reaching
   // this column — secrets (passwords, tokens, signed license material)
   // must never appear here even transiently within one transaction.
-  before   Json?
-  after    Json?
-  metadata Json?
-  createdAt DateTime @default(now()) @map("created_at")
+  before        Json?
+  after         Json?
+  metadata      Json?
+  createdAt     DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -993,9 +1008,9 @@ model CustomFieldDefinition {
   isRequired Boolean         @default(false) @map("is_required")
   // Allowed values, ENUM fields only (validated as a non-empty string[] at
   // the app layer); null/ignored for every other fieldType.
-  options   Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  options    Json?
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1027,4 +1042,240 @@ model CustomFieldValueSet {
   @@unique([tenantId, entityType, entityId])
   @@index([tenantId, entityType])
   @@map("custom_field_value_sets")
+}
+
+// ---------------------------------------------------------------------------
+// Employee (step 1.1, Phase 1). The core HR entity every future Phase 1+
+// module (leave, attendance, payroll, performance, ESS/MSS) references. See
+// /CLAUDE.md's docs index -> docs/conventions/employee.md for the full
+// write-up: encryption approach, country-driven required fields, the
+// custom-fields/audit/field-level-permission integrations, org chart, and
+// how this model feeds 0.7's approver-rule seams.
+// ---------------------------------------------------------------------------
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  TERMINATED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+// The core HR entity. Tenant-scoped, ordinary RLS applies, same pattern as
+// every other tenant-owned table. `userId` is a NULLABLE, per-tenant-unique
+// one-to-one link to `User` — an employee doesn't strictly need a login
+// account (e.g. freshly bulk-imported, not yet provisioned), so this is
+// optional rather than required.
+//
+// `managerId` is a composite self-relation (same pattern as
+// Branch.parentBranchId/Department.parentDepartmentId — see
+// docs/conventions/tenancy-rls.md) and is now the REAL org-chart data source
+// the workflow engine's MANAGER approver rule was seam-built for in 0.7 (see
+// User.managerId's own doc comment, and
+// apps/api/src/workflow/approver-resolver.service.ts, which now resolves
+// MANAGER/BRANCH_HEAD/DEPARTMENT_HEAD through this table first, falling back
+// to the legacy User.managerId/UserBranch seams only for a requester with no
+// Employee record at all).
+//
+// `statutoryFields` is a `{ [fieldKey]: string }` JSON map giving concrete
+// meaning to Country Pack `requiredEmployeeFields`' opaque keys (0.5's doc
+// comment there explicitly deferred this to "the future employee-fields
+// module" — this is that module). Validated at the application layer against
+// the effective Country Pack resolved for the employee's `branchId` — see
+// EmployeeService.
+//
+// `bankAccountNumberEncrypted`/`bankRoutingCodeEncrypted` and
+// `baseSalaryEncrypted` are ENCRYPTED AT REST (application-level AES-256-GCM
+// via EncryptionService, apps/api/src/common/encryption) — never stored
+// plaintext. `baseSalaryEncrypted` is ADDITIONALLY field-level gated behind
+// `salary.view` at the API/DTO layer (see
+// docs/conventions/field-level-permissions.md) — encryption-at-rest and
+// field-level omission are two independent, stacked controls, consistent
+// with this project's "no single layer of security is trusted alone"
+// posture (see docs/conventions/tenancy-rls.md).
+model Employee {
+  id           String  @id @default(uuid()) @db.Uuid
+  tenantId     String  @map("tenant_id") @db.Uuid
+  employeeCode String  @map("employee_code")
+  userId       String? @map("user_id") @db.Uuid
+
+  // Identity + personal.
+  firstName     String    @map("first_name")
+  lastName      String    @map("last_name")
+  personalEmail String?   @map("personal_email")
+  phone         String?
+  dateOfBirth   DateTime? @map("date_of_birth") @db.Date
+  gender        Gender?
+
+  // Job.
+  branchId       String         @map("branch_id") @db.Uuid
+  departmentId   String?        @map("department_id") @db.Uuid
+  designationId  String?        @map("designation_id") @db.Uuid
+  employmentType EmploymentType @map("employment_type")
+  joinDate       DateTime       @map("join_date") @db.Date
+  status         EmployeeStatus @default(ACTIVE)
+  managerId      String?        @map("manager_id") @db.Uuid
+
+  // Country-driven required statutory identifiers — see the model doc above.
+  statutoryFields Json @default("{}") @map("statutory_fields")
+
+  // Bank details — ENCRYPTED AT REST, no field-level gate (see the model doc
+  // above for why salary gets one and bank details don't: only salary was
+  // asked to be field-level protected).
+  bankAccountNumberEncrypted String? @map("bank_account_number_encrypted")
+  bankNameEncrypted          String? @map("bank_name_encrypted")
+  bankRoutingCodeEncrypted   String? @map("bank_routing_code_encrypted")
+
+  // Compensation — ENCRYPTED AT REST AND field-level gated (salary.view) at
+  // the DTO layer.
+  baseSalaryEncrypted String? @map("base_salary_encrypted")
+  salaryCurrency      String? @map("salary_currency") @db.VarChar(3)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: SetNull)
+  branch      Branch       @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  department  Department?  @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: SetNull)
+  designation Designation? @relation(fields: [tenantId, designationId], references: [tenantId, id], onDelete: SetNull)
+
+  // Composite self-relation, same pattern as User.manager (0.7)/
+  // Branch.parentBranch/Department.parentDepartment.
+  manager       Employee?  @relation("EmployeeManager", fields: [tenantId, managerId], references: [tenantId, id], onDelete: SetNull)
+  directReports Employee[] @relation("EmployeeManager")
+
+  dependents        EmployeeDependent[]
+  emergencyContacts EmployeeEmergencyContact[]
+  documents         EmployeeDocument[]
+
+  // Lets other tenant-scoped tables (future Leave/Attendance/Payroll) define
+  // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
+  // table, same pattern as every other entity in this schema.
+  @@unique([tenantId, id])
+  @@unique([tenantId, employeeCode])
+  @@unique([tenantId, userId])
+  @@index([tenantId, branchId])
+  @@index([tenantId, departmentId])
+  @@index([tenantId, managerId])
+  @@index([tenantId, status])
+  @@map("employees")
+}
+
+// One dependent per row — full-replace on every Employee create/update (see
+// EmployeeService), same "PUT replaces the whole resource" contract used
+// throughout this codebase for tenant-editable collections.
+model EmployeeDependent {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  employeeId   String    @map("employee_id") @db.Uuid
+  name         String
+  relationship String
+  dateOfBirth  DateTime? @map("date_of_birth") @db.Date
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, employeeId])
+  @@map("employee_dependents")
+}
+
+// One emergency contact per row — same full-replace contract as
+// EmployeeDependent above.
+model EmployeeEmergencyContact {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  employeeId   String   @map("employee_id") @db.Uuid
+  name         String
+  relationship String
+  phone        String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, employeeId])
+  @@map("employee_emergency_contacts")
+}
+
+enum EmployeeDocumentType {
+  ID_PROOF
+  VISA
+  CONTRACT
+  CERTIFICATE
+  OTHER
+}
+
+// Document METADATA only — the file bytes live in S3/MinIO
+// (apps/api/src/storage), addressed by `storageKey`. Reuses the existing
+// S3_* env config (documented since 0.1, unused until this step).
+model EmployeeDocument {
+  id               String               @id @default(uuid()) @db.Uuid
+  tenantId         String               @map("tenant_id") @db.Uuid
+  employeeId       String               @map("employee_id") @db.Uuid
+  documentType     EmployeeDocumentType @map("document_type")
+  fileName         String               @map("file_name")
+  mimeType         String               @map("mime_type")
+  sizeBytes        Int                  @map("size_bytes")
+  storageKey       String               @map("storage_key")
+  uploadedByUserId String?              @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime             @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, employeeId])
+  @@map("employee_documents")
+}
+
+enum EmployeeImportStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  COMPLETED_WITH_ERRORS
+  FAILED
+}
+
+// Tracks one bulk CSV import request end to end — the async BullMQ pattern
+// established in 0.8 (see docs/conventions/notifications-queues.md), reused
+// as-is: `POST /employees/import` creates this row PENDING and enqueues one
+// job carrying just `{ tenantId, importJobId }`; the worker
+// (EmployeeImportProcessor) reloads `csvContent` fresh from this row (not
+// from job data — same "job data stays minimal, everything else reloaded
+// from the DB so a retried job sees current state" posture 0.8 established),
+// processes rows with per-row validation, and writes `errors`/counts back as
+// it goes so a client can poll `GET /employees/import/:jobId` for progress
+// without ever blocking the request that kicked off the import.
+model EmployeeImportJob {
+  id                String               @id @default(uuid()) @db.Uuid
+  tenantId          String               @map("tenant_id") @db.Uuid
+  submittedByUserId String?              @map("submitted_by_user_id") @db.Uuid
+  status            EmployeeImportStatus @default(PENDING)
+  csvContent        String               @map("csv_content") @db.Text
+  totalRows         Int                  @default(0) @map("total_rows")
+  processedRows     Int                  @default(0) @map("processed_rows")
+  successCount      Int                  @default(0) @map("success_count")
+  errorCount        Int                  @default(0) @map("error_count")
+  // [{ row: number, message: string }]
+  errors            Json                 @default("[]")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("employee_import_jobs")
 }

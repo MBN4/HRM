@@ -2,14 +2,20 @@
  * Field names that must NEVER reach durable storage un-redacted — auth's
  * `token` (a live password-reset secret, flagged as sensitive at
  * `AuthEventPayload.token` since 0.8), password hashes, refresh/access
- * tokens, and signed license material (`License.signedToken`, license
- * file contents). Matched case-insensitively against object KEYS at any
- * depth, not by an exhaustive per-event field-path list — simpler and
- * safer to over-redact (a field named `token` nested three levels deep is
- * still a token) than to maintain a path list that silently misses a new
- * nesting as modules evolve. See /CLAUDE.md § Conventions → Audit log.
+ * tokens, signed license material (`License.signedToken`, license file
+ * contents), and — since step 1.1 — an Employee response's whole
+ * `bankDetails`/`compensation` objects (redacting the CONTAINER key rather
+ * than each leaf field is the same "safer to over-redact" call as
+ * everything else in this pattern: it also catches `salaryCurrency`, which
+ * isn't sensitive on its own but isn't worth a narrower carve-out either —
+ * see docs/conventions/employee.md). Matched case-insensitively against
+ * object KEYS at any depth, not by an exhaustive per-event field-path list
+ * — simpler and safer to over-redact (a field named `token` nested three
+ * levels deep is still a token) than to maintain a path list that silently
+ * misses a new nesting as modules evolve. See
+ * docs/conventions/audit-custom-fields.md.
  */
-const REDACTED_KEY_PATTERN = /password|token|secret|privateKey|licenseFile|signedToken/i;
+const REDACTED_KEY_PATTERN = /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation/i;
 
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 
