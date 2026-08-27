@@ -15,7 +15,7 @@ import { loadUserContext } from './load-user-context.util';
 import { PasswordService } from './password.service';
 import { AUTH_PROVIDER } from './providers/auth-provider.token';
 import type { AuthProvider } from './providers/auth-provider.interface';
-import { RateLimiterService } from '../common/rate-limit/rate-limiter.service';
+import { RateLimiterService } from '../redis/rate-limiter.service';
 import { TokenService } from './token.service';
 
 const PASSWORD_RESET_TTL_SECONDS = 30 * 60;

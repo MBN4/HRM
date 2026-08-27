@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
-import { RateLimiterService } from '../common/rate-limit/rate-limiter.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PermissionsGuard } from './guards/permissions.guard';
@@ -30,7 +29,6 @@ import { TokenService } from './token.service';
     AuthService,
     PasswordService,
     TokenService,
-    RateLimiterService,
     PermissionsGuard,
     LocalAuthProvider,
     // The SSO seam: AuthService depends on the AUTH_PROVIDER token, not on

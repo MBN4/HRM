@@ -13,6 +13,7 @@ import {
   type ResetPasswordInput,
 } from '@hrm/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import { Priority } from '../resilience/load-shedding/priority.decorator';
 import { CurrentTenant } from '../tenancy/current-tenant.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AllowAnonymous } from './decorators/allow-anonymous.decorator';
@@ -29,6 +30,7 @@ export class AuthController {
 
   @Post('login')
   @AllowAnonymous()
+  @Priority('CRITICAL')
   @HttpCode(HttpStatus.OK)
   login(@Body(new ZodValidationPipe(loginSchema)) body: LoginInput) {
     return this.auth.login(this.requireTenantId(), this.tenantContext.getTx(), body);
@@ -36,6 +38,7 @@ export class AuthController {
 
   @Post('refresh')
   @AllowAnonymous()
+  @Priority('CRITICAL')
   @HttpCode(HttpStatus.OK)
   refresh(@Body(new ZodValidationPipe(refreshSchema)) body: RefreshInput) {
     return this.auth.refresh(this.requireTenantId(), body.refreshToken);

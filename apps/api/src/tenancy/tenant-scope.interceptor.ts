@@ -4,16 +4,21 @@ import {
   ForbiddenException,
   Injectable,
   NestInterceptor,
+  RequestTimeoutException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { firstValueFrom, Observable, of } from 'rxjs';
 import { Prisma, withTenantContext } from '@hrm/db';
+import { DEFAULT_REQUEST_PRIORITY, RequestPriority } from '@hrm/shared';
 import { IS_ALLOW_ANONYMOUS_KEY } from '../auth/decorators/allow-anonymous.decorator';
 import { loadUserContext } from '../auth/load-user-context.util';
+import { LoadSheddingService } from '../resilience/load-shedding/load-shedding.service';
+import { PRIORITY_KEY } from '../resilience/load-shedding/priority.decorator';
+import { TenantRateLimitService } from '../resilience/rate-limit/tenant-rate-limit.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { IS_PLATFORM_KEY } from './platform-route.decorator';
 import { TenantResolutionService } from './tenant-resolution.service';
@@ -28,6 +33,8 @@ const EMPTY_CONTEXT: Omit<RequestTenantStore, 'platform' | 'tx'> = {
   permissions: null,
   branchIds: null,
 };
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 interface AccessTokenPayload {
   sub: string;
@@ -50,17 +57,37 @@ function extractBearerToken(req: Request): string | null {
  * Applied globally (see tenancy.module.ts). For every HTTP request, in
  * order:
  *
- *   1. `@Public()` routes skip resolution entirely — no tenant, no
- *      transaction, no auth.
+ *   0. LOAD SHEDDING (step 0.10 — see /CLAUDE.md § Conventions → Load
+ *      shedding) runs FIRST, before anything below, including `@Public()`/
+ *      `@PlatformRoute()` detection: a shed request never resolves a
+ *      tenant, never opens a DB transaction, never does ANY work beyond
+ *      reading its route's `@Priority()`. This — and the REQUEST TIMEOUT
+ *      wrapping the whole method below — are called directly from HERE
+ *      rather than registered as separate global `APP_INTERCEPTOR`s: an
+ *      earlier version of this step tried exactly that and was PROVEN
+ *      WRONG by `apps/api/test/resilience.e2e-spec.ts`'s ordering test —
+ *      NestJS does not reliably order `APP_INTERCEPTOR`s registered in
+ *      DIFFERENT modules by `imports` array position, so a
+ *      separately-registered interceptor ended up nested INSIDE this one
+ *      instead of wrapping it. Calling both directly from this single
+ *      global interceptor guarantees the ordering by construction — the
+ *      same reasoning 0.4 documents for why auth lives here instead of a
+ *      second global interceptor, extended to load shedding, the request
+ *      timeout, and (per-tenant rate limiting) below.
+ *   1. `@Public()` routes skip tenant resolution entirely — no tenant, no
+ *      transaction, no auth. Still shedable/timeboxed by step 0 above.
  *   2. `@PlatformRoute()` routes require `PLATFORM_MODE_ENABLED=true` or are
  *      rejected; even enabled, they get no transaction (see
  *      platform-route.decorator.ts) — there is no bypass to open one with
  *      yet.
  *   3. Everything else goes through `TenantResolutionService`. Unresolvable
- *      -> 401. Resolved -> the ENTIRE rest of the request (remaining
- *      interceptors, pipes, the controller method) runs inside one
- *      `withTenantContext` transaction, so RLS is enforced for every query
- *      the handler makes, not just ones it happens to wrap itself.
+ *      -> 401. Resolved -> `TenantRateLimitService.enforce(tenantId)` runs
+ *      NEXT, still BEFORE the transaction opens (step 0.10): a tenant over
+ *      its quota gets a 429 without ever checking out a pooled DB
+ *      connection. Only then does the ENTIRE rest of the request
+ *      (remaining interceptors, pipes, the controller method) run inside
+ *      one `withTenantContext` transaction, so RLS is enforced for every
+ *      query the handler makes, not just ones it happens to wrap itself.
  *   4. Within that transaction, unless the route is `@AllowAnonymous()`
  *      (login/refresh/reset — they need a tenant, not a token), the
  *      request's `Authorization: Bearer` JWT is verified and the user's
@@ -68,24 +95,26 @@ function extractBearerToken(req: Request): string | null {
  *      — through the SAME transaction, so those lookups are RLS-enforced
  *      too — and placed in the request context alongside `tenantId`.
  *
- * Auth-context population lives here, in the same interceptor that already
- * opens the transaction, rather than as a second global interceptor:
- * `tx` only exists inside this call, so anything that needs to query
- * RLS-protected tables (User/Role/Permission/UserBranch all are) to
- * populate the context has to run here too. Two separate global
- * interceptors would make that ordering an implicit, fragile property of
- * module import order instead of a guarantee.
+ * The Observable from `next.handle()` is bridged into a Promise via
+ * `firstValueFrom` throughout (awaiting the Observable directly would
+ * resolve instantly with the Observable object itself) — this whole
+ * method now builds ONE Promise for the entire request (see `handle()`)
+ * and wraps IT with the load-shedding release and the request timeout,
+ * converting back to an Observable only at the very end.
  *
- * The Observable from `next.handle()` is bridged into the transaction's
- * callback via `firstValueFrom` (awaiting the Observable directly would
- * resolve instantly with the Observable object itself, closing the
- * transaction before the controller ever runs).
- *
- * Known tradeoff: holding one Postgres transaction open for a request's
- * full duration means a slow handler (e.g. an outbound HTTP call) holds a
- * pooled connection the whole time. Acceptable for now — this is what makes
- * "RLS enforced for the whole request lifecycle" true — but worth
- * revisiting under 0.10 (resilience) if it becomes a real bottleneck.
+ * Known tradeoffs, both DOCUMENTED not hidden (see /CLAUDE.md §
+ * Conventions → Connection-pool protection / Graceful degradation +
+ * health for the full write-up):
+ *   - Holding one Postgres transaction open for a request's full duration
+ *     means a slow handler holds a pooled connection the whole time —
+ *     0.10's bounded pool + `pool_timeout` + `DbPoolExhaustionFilter` is
+ *     what turns "exhausted" into a clean 503 instead of a hang.
+ *   - The request timeout bounds how long the CALLER waits, not how long
+ *     underlying async work (a Promise mid-`await`, a Postgres query
+ *     already sent) actually keeps running — JS Promises aren't
+ *     cancellable. The response is fast and clean either way; the
+ *     resource is freed once the underlying work naturally finishes or
+ *     its own timeout (e.g. `pool_timeout`) fires.
  */
 @Injectable()
 export class TenantScopeInterceptor implements NestInterceptor {
@@ -95,6 +124,8 @@ export class TenantScopeInterceptor implements NestInterceptor {
     private readonly config: ConfigService,
     private readonly tenantContext: TenantContextService,
     private readonly jwt: JwtService,
+    private readonly tenantRateLimit: TenantRateLimitService,
+    private readonly loadShedding: LoadSheddingService,
   ) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
@@ -102,12 +133,31 @@ export class TenantScopeInterceptor implements NestInterceptor {
       return next.handle();
     }
 
+    const response = context.switchToHttp().getResponse<Response>();
+    const priority =
+      this.reflector.getAllAndOverride<RequestPriority | undefined>(PRIORITY_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? DEFAULT_REQUEST_PRIORITY;
+    const release = this.loadShedding.admit(priority, response);
+
+    try {
+      const result = await this.withRequestTimeout(this.handle(context, next));
+      return of(result);
+    } finally {
+      release();
+    }
+  }
+
+  private async handle(context: ExecutionContext, next: CallHandler): Promise<unknown> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
     if (isPublic) {
-      return this.tenantContext.run({ ...EMPTY_CONTEXT, platform: false, tx: null }, () => next.handle());
+      return this.tenantContext.run({ ...EMPTY_CONTEXT, platform: false, tx: null }, () =>
+        firstValueFrom(next.handle(), { defaultValue: undefined }),
+      );
     }
 
     const isPlatform = this.reflector.getAllAndOverride<boolean>(IS_PLATFORM_KEY, [
@@ -118,7 +168,9 @@ export class TenantScopeInterceptor implements NestInterceptor {
       if (this.config.get<string>('PLATFORM_MODE_ENABLED') !== 'true') {
         throw new ForbiddenException('Platform mode is not enabled.');
       }
-      return this.tenantContext.run({ ...EMPTY_CONTEXT, platform: true, tx: null }, () => next.handle());
+      return this.tenantContext.run({ ...EMPTY_CONTEXT, platform: true, tx: null }, () =>
+        firstValueFrom(next.handle(), { defaultValue: undefined }),
+      );
     }
 
     const req = context.switchToHttp().getRequest<Request>();
@@ -127,12 +179,14 @@ export class TenantScopeInterceptor implements NestInterceptor {
       throw new UnauthorizedException('Unable to resolve a tenant for this request.');
     }
 
+    await this.tenantRateLimit.enforce(resolved.tenantId);
+
     const isAllowAnonymous = this.reflector.getAllAndOverride<boolean>(IS_ALLOW_ANONYMOUS_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
 
-    const result = await withTenantContext(resolved.tenantId, async (tx) => {
+    return withTenantContext(resolved.tenantId, async (tx) => {
       const authContext = isAllowAnonymous ? EMPTY_CONTEXT : await this.authenticate(req, resolved.tenantId, tx);
 
       return this.tenantContext.run(
@@ -140,8 +194,19 @@ export class TenantScopeInterceptor implements NestInterceptor {
         () => firstValueFrom(next.handle(), { defaultValue: undefined }),
       );
     });
+  }
 
-    return of(result);
+  private async withRequestTimeout<T>(promise: Promise<T>): Promise<T> {
+    const timeoutMs = Number(this.config.get<string>('REQUEST_TIMEOUT_MS') ?? DEFAULT_REQUEST_TIMEOUT_MS);
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new RequestTimeoutException('The request took too long to process.')), timeoutMs);
+    });
+    try {
+      return await Promise.race([promise, timeout]);
+    } finally {
+      clearTimeout(timer!);
+    }
   }
 
   /**

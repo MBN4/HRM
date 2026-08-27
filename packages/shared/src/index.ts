@@ -18,3 +18,6 @@ export * from './validators/audit.validator';
 export * from './audit/audit-events';
 export * from './audit/redact';
 export * from './i18n';
+export * from './constants/rate-limits';
+export * from './resilience';
+export * from './validators/idempotency.validator';

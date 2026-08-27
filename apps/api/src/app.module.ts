@@ -12,6 +12,7 @@ import { LicensingModule } from './licensing/licensing.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
+import { ResilienceModule } from './resilience/resilience.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { WorkflowModule } from './workflow/workflow.module';
 
@@ -25,6 +26,11 @@ import { WorkflowModule } from './workflow/workflow.module';
     EventEmitterModule.forRoot({ wildcard: true }),
     RedisModule,
     QueueModule,
+    // Both @Global() — relative import order doesn't matter for DI
+    // resolution (see ResilienceModule's doc comment for why load
+    // shedding/the request timeout are plain services TenantScopeInterceptor
+    // calls directly, rather than separately-ordered global interceptors).
+    ResilienceModule,
     TenancyModule,
     AuthModule,
     CountryPacksModule,

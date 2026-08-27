@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { RateLimiterService } from './rate-limiter.service';
 import { REDIS_CLIENT } from './redis.constants';
 
 /**
@@ -10,6 +11,12 @@ import { REDIS_CLIENT } from './redis.constants';
  * belongs here, never in process memory — this is what keeps the API
  * horizontally scalable (see /CLAUDE.md § Conventions → Tenant resolution →
  * STATELESS).
+ *
+ * `RateLimiterService` is provided/exported here (moved from `auth/` in
+ * 0.10) so it's usable from any module without an explicit import — the
+ * same reasoning `TenancyModule` documents for its own `@Global()`, and
+ * needed now that `TenantScopeInterceptor` (in `TenancyModule`) also
+ * depends on it for per-tenant request-volume limiting.
  */
 @Global()
 @Module({
@@ -25,7 +32,8 @@ import { REDIS_CLIENT } from './redis.constants';
       },
       inject: [ConfigService],
     },
+    RateLimiterService,
   ],
-  exports: [REDIS_CLIENT],
+  exports: [REDIS_CLIENT, RateLimiterService],
 })
 export class RedisModule {}

@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import { REDIS_CLIENT } from '../../redis/redis.constants';
+import { REDIS_CLIENT } from './redis.constants';
 
 export class TooManyAttemptsException extends HttpException {
   constructor(retryAfterSeconds: number) {
@@ -20,6 +20,14 @@ export class TooManyAttemptsException extends HttpException {
  * algorithm, which this scope doesn't need. Shared across all API
  * instances via Redis, so it works correctly under horizontal scaling
  * (an in-memory counter would not).
+ *
+ * Moved here from `auth/`, and `RedisModule` promoted to provide/export it
+ * (step 0.10): originally auth-only (login/refresh/password-reset rate
+ * limiting, 0.4), now also the algorithm `TenantRateLimitService` uses for
+ * per-tenant request-volume limiting (see /CLAUDE.md § Conventions →
+ * Per-tenant rate limiting) — a generic Redis rate-limiting primitive
+ * belongs beside `RedisModule`, not owned by its first caller. No
+ * behavior change for existing auth callers.
  */
 @Injectable()
 export class RateLimiterService {
@@ -28,7 +36,8 @@ export class RateLimiterService {
   /**
    * Throws `TooManyAttemptsException` (429) once `key` has been hit more
    * than `limit` times within `windowSeconds`. Callers choose `key` to
-   * scope the limit (e.g. `login:{tenantId}:{email}`, `reset:{email}`).
+   * scope the limit (e.g. `login:{tenantId}:{email}`, `reset:{email}`,
+   * `tenant-quota:{tenantId}`).
    */
   async consume(key: string, limit: number, windowSeconds: number): Promise<void> {
     const redisKey = `ratelimit:${key}`;
