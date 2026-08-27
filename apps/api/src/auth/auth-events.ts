@@ -1,9 +1,10 @@
 /**
  * Structured domain events for every auth-worthy action, emitted by
- * `AuthService` via `@nestjs/event-emitter` and consumed today only by
- * `AuditEventsListener` (which just logs them). This is the wiring point
- * 0.9's real audit log persists instead — keep the event name/payload
- * contract stable, since 0.9 depends on it without touching this module.
+ * `AuthService` via `@nestjs/event-emitter` and consumed by
+ * `apps/api/src/audit/listeners/domain-event-audit.listener.ts`'s
+ * `DomainEventAuditListener` (0.9), which persists them into `audit_log`
+ * — keep this event name/payload contract stable, since that listener
+ * depends on it without this module changing.
  */
 export const AUTH_EVENTS = {
   LOGIN: 'auth.login',

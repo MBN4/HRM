@@ -1103,6 +1103,266 @@ resolveEnabledChannels` is the one place this is resolved; no caller
     e2e files sharing one process's event bus, not a production concern
     (nothing tears down a real tenant milliseconds after emitting an
     event), and it never affected a test assertion or outcome.
+- **Audit log** (defined in step 0.9 — `packages/db`, `packages/shared`,
+  `apps/api/src/audit`):
+  - **Two capture paths, one sink.** `AuditRecordService`
+    (`apps/api/src/audit/audit-record.service.ts`) is the ONLY place an
+    `audit_log` row is ever written — every `before`/`after`/`metadata`
+    payload passes through `@hrm/shared`'s `redactSensitiveFields` there,
+    so redaction can never be forgotten at an individual call site.
+    - **HTTP mutations**: `@AuditLog(entityType, action)` +
+      `@UseInterceptors(AuditInterceptor)` — the same "decorator carries
+      metadata, a route-scoped interceptor reads it and does the work"
+      shape as `@RequirePermissions()`/`PermissionsGuard` and
+      `@RequireFeature()`/`FeatureFlagGuard` (see those for why this is an
+      interceptor, not a `CanActivate` guard: `TenantContextService.getTx()`
+      only works once `TenantScopeInterceptor`'s interceptor-phase
+      transaction is open). `AuditInterceptor` AWAITS the write inside the
+      request's own transaction before the response returns — a rollback
+      rolls back the audit entry too (correct: if the mutation didn't
+      happen, nothing should claim it did), and the caller has a hard
+      guarantee the entry exists by the time they see a response. A route
+      handler MAY call `AuditCaptureService.setBefore(value)` (backed by
+      its own tiny `AsyncLocalStorage`, `audit-capture.store.ts` —
+      deliberately NOT an added field on `RequestTenantStore`, since this
+      is scratch bookkeeping for one interceptor, not part of the
+      tenant/auth identity the rest of the request relies on) to attach a
+      pre-mutation snapshot; omitting it just means `before: null` (a
+      CREATE has nothing to capture). Wired onto `PUT
+/country-packs/overrides/:countryCode` as the reference usage — a
+      real sensitive tenant-config mutation, not a synthetic demo.
+    - **Domain events**: `DomainEventAuditListener`
+      (`apps/api/src/audit/listeners/domain-event-audit.listener.ts`)
+      subscribes to `auth.*`/`licensing.*`/`workflow.*`/`notification.*`
+      (nothing emits under the last namespace yet — subscribed anyway so
+      the sink is free the moment something does) — the SAME events
+      `AuditEventsListener`/`LicensingEventsListener`/
+      `WorkflowEventsListener` used to just structured-log; those three
+      placeholder classes are DELETED by this step, superseded exactly as
+      each of their own doc comments already promised. Writes via
+      `AuditRecordService.recordForTenant`, which opens its OWN fresh
+      `withTenantContext` transaction rather than trying to reuse the
+      emitting request's — domain events can fire asynchronously after
+      that request's transaction has already committed, the same timing
+      gap 0.8 documents as "THE RACE" for `NotificationDispatchListener`;
+      never throws (logs and swallows) for the same reason 0.8's listener
+      is fire-and-forget: the original action already returned a response,
+      an audit-sink failure must never look like that action failed.
+      `entityType`/`entityId` are derived GENERICALLY (namespace prefix ->
+      `PascalCase`; first present of a short list of common id fields),
+      not via a per-event switch statement — audit's job is just "record
+      that this happened," so this doesn't grow a maintenance burden the
+      way `NotificationRecipientResolverService`'s genuinely-necessary
+      per-event switch would if reused here. One deliberate, documented
+      exception: `licensing.issued`/`licensing.revoked`/
+      `licensing.flag_override_set` are always emitted from an
+      unauthenticated `@PlatformRoute()` (`LicensingAdminService`), so
+      those three are hardcoded as `actorPlatform: true` rather than left
+      to the generic derivation, which has no way to know that.
+  - **Immutability is enforced at the DATABASE layer, not just by no
+    application code path updating/deleting it.** The
+    `enable_rls_and_immutability_for_audit_log` migration grants `hrm_app`
+    only `SELECT`/`INSERT` on `audit_log` and explicitly `REVOKE`s
+    `UPDATE`/`DELETE` (defense-in-depth on top of simply never granting
+    them, against a future migration accidentally adding a blanket grant)
+    — verified directly against Postgres (not just inferred from the SQL)
+    in `packages/db/test/audit-log-immutability.spec.ts`: an `UPDATE`/
+    `DELETE` through `hrm_app` fails with `permission denied`, even though
+    ordinary tenant-scoped RLS (`tenant_isolation`, `USING`/`WITH CHECK`)
+    still applies for the `SELECT`/`INSERT` paths that remain. Cascading
+    deletes from a `Tenant` row being deleted are unaffected — `ON DELETE
+CASCADE` is enforced by the FK constraint itself, not by the deleting
+    session's own privilege on the child table.
+  - **PARTITION-READY, not yet partitioned** — the gap flagged back in 0.2
+    (see the comment block above the `Tenant` model in `schema.prisma`) is
+    closed for the shape, not the partitioning itself: `AuditLog`'s
+    primary key is the COMPOSITE `(id, occurredAt)`, since Postgres
+    requires the partition key to be part of every unique constraint/PK on
+    a partitioned table. Phase 5.2 is expected to add the actual
+    `PARTITION BY RANGE (occurred_at)` migration; this step's schema is
+    designed so that lands without an incompatible PK change.
+  - **Query API**: `GET /audit` (`apps/api/src/audit/audit.controller.ts`),
+    deny-by-default behind a new `audit.read` permission — granted to
+    `TENANT_ADMIN` only (via `ALL_PERMISSIONS`), deliberately NOT
+    `HR_MANAGER`, the same "ownership/security territory, not HR policy"
+    reasoning 0.6 documents for `license.manage`. Filters
+    (`entityType`/`entityId`/`action`/`actorUserId`/`before`) are all
+    optional; pagination uses a plain `occurredAt < before` cursor (an ISO
+    timestamp) rather than Prisma's built-in `cursor` option, which would
+    need the table's composite PK — simpler and sufficient for what's
+    inherently a "browse recent history" read pattern. Tenant-scoped like
+    every other read in this codebase: the query runs through the
+    caller's own RLS-scoped transaction, so no filter combination can ever
+    surface another tenant's entries.
+  - Verified end-to-end over real HTTP by `apps/api/test/audit.e2e-spec.ts`
+    (a `PUT /country-packs/overrides/:countryCode` mutation auto-capturing
+    an audit row with no hand-written write in that route, a second write
+    capturing the prior override as `before`, `licensing.revoked`
+    landing in the trail via the domain-event sink with `actorPlatform:
+true`, `auth.password_reset_requested`'s sensitive `token` field
+    redacted before it ever reaches the row, `GET /audit` deny-by-default
+    and tenant-isolated) plus
+    `packages/db/test/audit-log-immutability.spec.ts` (5 tests: insert
+    succeeds, update/delete rejected at the DB level, RLS isolation, no
+    tenant context fails loudly).
+- **Custom fields** (defined in step 0.9 — `packages/db`, `packages/shared`,
+  `apps/api/src/custom-fields`):
+  - Lets a tenant extend a core entity with its own typed fields WITHOUT a
+    schema migration. `CustomFieldDefinition.entityType` is a free-form
+    string (the future "Employee", eventually others), the SAME
+    polymorphic-by-string pattern `WorkflowInstance.entityType`/
+    `Notification.eventType` already use, for the same reason: a closed
+    catalog here would mean a migration every time a new entity becomes
+    custom-field-aware. Both `CustomFieldDefinition` and
+    `CustomFieldValueSet` are tenant-scoped, ordinary RLS.
+  - **Types**: `STRING`/`NUMBER`/`DATE`/`BOOLEAN`/`ENUM` (a Postgres enum,
+    `CustomFieldType` — unlike `entityType`, the field TYPE catalog is
+    closed and a code-level concern, so an enum is correct here, matching
+    `NotificationChannel`/`WorkflowActionType`'s own "some things ARE a
+    fixed, closed set" exception to the free-form-string rule). `options`
+    (a `string[]`) is required (and non-empty) exactly when `fieldType` is
+    `ENUM`, rejected otherwise — enforced by `@hrm/shared`'s
+    `defineCustomFieldSchema` (`.strict()` + `.refine()`, the same
+    "no meaningless combination accepted" posture
+    `tenantCountryOverrideSchema`/`licensePayloadSchema` already use).
+  - **Storage — one JSONB blob per entity, not one row per field.**
+    `CustomFieldValueSet` is `@@unique([tenantId, entityType, entityId])`
+    holding ALL of that entity's custom values as a single `{ [fieldKey]:
+value }` JSON map — simpler and sufficiently scalable for this step
+    than one row per field per entity, matching "typed... with a JSONB
+    storage approach" from this step's brief.
+  - **`setValues` is FULL REPLACE, not a partial PATCH** — the same "PUT
+    replaces the whole resource" contract
+    `TenantCountryOverride`/`TenantFeatureFlagOverride` already use: the
+    submitted body must satisfy every `isRequired` field ON ITS OWN, not
+    merged with whatever was previously stored. Every write re-validates
+    against the entity type's CURRENT `CustomFieldDefinition` rows — an
+    unknown key is a `400`, a missing required field is a `400`, a
+    type-mismatched value is a `400` (STRING/NUMBER/BOOLEAN via `typeof`,
+    DATE via `Date.parse`, ENUM via membership in that definition's
+    `options`) — the same "JSON column has no schema-level guarantee of
+    its own" posture as Country Pack config / workflow approver rules /
+    every other JSON-configured feature in this system.
+  - **`CustomFieldsController` is this framework's demo/reference surface,
+    not a stand-in for a real entity's own RBAC.** Mutations
+    (`POST /custom-fields/definitions`, `PUT
+/custom-fields/values/:entityType/:entityId`) are gated on a new
+    `custom_field.manage` permission (granted to `TENANT_ADMIN` implicitly
+    and `HR_MANAGER` explicitly, alongside
+    `country_pack.override.manage` — HR-policy territory, unlike
+    `audit.read`); reads are open to any authenticated tenant user, same
+    posture as `GET /tenancy/branches`. A future real entity module
+    (Employee, ...) is expected to call `CustomFieldValueService`/
+    `CustomFieldDefinitionService` directly from ITS OWN
+    field-appropriately-permissioned routes (`employee.write`, ...)
+    rather than routing through this generic controller — `getValues`'s
+    result is meant to be spread into that entity's own response DTO.
+  - Verified end-to-end over real HTTP by
+    `apps/api/test/custom-fields.e2e-spec.ts`: defining a
+    STRING/NUMBER/ENUM field (deny-by-default, ENUM-without-options
+    rejected), setting values (missing required field / out-of-`options`
+    ENUM / unknown key / wrong type all `400`), a full round trip
+    (`PUT` then `GET` returns exactly what was set), and tenant isolation
+    (tenant B sees no definitions and no values for tenant A's entity).
+- **i18n / timezone / RTL** (defined in step 0.9 — `packages/shared/src/i18n`,
+  `apps/api/src/common/i18n`, `apps/portal`, `apps/admin`): formalizes
+  what was ad hoc since 0.5 (Country Pack `locale`) and 0.8 (notification
+  template rendering) into one canonical convention every future module
+  should follow, rather than re-deriving its own.
+  - **Timestamps: UTC in, UTC through, local at the very last step only.**
+    Every timestamp is STORED (Prisma `DateTime` columns) and TRANSMITTED
+    (JSON, `Date#toISOString()`) in UTC — this was already true everywhere
+    in this codebase, now made an explicit, documented rule.
+    `@hrm/shared`'s `formatInTimeZone(instant, timeZone, options)` (built
+    on the native `Intl.DateTimeFormat` — Node's bundled ICU already
+    carries the full IANA database, no date-fns-tz/moment-timezone
+    dependency earns its weight here) is the ONE sanctioned place a UTC
+    instant becomes a specific timezone's rendering; `assertValidTimeZone`
+    throws `InvalidTimeZoneError` for a bogus zone rather than silently
+    falling back to UTC, the same "no `missing_ok`" posture as RLS's
+    `current_setting`/Country Pack resolution's `404`.
+    `apps/api/src/common/i18n/timezone.service.ts`'s `TimezoneService` is
+    the thin API-layer wrapper (`resolveBranchTimezone` reads the
+    existing `Branch.timezone` column, set since 0.2); there is no
+    per-user timezone column yet — branch timezone is today's only
+    resolvable source, a future profile module can add a user-level
+    override the same way `User.preferredLanguage` (0.8) overrides a
+    resolved pack's language.
+  - **RTL: the Country Pack's `locale.rtl` is authoritative; a bare
+    language-code whitelist is the fallback.** `@hrm/shared/src/i18n/rtl.ts`
+    (formerly `notifications/rtl-languages.ts` — moved and generalized
+    here since it's no longer notification-hub-specific; the one existing
+    caller, `NotificationLocaleResolverService`, is unaffected since it
+    only ever imported the barrel export) still exports `isRtlLanguage`
+    for the same one-off it always had (a `User.preferredLanguage`
+    override with no pack attached), plus a new `directionFor(rtl):
+'rtl' | 'ltr'` used everywhere a boolean needs to become the literal
+    value `<html dir>` expects. **`GET /i18n/demo`**
+    (`apps/api/src/common/i18n/i18n-demo.controller.ts`) is this step's
+    proof endpoint, in the same "demo endpoint proving a cross-cutting
+    mechanism with no dedicated entity to hang it off of" role as `GET
+/auth/rbac-demo`/`GET /tenancy/permission-field-demo`/`GET
+/licensing/demo/advanced-reporting` — it reuses
+    `CountryPackResolutionService` (0.5) for locale/RTL rather than
+    re-deriving it, the same reuse `NotificationLocaleResolverService`
+    (0.8) already established, and `TimezoneService` for rendering, proving
+    a US branch and a Qatar branch resolve opposite `locale`/`rtl`/
+    `direction` through the SAME endpoint while the underlying `nowUtc`
+    stays identical.
+  - **String externalization — TWO catalogs, deliberately not unified into
+    one.** `NotificationTemplate` (0.8, DB-stored, tenant-facing,
+    versioned, vendor-authored COPY — emails, in-app notification text)
+    is UNCHANGED by this step. `@hrm/shared/src/i18n/messages.ts`'s
+    `UI_MESSAGES`/`translate()` is NEW: application CHROME (button
+    labels, nav items, generic error text) for `apps/portal`/`apps/admin`
+    — ordinary UI strings that ship with the code like any other source
+    file, not tenant- or admin-editable data. Forcing these into one
+    mechanism would be the wrong abstraction (one is runtime tenant data,
+    the other is build-time source); what IS unified is the substitution
+    mechanism itself — `@hrm/shared/src/i18n/interpolate.ts`'s
+    `interpolateTemplate` (the `{{placeholder}}` regex substitution
+    originally written for `NotificationTemplateRenderer`, promoted here
+    so BOTH catalogs share exactly one templating syntax in this
+    codebase, not two;
+    `apps/api/src/notifications/notification-template-renderer.service.ts`
+    was updated to call the shared function instead of its own private
+    copy, with no behavior change). A UI string missing from a locale
+    falls back to `DEFAULT_LOCALE` ("en"); missing from EVERY locale
+    renders visibly as `[[key]]` rather than silently as empty text —
+    DIFFERENT from `NotificationTemplateRenderer`'s server-side posture
+    (a fully-missing template is a loud `404`, surfacing as a dead-lettered
+    job): a missing UI string must never crash rendering, so this layer is
+    deliberately more forgiving.
+  - **Web apps: one `I18nProvider` per app, duplicated verbatim rather
+    than factored into a shared package.** `apps/portal/src/i18n/
+I18nProvider.tsx` and `apps/admin/src/i18n/I18nProvider.tsx` are
+    byte-identical: a React context exposing `{ locale, dir, t, setLocale
+}`, `dir` derived from `locale` via `isRtlLanguage` (a reasonable
+    default for UI chrome with no per-tenant session to resolve a real
+    Country Pack from yet — an optional `rtl` prop lets a future
+    session-aware integration override it with the AUTHORITATIVE
+    `locale.rtl` from `GET /country-packs/effective` instead), and a
+    `useEffect` that reconciles `document.documentElement.lang`/`dir`
+    whenever locale changes. `RootLayout` in both apps ships a safe
+    `lang="en" dir="ltr"` initial server render (no session to resolve
+    from at that layer yet) wrapped in `<I18nProvider>`; each app's home
+    page demonstrates `useI18n()` (`t('app.name')`, a locale-toggle
+    button flipping the whole page RTL). Not factored into a shared
+    package because this codebase has no shared REACT package today
+    (`packages/shared` is intentionally framework-agnostic) and ~50 lines
+    used by exactly two apps doesn't earn one yet — promote to a real
+    `packages/ui` if a third app needs this or the provider grows real
+    complexity.
+  - Verified: `apps/api/src/common/i18n/timezone.spec.ts` (pure unit
+    tests — the same UTC instant renders differently per IANA timezone,
+    respects the `locale` option, rejects a bogus timezone loudly, accepts
+    both a `Date` and an ISO string) and
+    `apps/api/test/i18n-demo.e2e-spec.ts` (3 e2e tests over real HTTP: a
+    US branch resolves `en`/LTR, a Qatar branch resolves `ar`/RTL through
+    the SAME endpoint, and the same UTC instant renders differently per
+    branch timezone while `nowUtc` itself stays a stable ISO-8601 UTC
+    string) plus `apps/portal`/`apps/admin` both building and linting
+    cleanly with the new provider wired into their root layouts.
 
 ## 5. Build log (append-only)
 
@@ -1685,6 +1945,126 @@ config`. Note for future work: ESLint's shareable-config name resolution
     `localhost:6379`: all 9 new tests pass, all 124 existing tests still
     pass (133 total: 9 `packages/db` RLS + 124 `apps/api`). Full-repo
     `pnpm build` (5/5), `pnpm lint` (7/7), `pnpm test` all green.
+- **0.9 audit logging, custom fields, i18n — done — 2026-08-27.** Three
+  cross-cutting foundations: an append-only, DB-level-immutable audit log
+  fed automatically by both HTTP-mutation interceptor capture and the
+  existing `auth`/`licensing`/`workflow`/`notification` domain events; a
+  tenant-extensible custom-fields mechanism for entities with no schema
+  migration; and a formalized i18n/timezone/RTL convention unifying what
+  0.5/0.8 had already established ad hoc. Full design in § Conventions →
+  Audit log / Custom fields / i18n / timezone / RTL above. Files:
+  - `packages/db/prisma/schema.prisma` — `AuditLog` (composite
+    `(id, occurredAt)` PK, partition-ready), `CustomFieldType` enum,
+    `CustomFieldDefinition`, `CustomFieldValueSet`, plus the three new
+    back-relations on `Tenant`.
+  - `packages/db/prisma/migrations/20260827090000_add_audit_and_custom_fields/`
+    — the enum and three tables (generated via `prisma migrate diff` +
+    `migrate deploy`, same non-interactive method every prior step since
+    0.4 documented).
+  - `packages/db/prisma/migrations/20260827090500_enable_rls_for_audit_and_custom_fields/`
+    — ordinary `tenant_isolation` RLS on the two custom-field tables;
+    `audit_log` gets the same RLS policy PLUS an explicit
+    `REVOKE UPDATE, DELETE ... FROM hrm_app` (only `SELECT`/`INSERT`
+    granted) — the DB-level immutability guarantee, verified directly
+    against Postgres via `psql` during this step and by
+    `packages/db/test/audit-log-immutability.spec.ts`.
+  - `packages/shared/src/i18n/` — `rtl.ts` (`isRtlLanguage`, moved/
+    generalized from the deleted `notifications/rtl-languages.ts`, plus
+    new `directionFor`), `interpolate.ts` (`interpolateTemplate`, promoted
+    out of `NotificationTemplateRenderer`), `timezone.ts`
+    (`formatInTimeZone`/`assertValidTimeZone`/`toUtcIsoString`),
+    `messages.ts` (`UI_MESSAGES`/`translate`, the new web-app UI catalog).
+  - `packages/shared/src/audit/` — `redact.ts` (`redactSensitiveFields`,
+    the one redaction backstop both audit capture paths call) and
+    `audit-events.ts` (`AUDIT_ACTIONS`, `AuditLogEntryDto`).
+  - `packages/shared/src/validators/audit.validator.ts` /
+    `custom-field.validator.ts` — `auditQuerySchema`,
+    `defineCustomFieldSchema` (`.strict()` + `.refine()` on the
+    ENUM/`options` pairing), `setCustomFieldValuesSchema`.
+  - `packages/shared/src/constants/permissions.ts` — new `AUDIT_READ`
+    (`TENANT_ADMIN` only, via `ALL_PERMISSIONS`) and
+    `CUSTOM_FIELD_MANAGE` (`TENANT_ADMIN` implicitly + `HR_MANAGER`
+    explicitly) permissions.
+  - `apps/api/src/audit/` — `audit-capture.store.ts`/`audit-capture.service.ts`
+    (the route-handler "before" snapshot hook, its own isolated
+    `AsyncLocalStorage`), `audit-log.decorator.ts` (`@AuditLog()`),
+    `audit-record.service.ts` (`AuditRecordService`, the one write path —
+    `recordWithinTransaction` for HTTP mutations,
+    `recordForTenant` for domain events), `audit.interceptor.ts`
+    (`AuditInterceptor`), `audit-query.service.ts`/`audit.controller.ts`
+    (`GET /audit`), `listeners/domain-event-audit.listener.ts`
+    (`DomainEventAuditListener`, replacing and deleting the three
+    placeholder loggers — `auth/listeners/audit-events.listener.ts`,
+    `licensing/listeners/licensing-events.listener.ts`,
+    `workflow/listeners/workflow-events.listener.ts`), `audit.module.ts`.
+  - `apps/api/src/custom-fields/` — `custom-field-definition.service.ts`,
+    `custom-field-value.service.ts`, `custom-fields.controller.ts`
+    (`POST`/`GET .../definitions`, `PUT`/`GET .../values/:entityType/:entityId`),
+    `custom-fields.module.ts`.
+  - `apps/api/src/common/i18n/` — `timezone.service.ts` (`TimezoneService`),
+    `i18n-demo.controller.ts` (`GET /i18n/demo`), `i18n.module.ts`.
+  - `apps/api/src/country-packs/country-packs.controller.ts` — `PUT
+/country-packs/overrides/:countryCode` now `@AuditLog`'d, with an
+    explicit `AuditCaptureService.setBefore()` call capturing the
+    pre-upsert override row — the reference usage of the automatic-capture
+    framework on a REAL sensitive mutation, not a synthetic demo.
+  - `apps/api/src/notifications/notification-template-renderer.service.ts`
+    — its private `substitute` method deleted; now calls `@hrm/shared`'s
+    `interpolateTemplate` instead (behavior unchanged, one templating
+    implementation instead of two).
+  - `apps/api/src/app.module.ts` — registered `AuditModule`,
+    `CustomFieldsModule`, `I18nModule`; `auth.module.ts`/
+    `licensing.module.ts`/`workflow.module.ts` had their now-deleted
+    placeholder listener registrations removed.
+  - `apps/api/src/auth/auth-events.ts` / `licensing/licensing-events.ts` /
+    `workflow/workflow-events.ts` — doc comments updated to point at
+    `DomainEventAuditListener` instead of the deleted placeholder classes;
+    no contract/behavior change.
+  - `apps/portal/src/i18n/I18nProvider.tsx` /
+    `apps/admin/src/i18n/I18nProvider.tsx` — byte-identical React i18n/RTL
+    context providers (see Conventions for why duplicated rather than
+    shared). Both apps' `layout.tsx` wrap `children` in `<I18nProvider>`
+    with a safe `lang="en" dir="ltr"` initial `<html>`; both apps'
+    `page.tsx` demonstrate `useI18n()` with a working locale-toggle button.
+  - `packages/db/test/audit-log-immutability.spec.ts` — 5 integration
+    tests (insert succeeds; update/delete rejected at the DB level with
+    `permission denied`; RLS isolation; no tenant context fails loudly).
+  - `apps/api/src/common/i18n/timezone.spec.ts` — 5 pure unit tests for
+    `formatInTimeZone`/`toUtcIsoString`/`assertValidTimeZone`.
+  - `apps/api/test/audit.e2e-spec.ts` — 7 integration tests over real HTTP
+    (see Conventions → Audit log → Verified-by for the full list).
+  - `apps/api/test/custom-fields.e2e-spec.ts` — 9 integration tests over
+    real HTTP (definition validation, value validation, round trip,
+    tenant isolation).
+  - `apps/api/test/i18n-demo.e2e-spec.ts` — 3 integration tests over real
+    HTTP (US branch en/LTR, Qatar branch ar/RTL, per-timezone rendering).
+    **Bug caught and fixed while landing this step**: `AuditInterceptor`
+    (used via `@UseInterceptors(AuditInterceptor)` from
+    `country-packs.controller.ts`/`custom-fields.controller.ts`) initially
+    failed to resolve its `AuditRecordService` dependency the moment
+    `AppModule` compiled, because `AuditModule` wasn't `@Global()` — unlike
+    `PermissionsGuard`, whose own dependencies (`Reflector`, and
+    `TenantContextService` from the already-`@Global()` `TenancyModule`)
+    happen to be globally available regardless of which module registers
+    it, `AuditRecordService` had no such global source. This broke EVERY
+    e2e suite (all of them boot the full `AppModule`), caught immediately
+    by running the full suite before considering this step done. Fixed by
+    adding `@Global()` to `AuditModule`, the same pattern `TenancyModule`
+    already established for exactly this reason.
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379`: all 24 new `apps/api` tests pass (7 audit + 9
+    custom-fields + 3 i18n-demo + 5 timezone unit), all 124 pre-existing
+    `apps/api` tests still pass with no behavior change (148 total), and
+    all 14 `packages/db` tests pass (9 original RLS + 5 new
+    audit-immutability) — 162 tests total, 17 `apps/api` suites in ~33s.
+    One benign, pre-existing log line reappears in the full run (a
+    `workflow.submitted` dispatch failing with a foreign-key error after
+    `workflow.e2e-spec.ts`'s `afterAll` deletes its tenant) — the same
+    test-teardown ordering artifact 0.8's build log entry already
+    documents, unrelated to this step and never affecting an assertion.
+    Full-repo `pnpm build` and `pnpm lint` both green across all 7
+    workspaces. `apps/portal` and `apps/admin` both build and lint cleanly
+    with the new provider wired into their root layouts.
 
 ## 6. Not yet built
 
@@ -1695,11 +2075,13 @@ config`. Note for future work: ESLint's shareable-config name resolution
 - [x] **0.6** Licensing (SaaS vs. lifetime on-prem enforcement)
 - [x] **0.7** Workflow engine
 - [x] **0.8** Notifications
-- [ ] **0.9** Audit logging, custom fields, i18n
+- [x] **0.9** Audit logging, custom fields, i18n
 - [ ] **0.10** Resilience (graceful degradation, backpressure, circuit breaking)
 - [ ] **Phase 1** — _scope not yet defined_
 - [ ] **Phase 2** — _scope not yet defined_
 - [ ] **Phase 3** — _scope not yet defined_
 - [ ] **Phase 4** — _scope not yet defined_
-- [ ] **Phase 5** — _scope not yet defined_
+- [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to partition
+      `audit_log` — see § Conventions → Audit log — and, per 0.2's original
+      note, `attendance` once that table exists)
 - [ ] **Phase 6** — _scope not yet defined_

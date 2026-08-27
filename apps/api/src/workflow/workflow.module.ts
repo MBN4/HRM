@@ -3,11 +3,10 @@ import { ApproverResolverService } from './approver-resolver.service';
 import { WorkflowController } from './workflow.controller';
 import { WorkflowEngineService } from './workflow-engine.service';
 import { WorkflowEscalationService } from './workflow-escalation.service';
-import { WorkflowEventsListener } from './listeners/workflow-events.listener';
 
 @Module({
   controllers: [WorkflowController],
-  providers: [ApproverResolverService, WorkflowEngineService, WorkflowEscalationService, WorkflowEventsListener],
+  providers: [ApproverResolverService, WorkflowEngineService, WorkflowEscalationService],
   exports: [WorkflowEngineService, WorkflowEscalationService, ApproverResolverService],
 })
 export class WorkflowModule {}

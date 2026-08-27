@@ -1,11 +1,10 @@
 /**
  * Structured domain events for every workflow state change, emitted via
- * `@nestjs/event-emitter` and consumed today only by
- * `workflow/listeners/workflow-events.listener.ts` (which just logs
- * them) — the same deferred-persistence pattern `auth-events.ts`/
- * `licensing-events.ts` document: the notification hub (0.8) and the real
- * audit log (0.9) both consume this contract instead of this listener's
- * implementation, without `WorkflowEngineService` changing.
+ * `@nestjs/event-emitter` and consumed by the notification hub's
+ * `NotificationDispatchListener` (0.8) and audit's
+ * `DomainEventAuditListener` (0.9, persisting into `audit_log`) — the
+ * same contract `auth-events.ts`/`licensing-events.ts` document, without
+ * `WorkflowEngineService` changing.
  */
 export const WORKFLOW_EVENTS = {
   SUBMITTED: 'workflow.submitted',

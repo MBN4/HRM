@@ -22,6 +22,8 @@ export const PERMISSIONS = {
   LICENSE_MANAGE: 'license.manage',
   WORKFLOW_PARTICIPATE: 'workflow.participate',
   WORKFLOW_MANAGE: 'workflow.manage',
+  AUDIT_READ: 'audit.read',
+  CUSTOM_FIELD_MANAGE: 'custom_field.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -49,6 +51,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.COUNTRY_PACK_OVERRIDE_MANAGE,
     PERMISSIONS.WORKFLOW_PARTICIPATE,
     PERMISSIONS.WORKFLOW_MANAGE,
+    PERMISSIONS.CUSTOM_FIELD_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

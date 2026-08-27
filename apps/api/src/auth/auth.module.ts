@@ -5,7 +5,6 @@ import { RateLimiterService } from '../common/rate-limit/rate-limiter.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PermissionsGuard } from './guards/permissions.guard';
-import { AuditEventsListener } from './listeners/audit-events.listener';
 import { PasswordService } from './password.service';
 import { AUTH_PROVIDER } from './providers/auth-provider.token';
 import { LocalAuthProvider } from './providers/local-auth.provider';
@@ -33,7 +32,6 @@ import { TokenService } from './token.service';
     TokenService,
     RateLimiterService,
     PermissionsGuard,
-    AuditEventsListener,
     LocalAuthProvider,
     // The SSO seam: AuthService depends on the AUTH_PROVIDER token, not on
     // LocalAuthProvider directly. Swapping in a tenant-configurable

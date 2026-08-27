@@ -1,9 +1,18 @@
 import { BadRequestException, Body, Controller, Get, Param, Put, Query, UseInterceptors } from '@nestjs/common';
-import { countryPackConfigSchema, PERMISSIONS, TenantCountryOverrideInput, tenantCountryOverrideSchema } from '@hrm/shared';
+import {
+  AUDIT_ACTIONS,
+  countryPackConfigSchema,
+  PERMISSIONS,
+  TenantCountryOverrideInput,
+  tenantCountryOverrideSchema,
+} from '@hrm/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { AuditCaptureService } from '../audit/audit-capture.service';
+import { AuditLog } from '../audit/audit-log.decorator';
+import { AuditInterceptor } from '../audit/audit.interceptor';
 import { assertLeaveBoundsRespected, InvalidCountryOverrideError } from './country-pack-override.util';
 import { CountryPackNotFoundError, CountryPackResolutionService } from './country-pack-resolution.service';
 
@@ -29,6 +38,7 @@ export class CountryPacksController {
   constructor(
     private readonly resolution: CountryPackResolutionService,
     private readonly tenantContext: TenantContextService,
+    private readonly auditCapture: AuditCaptureService,
   ) {}
 
   /**
@@ -57,11 +67,17 @@ export class CountryPacksController {
    * Creates or replaces the calling tenant's override for one country.
    * Deny-by-default like every other mutating route in this codebase — see
    * /CLAUDE.md § Conventions → RBAC for why `PermissionsGuard` is applied
-   * via `@UseInterceptors()` despite the name.
+   * via `@UseInterceptors()` despite the name. Also `@AuditLog`'d — a
+   * tenant weakening/strengthening a legal-floor-adjacent config like
+   * leave defaults is exactly the kind of sensitive mutation 0.9's audit
+   * log exists to capture automatically; the pre-upsert row (if any) is
+   * captured explicitly via `AuditCaptureService` since a generic
+   * interceptor has no way to know what "before" means for this route.
    */
   @Put('overrides/:countryCode')
-  @UseInterceptors(PermissionsGuard)
+  @UseInterceptors(PermissionsGuard, AuditInterceptor)
   @RequirePermissions(PERMISSIONS.COUNTRY_PACK_OVERRIDE_MANAGE)
+  @AuditLog('TenantCountryOverride', AUDIT_ACTIONS.UPDATE)
   async putOverride(
     @Param('countryCode') countryCode: string,
     @Body(new ZodValidationPipe(tenantCountryOverrideSchema)) body: TenantCountryOverrideInput,
@@ -92,6 +108,11 @@ export class CountryPacksController {
         throw error;
       }
     }
+
+    const existing = await tx.tenantCountryOverride.findUnique({
+      where: { tenantId_countryCode: { tenantId, countryCode: validCountryCode } },
+    });
+    this.auditCapture.setBefore(existing?.overrides ?? null);
 
     await tx.tenantCountryOverride.upsert({
       where: { tenantId_countryCode: { tenantId, countryCode: validCountryCode } },

@@ -1,10 +1,10 @@
 /**
  * Structured domain events for every licensing-worthy action, emitted via
- * `@nestjs/event-emitter` and consumed today only by
- * `licensing/listeners/licensing-events.listener.ts` (which just logs
- * them) — the same deferred-persistence pattern `auth-events.ts`
- * documents: 0.9's real audit log persists against this contract instead,
- * without this module changing.
+ * `@nestjs/event-emitter` and consumed by
+ * `apps/api/src/audit/listeners/domain-event-audit.listener.ts`'s
+ * `DomainEventAuditListener` (0.9), which persists them into `audit_log`
+ * — the same contract `auth-events.ts` documents, without this module
+ * changing.
  */
 export const LICENSING_EVENTS = {
   ISSUED: 'licensing.issued',

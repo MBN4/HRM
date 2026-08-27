@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
-import { NotificationChannel } from '@hrm/shared';
+import { interpolateTemplate, NotificationChannel } from '@hrm/shared';
 
 const FALLBACK_LOCALE = 'en';
 
@@ -33,8 +33,8 @@ export class NotificationTemplateRenderer {
   ): Promise<RenderedNotification> {
     const template = await this.findTemplate(tx, eventType, channel, locale);
     return {
-      subject: template.subject ? this.substitute(template.subject, payload) : undefined,
-      body: this.substitute(template.body, payload),
+      subject: template.subject ? interpolateTemplate(template.subject, payload) : undefined,
+      body: interpolateTemplate(template.body, payload),
     };
   }
 
@@ -57,12 +57,6 @@ export class NotificationTemplateRenderer {
     }
     throw new NotFoundException(
       `No notification template is configured for event "${eventType}", channel "${channel}", locale "${locale}" (or fallback "${FALLBACK_LOCALE}").`,
-    );
-  }
-
-  private substitute(template: string, vars: Record<string, unknown>): string {
-    return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) =>
-      vars[key] !== undefined && vars[key] !== null ? String(vars[key]) : '',
     );
   }
 }

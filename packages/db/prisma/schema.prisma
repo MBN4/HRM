@@ -21,12 +21,13 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Future partitioned tables (not created in this step — tracked in
-// /CLAUDE.md § Not yet built as 0.9 "audit_log" and a later HR phase for
-// "attendance"):
+// Future partitioned tables:
 //
 //   - attendance  — one row per clock-in/out event; extremely high volume.
 //   - audit_log   — one row per mutating action across the whole system.
+//     Created in step 0.9 (see AuditLog below) as PARTITION-READY (composite
+//     primary key) but NOT actually partitioned yet — the `PARTITION BY
+//     RANGE` migration itself is Phase 5.2.
 //
 // Both MUST be created as PARTITIONED tables from day one — retrofitting
 // partitioning onto a live, non-partitioned table at scale is a painful
@@ -98,6 +99,9 @@ model Tenant {
   notifications           Notification[]
   notificationDeliveries  NotificationDelivery[]
   notificationPreferences NotificationPreference[]
+  auditLogs               AuditLog[]
+  customFieldDefinitions  CustomFieldDefinition[]
+  customFieldValueSets    CustomFieldValueSet[]
 
   @@map("tenants")
 }
@@ -899,4 +903,128 @@ model NotificationTemplate {
   @@unique([eventType, channel, locale, version])
   @@index([eventType, channel, locale, isActive])
   @@map("notification_templates")
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (step 0.9). Append-only, immutable record of sensitive actions
+// across the whole system — fed by two sources: (1) `AuditInterceptor`
+// (`apps/api/src/audit`), wrapping specific HTTP mutations, and (2) a
+// consolidated domain-event listener replacing the placeholder loggers
+// `auth`/`licensing`/`workflow`'s own listeners used to be (see
+// /CLAUDE.md § Conventions → Audit log for the full write-up). Tenant-scoped,
+// ordinary RLS applies for reads/inserts — but UNLIKE every other
+// tenant-scoped table, `hrm_app` is granted NO `UPDATE`/`DELETE` at all (see
+// the `enable_rls_and_immutability_for_audit_log` migration): immutability
+// is enforced at the database layer, not just by this table having no
+// update/delete application code path.
+//
+// PARTITION-READY, not yet partitioned: primary key is the COMPOSITE
+// `(id, occurredAt)`, per the note above the `Tenant` model — Postgres
+// requires the partition key to be part of every unique constraint/PK on a
+// partitioned table, so this shape is chosen now so Phase 5.2's
+// `PARTITION BY RANGE (occurred_at)` migration is not a breaking PK change
+// later. `action`/`entityType` are free-form strings, not enums — same
+// reasoning as `WorkflowInstance.entityType`/`Notification.eventType`: a
+// closed catalog here would mean a migration for every new audited action.
+model AuditLog {
+  id         String   @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  // Null when the action was system/platform-initiated (no authenticated
+  // user in the request context) — same "nullable system actor" convention
+  // as WorkflowAction.actorUserId for ESCALATE/AUTO_APPROVE.
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  // True when the action came through an unauthenticated @PlatformRoute()
+  // (see /CLAUDE.md § Conventions → Platform context) — there is no
+  // per-user actor to attach in that case, only "this was a platform
+  // operation".
+  actorPlatform Boolean @default(false) @map("actor_platform")
+  action        String
+  entityType    String  @map("entity_type")
+  entityId      String? @map("entity_id")
+  // Redacted (see @hrm/shared's `redactAuditPayload`) before ever reaching
+  // this column — secrets (passwords, tokens, signed license material)
+  // must never appear here even transiently within one transaction.
+  before   Json?
+  after    Json?
+  metadata Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([id, occurredAt])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, actorUserId])
+  @@map("audit_log")
+}
+
+// ---------------------------------------------------------------------------
+// Custom fields (step 0.9). Lets a tenant extend a core entity with its own
+// typed fields WITHOUT a schema migration — see /CLAUDE.md § Conventions →
+// Custom fields. `entityType` is a free-form string (e.g. the future
+// "Employee"), the SAME polymorphic-by-string pattern `WorkflowInstance`/
+// `Notification` already use, for the same reason: a closed catalog here
+// would mean a migration every time a new entity becomes custom-field-aware.
+// Both tables are tenant-scoped, ordinary RLS applies.
+// ---------------------------------------------------------------------------
+
+enum CustomFieldType {
+  STRING
+  NUMBER
+  DATE
+  BOOLEAN
+  ENUM
+}
+
+// A tenant-defined field on one entity type — e.g. "Employee" /
+// "shirt_size" / ENUM / ["S","M","L","XL"]. Validated against
+// `@hrm/shared`'s `customFieldDefinitionSchema` on every write, same "JSON
+// column has no schema-level guarantee of its own" posture as every other
+// JSON-configured feature in this codebase (Country Pack config, workflow
+// approver rules, ...).
+model CustomFieldDefinition {
+  id         String          @id @default(uuid()) @db.Uuid
+  tenantId   String          @map("tenant_id") @db.Uuid
+  entityType String          @map("entity_type")
+  fieldKey   String          @map("field_key")
+  label      String
+  fieldType  CustomFieldType @map("field_type")
+  isRequired Boolean         @default(false) @map("is_required")
+  // Allowed values, ENUM fields only (validated as a non-empty string[] at
+  // the app layer); null/ignored for every other fieldType.
+  options   Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, entityType, fieldKey])
+  @@index([tenantId, entityType])
+  @@map("custom_field_definitions")
+}
+
+// One row per (entityType, entityId) holding ALL of that entity's custom
+// field values as a single JSONB map (`{ [fieldKey]: value }`) — simpler and
+// sufficiently scalable for this step vs. one row per field per entity, and
+// mirrors "typed... with a JSONB storage approach" from this step's brief.
+// Every write is re-validated against the entity type's current
+// `CustomFieldDefinition` rows (type-checked per field, required fields
+// present, ENUM values within `options`) — see
+// `CustomFieldValueService.setValues`.
+model CustomFieldValueSet {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  values     Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, entityId])
+  @@index([tenantId, entityType])
+  @@map("custom_field_value_sets")
 }

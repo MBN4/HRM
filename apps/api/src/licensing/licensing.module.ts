@@ -7,7 +7,6 @@ import { LicenseVerificationService } from './license-verification.service';
 import { LicensingAdminController } from './licensing-admin.controller';
 import { LicensingAdminService } from './licensing-admin.service';
 import { LicensingController } from './licensing.controller';
-import { LicensingEventsListener } from './listeners/licensing-events.listener';
 import { SeatCapService } from './seat-cap.service';
 
 @Module({
@@ -20,7 +19,6 @@ import { SeatCapService } from './seat-cap.service';
     LicenseActivationService,
     LicensingAdminService,
     SeatCapService,
-    LicensingEventsListener,
   ],
   exports: [FeatureFlagResolutionService, FeatureFlagGuard],
 })
