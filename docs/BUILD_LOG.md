@@ -983,3 +983,91 @@ XFieldUpdateOperationsInput` union (Prisma's `{set: X}` update-operation
     change (176 total in `apps/api`; 190 including `packages/db`'s 14).
     Full-repo `pnpm build` (5/5), `pnpm lint` (7/7), `pnpm test` (4/4
     tasks) all green.
+- **1.2 Leave module — done — 2026-08-27.** Consumes four Phase 0/1 systems
+  rather than reimplementing any of them — the workflow engine (0.7) for
+  approval, Country Packs (0.5) for entitlements/holidays/weekends, the
+  Employee/manager relation (1.1) for approver resolution, and the 0.8
+  BullMQ queue pattern for scheduled accrual. Full design in
+  [`docs/conventions/leave.md`](./conventions/leave.md). Files:
+  - `packages/db/prisma/schema.prisma` — `LeaveType` enum (ANNUAL/SICK/
+    MATERNITY/PATERNITY — a CLOSED catalog mirroring `CountryPackConfig.
+leaveDefaults`' four fixed keys, not a free-form `entityType` string, the
+    same "some things ARE a fixed set" exception `CustomFieldType` already
+    takes), `LeaveRequestStatus` enum, `LeaveBalance` (one row per
+    employee/leaveType/calendar-year, `entitledDays` a snapshot of the
+    resolved pack+override entitlement, `accruedDays`/`carriedOverDays`/
+    `usedDays` — available balance is `accruedDays + carriedOverDays -
+usedDays`, derived at read time, never stored), `LeaveRequest`
+    (`workflowInstanceId` a plain UUID reference — no FK — to the
+    `WorkflowInstance` it started, `balanceApplied` guards the workflow-
+    event listener against double-deducting), `LeaveAccrualRun` (one row
+    per employee/leaveType/calendar-month the accrual worker has
+    processed — the DB-layer half of accrual idempotency), plus back-
+    relations on `Tenant`/`Employee`.
+  - `packages/db/prisma/migrations/20260827184026_add_leave_module/` — the
+    two enums and three tables (generated via `prisma migrate diff` +
+    `migrate deploy`; the SAME stray-empty-migration-folder situation 1.1
+    hit recurred on the first `migrate diff` attempt — folder deleted, its
+    `_prisma_migrations` row deleted directly, before the real migration
+    was written).
+  - `packages/db/prisma/migrations/20260827184100_enable_rls_for_leave_module/`
+    — `ENABLE`/`FORCE ROW LEVEL SECURITY` + the standard `tenant_isolation`
+    policy on all three new tables, identical pattern to every other
+    tenant-owned table.
+  - `packages/shared/src/validators/leave.validator.ts` — `LEAVE_TYPES`/
+    `LEAVE_REQUEST_STATUSES` const-array/type-key pairs,
+    `createLeaveRequestSchema` (`.strict()` + a `.refine()` that
+    `endDate >= startDate`), `adjustLeaveBalanceSchema`,
+    `runLeaveAccrualSchema`.
+  - `packages/shared/src/constants/permissions.ts` — three new permissions
+    (`leave.read`/`leave.write`/`leave.approve`), seeded onto
+    `HR_MANAGER`/`MANAGER` (all three) and `EMPLOYEE` (read + write only,
+    self-service) — `TENANT_ADMIN` already gets everything via
+    `ALL_PERMISSIONS`.
+  - `apps/api/src/leave/` — `leave-country-pack.util.ts`
+    (`resolveLeavePackConfig`, the explicit-`tx` duplicate of
+    `CountryPackResolutionService`'s branch→pack→override resolution, the
+    SAME pattern `employee-country-pack.util.ts` (1.1) established, needed
+    here for the SAME reason: this module's entitlement/day-count
+    resolution runs from both an HTTP request and the accrual worker),
+    `leave-day-calculator.ts` (`countBusinessDays`, pure/UTC-safe weekend +
+    public-holiday exclusion), `leave-entitlement.util.ts`
+    (`entitlementForType`, the one place that maps a `LeaveType` to its
+    `leaveDefaults` key), `leave-balance.service.ts` (`LeaveBalanceService`
+    — balance row lifecycle: get-or-create with a snapshotted entitlement,
+    deduct/restore/adjust), `leave-response.dto.ts`, `leave.service.ts`
+    (`LeaveService` — submit/list/get/balances/calendar/conflicts; submit
+    checks the balance BEFORE creating anything, then starts a real
+    `WorkflowInstance` via `WorkflowEngineService.startInstance` — no
+    bespoke approval logic at all), `leave-workflow-events.listener.ts`
+    (`LeaveWorkflowEventsListener`, subscribes to the workflow engine's own
+    `workflow.approved`/`workflow.rejected`/`workflow.canceled` events
+    filtered to `entityType === "LeaveRequest"` — the ONLY leave-specific
+    reaction to the generic engine, applying the balance deduction/
+    restore side-effect it has no way to know about itself), `leave.
+constants.ts`, `leave.controller.ts` (`LeaveController` — deliberately NO
+    approve/reject/cancel route; those are the generic 0.7 workflow
+    routes), `leave.module.ts`; `accrual/leave-accrual.service.ts`
+    (`LeaveAccrualService`, the BullMQ producer — `POST /leave/accrual/run`
+    is today's manual trigger, not wired to a real cron yet, the same
+    documented tradeoff 0.7's `WorkflowEscalationService.
+sweepOverdueSteps` already takes), `accrual/leave-accrual.processor.ts`
+    (`LeaveAccrualProcessor`, the worker — iterates a tenant's `ACTIVE`
+    employees, wraps each employee/leaveType/period unit in
+    `IdempotencyService.execute()` — 0.10's Redis-backed primitive, called
+    directly rather than via the HTTP-only `@Idempotent()` decorator, plus
+    the `LeaveAccrualRun` unique constraint as a DB-layer backstop),
+    `accrual/leave-proration.util.ts` (`prorationFactorForJoinMonth` — a
+    mid-month joiner accrues only the remaining days of that month; a
+    future-dated joiner accrues nothing for a not-yet-started period).
+  - `apps/api/src/queue/queue.constants.ts` — new `LEAVE_ACCRUAL_QUEUE`
+    constant, registered via `BullModule.registerQueue()` in
+    `leave.module.ts`, the same reusable pattern 0.8/1.1 established.
+  - `apps/api/src/app.module.ts` — registers `LeaveModule`.
+  - `apps/api/test/leave.e2e-spec.ts` — 13 integration tests over real
+    HTTP — see docs/conventions/leave.md § Verified-by for the full list.
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379`: all 13 new tests pass, all 176 pre-existing
+    `apps/api` tests still pass with no behavior change (189 total in
+    `apps/api`; 203 including `packages/db`'s 14). Full-repo `pnpm build`
+    (5/5), `pnpm lint` (7/7), `pnpm test` (4/4 tasks) all green.

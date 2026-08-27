@@ -107,6 +107,9 @@ model Tenant {
   employeeEmergencyContacts EmployeeEmergencyContact[]
   employeeDocuments         EmployeeDocument[]
   employeeImportJobs        EmployeeImportJob[]
+  leaveBalances             LeaveBalance[]
+  leaveRequests             LeaveRequest[]
+  leaveAccrualRuns          LeaveAccrualRun[]
 
   @@map("tenants")
 }
@@ -1160,8 +1163,11 @@ model Employee {
   dependents        EmployeeDependent[]
   emergencyContacts EmployeeEmergencyContact[]
   documents         EmployeeDocument[]
+  leaveBalances     LeaveBalance[]
+  leaveRequests     LeaveRequest[]
+  leaveAccrualRuns  LeaveAccrualRun[]
 
-  // Lets other tenant-scoped tables (future Leave/Attendance/Payroll) define
+  // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
   // table, same pattern as every other entity in this schema.
   @@unique([tenantId, id])
@@ -1278,4 +1284,138 @@ model EmployeeImportJob {
 
   @@index([tenantId, status])
   @@map("employee_import_jobs")
+}
+
+// ---------------------------------------------------------------------------
+// Leave management (step 1.2, Phase 1). Consumes four Phase 0/1 systems
+// rather than reimplementing any of them — see docs/conventions/leave.md:
+// Country Packs (0.5) for entitlements/holidays/weekends, the workflow
+// engine (0.7) for approval (a leave request just starts a WorkflowInstance
+// with entityType "LeaveRequest" — there is no bespoke approve/reject logic
+// here), the Employee/manager relation (1.1) for approver resolution (free,
+// via 0.7's already-updated MANAGER resolver), and the 0.8 BullMQ queue
+// pattern for scheduled accrual.
+// ---------------------------------------------------------------------------
+
+// A CLOSED, code-level catalog — NOT a free-form-string `entityType` like
+// `WorkflowInstance`/`CustomFieldDefinition` — because it mirrors the four
+// fixed keys `CountryPackConfig.leaveDefaults` already commits to
+// (annualDays/sickDays/maternityDays/paternityDays). The ENTITLEMENT amount
+// for each type is fully country/tenant-pack-driven (see
+// LeaveEntitlementService); only the catalog of TYPES itself is fixed, the
+// same "some things ARE a fixed, closed set" exception `CustomFieldType`
+// already takes to this codebase's usual free-form-string convention.
+enum LeaveType {
+  ANNUAL
+  SICK
+  MATERNITY
+  PATERNITY
+}
+
+enum LeaveRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELED
+}
+
+// One row per (employee, leaveType, calendar year) — tenant-scoped, ordinary
+// RLS. `entitledDays` is a SNAPSHOT of the effective Country Pack (+ tenant
+// override) entitlement resolved when this row was first created — see
+// LeaveEntitlementService; it is not re-resolved on every read, so a
+// mid-year override change does not retroactively rewrite an employee's
+// already-running balance for that year (a deliberate, documented choice —
+// see docs/conventions/leave.md). `accruedDays` is built up incrementally by
+// the scheduled accrual job (LeaveAccrualService); `usedDays` is
+// incremented/decremented only by the LeaveRequest workflow-event listener,
+// never directly by a client. Available balance = accruedDays +
+// carriedOverDays - usedDays, computed at read time, not stored.
+model LeaveBalance {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  employeeId      String    @map("employee_id") @db.Uuid
+  leaveType       LeaveType @map("leave_type")
+  periodYear      Int       @map("period_year")
+  entitledDays    Float     @map("entitled_days")
+  accruedDays     Float     @default(0) @map("accrued_days")
+  carriedOverDays Float     @default(0) @map("carried_over_days")
+  usedDays        Float     @default(0) @map("used_days")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, employeeId, leaveType, periodYear])
+  @@index([tenantId, employeeId])
+  @@map("leave_balances")
+}
+
+// One employee's request for one contiguous date range of one leave type.
+// `days` is the resolved business-day count (weekends + that branch's public
+// holidays excluded — see LeaveDayCalculator), computed once at submission,
+// same "frozen snapshot" posture `WorkflowInstance.dataSnapshot` already
+// takes elsewhere in this schema. `workflowInstanceId` is a plain UUID
+// reference (no FK relation) to the `WorkflowInstance` this request started
+// — the SAME "just an id, not a structural relation" pattern
+// `WorkflowInstanceStep.delegatedToUserId`/`escalatedToUserId` already use,
+// consistent with the workflow engine's own polymorphic, FK-free
+// `entityType`/`entityId` design (this table IS what `entityId` points at).
+// `balanceApplied` guards the workflow-event listener against double-
+// deducting/double-restoring the balance if a `workflow.approved`/
+// `workflow.rejected`/`workflow.canceled` event were ever (re)delivered more
+// than once.
+model LeaveRequest {
+  id                 String             @id @default(uuid()) @db.Uuid
+  tenantId           String             @map("tenant_id") @db.Uuid
+  employeeId         String             @map("employee_id") @db.Uuid
+  leaveType          LeaveType          @map("leave_type")
+  startDate          DateTime           @map("start_date") @db.Date
+  endDate            DateTime           @map("end_date") @db.Date
+  days               Float
+  reason             String?
+  status             LeaveRequestStatus @default(PENDING)
+  workflowInstanceId String?            @map("workflow_instance_id") @db.Uuid
+  submittedByUserId  String?            @map("submitted_by_user_id") @db.Uuid
+  balanceApplied     Boolean            @default(false) @map("balance_applied")
+  decidedAt          DateTime?          @map("decided_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  // Lets a future module (payroll, ...) define a composite FK of
+  // (tenantId, id) -> this table, same pattern as every other entity here.
+  @@unique([tenantId, id])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, startDate, endDate])
+  @@map("leave_requests")
+}
+
+// One row per (employee, leaveType, calendar month) the scheduled accrual
+// job has successfully processed — this table IS the idempotency record for
+// accrual, alongside (defense-in-depth, not instead of) the Redis-backed
+// `IdempotencyService` the accrual worker also wraps each employee's run
+// with (see docs/conventions/leave.md and docs/conventions/resilience.md).
+// The `@@unique` constraint below is what makes a re-run of the same period
+// for the same employee a safe no-op at the DATABASE layer even if the
+// Redis-layer guard were somehow bypassed.
+model LeaveAccrualRun {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  employeeId     String    @map("employee_id") @db.Uuid
+  leaveType      LeaveType @map("leave_type")
+  periodYear     Int       @map("period_year")
+  periodMonth    Int       @map("period_month")
+  accruedAmount  Float     @map("accrued_amount")
+  proratedFactor Float     @default(1) @map("prorated_factor")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, employeeId, leaveType, periodYear, periodMonth])
+  @@index([tenantId, periodYear, periodMonth])
+  @@map("leave_accrual_runs")
 }

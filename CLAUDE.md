@@ -86,6 +86,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/resilience.md`](./docs/conventions/resilience.md)                           | Per-tenant rate limiting, circuit breakers, load shedding, connection-pool protection, idempotency, health/graceful shutdown. (0.10)                                  |
 | [`docs/conventions/tooling-eslint-config.md`](./docs/conventions/tooling-eslint-config.md)     | ESLint/pre-commit conventions for adding a new workspace (`root: true`, `parserOptions.project` overrides).                                                           |
 | [`docs/conventions/employee.md`](./docs/conventions/employee.md)                               | The core HR entity — encryption at rest, country-driven required fields, custom fields, org chart, bulk import, and feeding 0.7's workflow approver-rule seams. (1.1) |
+| [`docs/conventions/leave.md`](./docs/conventions/leave.md)                                     | Leave requests as a pure consumer of the workflow engine, country-driven entitlements/holidays/weekends, balance tracking, and scheduled/idempotent accrual. (1.2)    |
 
 ## 5. Build log summary
 
@@ -128,6 +129,11 @@ per step, kept here for a fast overview.
   import, document storage (S3/MinIO), and feeding 0.7's workflow
   approver-rule seams with real org-chart data. See
   [`docs/conventions/employee.md`](./docs/conventions/employee.md).
+- **1.2** — Leave module: a leave request is just a `WorkflowInstance`
+  (no bespoke approval logic), country-driven entitlements/holidays/
+  weekends via Country Packs, balance tracking, and idempotent scheduled
+  accrual via the 0.8 BullMQ pattern. See
+  [`docs/conventions/leave.md`](./docs/conventions/leave.md).
 
 ## 6. Not yet built
 
@@ -149,8 +155,8 @@ notifications, audit/custom-fields/i18n, and the resilience chassis all
 apply automatically to any new module/route with no additional wiring.
 
 - [x] **1.1** Employee module (core HR entity)
-- [ ] **1.2+** Leave, Attendance, ESS/MSS, dashboard — _scope not yet
-      defined_
+- [x] **1.2** Leave module
+- [ ] **1.3+** Attendance, ESS/MSS, dashboard — _scope not yet defined_
 - [ ] **Phase 2** — _scope not yet defined_
 - [ ] **Phase 3** — _scope not yet defined_
 - [ ] **Phase 4** — _scope not yet defined_

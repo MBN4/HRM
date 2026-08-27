@@ -10,6 +10,7 @@ import { EncryptionModule } from './common/encryption/encryption.module';
 import { CountryPacksModule } from './country-packs/country-packs.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { EmployeesModule } from './employees/employees.module';
+import { LeaveModule } from './leave/leave.module';
 import { LicensingModule } from './licensing/licensing.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { QueueModule } from './queue/queue.module';
@@ -46,6 +47,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     EncryptionModule,
     StorageModule,
     EmployeesModule,
+    LeaveModule,
   ],
   controllers: [AppController],
   providers: [AppService],
