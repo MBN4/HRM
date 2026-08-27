@@ -1,7 +1,8 @@
 # License signing keys
 
 RS256 keypair used to sign and verify lifetime/on-prem license files (see
-/CLAUDE.md § Conventions → Licensing / feature flags → Lifetime mode).
+docs/conventions/licensing-feature-flags.md → Two delivery modes →
+Lifetime mode).
 
 - `license-public-dev.pem` — **committed.** The public key ships in every
   build, SaaS and on-prem alike: it is all `LicenseVerificationService`

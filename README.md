@@ -15,14 +15,14 @@ brief, non-negotiables, conventions, and the running build log.
 
 ## Workspaces
 
-| Path               | Purpose                                   |
-| ------------------ | ------------------------------------------ |
-| `apps/api`          | NestJS backend                            |
-| `apps/admin`        | Vendor super-admin console (Next.js)      |
-| `apps/portal`       | Tenant org portal (Next.js)               |
-| `packages/db`       | Prisma schema + generated client          |
-| `packages/shared`   | Shared types, DTOs, zod validators, constants |
-| `packages/config`   | Shared ESLint / TypeScript / Prettier config |
+| Path              | Purpose                                       |
+| ----------------- | --------------------------------------------- |
+| `apps/api`        | NestJS backend                                |
+| `apps/admin`      | Vendor super-admin console (Next.js)          |
+| `apps/portal`     | Tenant org portal (Next.js)                   |
+| `packages/db`     | Prisma schema + generated client              |
+| `packages/shared` | Shared types, DTOs, zod validators, constants |
+| `packages/config` | Shared ESLint / TypeScript / Prettier config  |
 
 ## Prerequisites
 
@@ -78,20 +78,23 @@ brief, non-negotiables, conventions, and the running build log.
 
 ## Common commands
 
-| Command             | Description                              |
-| -------------------- | ----------------------------------------- |
-| `pnpm build`          | Build all workspaces (via Turborepo)     |
-| `pnpm dev`            | Run all apps in watch mode               |
-| `pnpm lint`           | Lint all workspaces                      |
-| `pnpm test`           | Run tests in all workspaces              |
-| `pnpm format`         | Format the repo with Prettier            |
-| `pnpm db:generate`    | Regenerate the Prisma client             |
-| `pnpm db:migrate`     | Run Prisma migrations (dev)              |
-| `pnpm db:studio`      | Open Prisma Studio                       |
+| Command            | Description                          |
+| ------------------ | ------------------------------------ |
+| `pnpm build`       | Build all workspaces (via Turborepo) |
+| `pnpm dev`         | Run all apps in watch mode           |
+| `pnpm lint`        | Lint all workspaces                  |
+| `pnpm test`        | Run tests in all workspaces          |
+| `pnpm format`      | Format the repo with Prettier        |
+| `pnpm db:generate` | Regenerate the Prisma client         |
+| `pnpm db:migrate`  | Run Prisma migrations (dev)          |
+| `pnpm db:studio`   | Open Prisma Studio                   |
 
 ## Conventions & project memory
 
-Tenancy model, country/tenant resolution, licensing, and everything else
-architectural is tracked in [`CLAUDE.md`](./CLAUDE.md), which also serves as
-an append-only build log and a checklist of what is/isn't built yet. Read it
-before starting new work.
+[`CLAUDE.md`](./CLAUDE.md) is the project's persistent memory and the entry
+point for architectural context — read it before starting new work. It
+indexes the detail: the full append-only build log lives in
+[`docs/BUILD_LOG.md`](./docs/BUILD_LOG.md), and tenancy model,
+country/tenant resolution, licensing, and everything else architectural is
+tracked one file per subsystem under [`docs/conventions/`](./docs/conventions/).
+`CLAUDE.md` also carries the checklist of what is/isn't built yet.
