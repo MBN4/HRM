@@ -5,12 +5,14 @@ import {
   refreshSchema,
   requestPasswordResetSchema,
   resetPasswordSchema,
+  setPushTokenSchema,
   PERMISSIONS,
   type ChangePasswordInput,
   type LoginInput,
   type RefreshInput,
   type RequestPasswordResetInput,
   type ResetPasswordInput,
+  type SetPushTokenInput,
 } from '@hrm/shared';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { Priority } from '../resilience/load-shedding/priority.decorator';
@@ -71,6 +73,19 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async changePassword(@Body(new ZodValidationPipe(changePasswordSchema)) body: ChangePasswordInput) {
     await this.auth.changePassword(this.requireTenantId(), this.tenantContext.getTx(), this.requireUserId(), body);
+  }
+
+  /**
+   * Registers/clears the caller's own push-notification device token (step
+   * 1.4, mobile ESS) — see `User.pushToken`'s doc comment in
+   * `schema.prisma`. Deliberately inline here (no dedicated service
+   * method), the same "self-contained, no bigger change" posture `/auth/me`
+   * itself already takes for a one-column self-mutation.
+   */
+  @Post('push-token')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async setPushToken(@Body(new ZodValidationPipe(setPushTokenSchema)) body: SetPushTokenInput) {
+    await this.tenantContext.getTx().user.update({ where: { id: this.requireUserId() }, data: { pushToken: body.pushToken } });
   }
 
   @Post('request-password-reset')

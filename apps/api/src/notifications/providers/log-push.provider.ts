@@ -2,10 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { NotificationProvider, NotificationProviderSendParams } from '@hrm/shared';
 
 /**
- * Dev/no-op push provider. No device-token field exists on `User` yet —
- * same rationale as `log-sms.provider.ts`. A real FCM-backed provider
- * swapped in later resolves an actual device token instead of this
- * placeholder.
+ * Dev/log-only push provider — `params.to` is the recipient's real
+ * registered device token (`User.pushToken`, set via `POST
+ * /auth/push-token`, step 1.4) when one exists, else the same user-id
+ * placeholder `log-sms.provider.ts` uses. This provider only LOGS either
+ * way; a real FCM/Expo-push-API-backed provider swapped in later (one DI
+ * binding, same seam as every other channel) sends to `params.to` for
+ * real instead.
  */
 @Injectable()
 export class LogPushProvider implements NotificationProvider {

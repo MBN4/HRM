@@ -104,11 +104,17 @@ Promise<void>`) is bound per channel behind a DI token
   container wired into `docker-compose.yml` and CI, out of scope for
   proving the abstraction itself, which the log provider already does.
   `IN_APP` has no provider — persisting the row IS the delivery.
-  Neither SMS nor PUSH has a real destination field on `User` yet (no
-  phone number / device token — that belongs to a future Employee/
-  profile module); the dev providers log the recipient's userId as a
-  placeholder `to`, documented at each provider as a seam a real
-  provider will resolve properly.
+  SMS still has no real destination field on `User` (no phone number —
+  that belongs to a future Employee/profile module); its dev provider
+  logs the recipient's userId as a placeholder `to`. **PUSH gained a real
+  destination in step 1.4**: `User.pushToken` (nullable, set/cleared via
+  `POST /auth/push-token`, registered by the mobile app on login/logout —
+  see [frontend-ess-mss.md](./frontend-ess-mss.md)) — `NotificationDeliveryService`
+  now uses it as `to` when present, falling back to the same userId
+  placeholder otherwise. `LogPushProvider` itself is UNCHANGED (still only
+  logs) — this only wires the REGISTRATION half for real; a genuine
+  FCM/Expo-push-API-calling provider is still future work, one DI binding
+  away.
 - **Templates + i18n.** "Externalize all template strings" means
   `NotificationTemplate` rows (seeded from
   `packages/db/src/seed-notification-templates.ts`, the same

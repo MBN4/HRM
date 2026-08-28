@@ -134,11 +134,20 @@ on [tenant-resolution.md](./tenant-resolution.md).
   penalized by attempts that came before it succeeded; no secrets appear
   in code (JWT/DB/Redis secrets are all env-sourced, per existing
   convention).
+- **`POST /auth/push-token`** (added in step 1.4 for the mobile ESS app —
+  see [frontend-ess-mss.md](./frontend-ess-mss.md)) registers/clears the
+  caller's own `User.pushToken` (`{ pushToken: string | null }`) — a
+  one-column, self-mutation route built inline in `AuthController` (no
+  dedicated service method), the same "self-contained, no bigger change"
+  posture `/auth/me` already takes for reading the caller's own context.
+  Feeds the notification hub's `PUSH` channel — see
+  [notifications-queues.md](./notifications-queues.md) → Provider seam.
 - Verified end-to-end over real HTTP by `apps/api/test/auth-rbac.e2e-spec.ts`
-  (16 tests: login incl. no-enumeration, refresh rotation + reuse
+  (18 tests: login incl. no-enumeration, refresh rotation + reuse
   revoking the whole family, logout vs. logout-all, RBAC permit/deny,
   field-level include/omit, branch-scoping restricted/unrestricted,
   cross-tenant login rejection + cross-tenant token replay rejection +
-  RLS still holding, rate-limit 429) plus `apps/api/test/tenant-resolution.e2e-spec.ts`
+  RLS still holding, rate-limit 429, push-token register/clear +
+  deny-by-default unauthenticated) plus `apps/api/test/tenant-resolution.e2e-spec.ts`
   (0.3's suite, updated to authenticate now that `/tenancy/*` correctly
   requires it).

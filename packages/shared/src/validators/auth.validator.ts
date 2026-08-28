@@ -32,3 +32,13 @@ export const resetPasswordSchema = z.object({
   newPassword: passwordSchema,
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+/**
+ * Registers/clears the caller's own push-notification device token (step
+ * 1.4, mobile ESS) — `null` deregisters (e.g. on logout), matching
+ * `User.pushToken`'s own nullable "no device registered" semantics.
+ */
+export const setPushTokenSchema = z.object({
+  pushToken: z.string().min(1).max(512).nullable(),
+});
+export type SetPushTokenInput = z.infer<typeof setPushTokenSchema>;

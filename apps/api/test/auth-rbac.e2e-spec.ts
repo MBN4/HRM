@@ -227,6 +227,40 @@ describe('auth + RBAC + branch scoping + field-level permissions (e2e)', () => {
     });
   });
 
+  describe('push token — step 1.4 mobile ESS seam', () => {
+    it('registers a device token, then clears it back to null', async () => {
+      const session = (await login(TENANT_A_SLUG, employeeAEmail)).body;
+
+      await request(app.getHttpServer())
+        .post('/auth/push-token')
+        .set('Host', hostFor(TENANT_A_SLUG))
+        .set('Authorization', `Bearer ${session.accessToken}`)
+        .send({ pushToken: 'ExponentPushToken[test-token-123]' })
+        .expect(204);
+
+      const afterSet = await prisma.user.findUnique({ where: { id: session.userId } });
+      expect(afterSet?.pushToken).toBe('ExponentPushToken[test-token-123]');
+
+      await request(app.getHttpServer())
+        .post('/auth/push-token')
+        .set('Host', hostFor(TENANT_A_SLUG))
+        .set('Authorization', `Bearer ${session.accessToken}`)
+        .send({ pushToken: null })
+        .expect(204);
+
+      const afterClear = await prisma.user.findUnique({ where: { id: session.userId } });
+      expect(afterClear?.pushToken).toBeNull();
+    });
+
+    it('rejects an unauthenticated request', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/push-token')
+        .set('Host', hostFor(TENANT_A_SLUG))
+        .send({ pushToken: 'x' })
+        .expect(401);
+    });
+  });
+
   describe('RBAC', () => {
     it('allows a user holding the required permission', async () => {
       const { accessToken } = (await login(TENANT_A_SLUG, adminAEmail)).body;

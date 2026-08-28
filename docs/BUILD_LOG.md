@@ -1266,3 +1266,124 @@ e2e-spec.ts`'s bulk-import polling test under shared-infra contention
     across concurrently-running e2e files (reproduced failing once, then
     passing on an immediate re-run with zero code changes in between,
     confirming it's parallelism-timing flakiness, not a regression).
+- **1.4 ESS/MSS self-service UI — done — 2026-08-28.** A pure CONSUMPTION
+  layer surfacing 0.4/0.5/0.7/0.8/1.1/1.2/1.3 through real UI on the tenant
+  portal (`apps/portal`, Next.js 14 App Router) and a new mobile app
+  (`apps/mobile`, React Native/Expo) — no Phase 0/1 module's business logic
+  changed, only two small, additive backend reads/writes (below). Full
+  design in
+  [`docs/conventions/frontend-ess-mss.md`](./conventions/frontend-ess-mss.md).
+  Files:
+  - **Two minimal backend additions** (the only apps/api changes this
+    step): `GET /employees/me` (`apps/api/src/employees/employee.service.ts`'s
+    `findOwn` + a new controller route, registered before `:id`) — the one
+    genuinely missing read (no existing route can answer "which Employee
+    is the caller" on its own), branch-scope-bypassed since a caller's own
+    record is never out of their own scope. `POST /auth/push-token`
+    (`apps/api/src/auth/auth.controller.ts`, `setPushTokenSchema` in
+    `@hrm/shared`) + a new nullable `User.pushToken` column
+    (`packages/db/prisma/migrations/20260828123959_add_user_push_token/`)
+    — registers/clears the caller's own push device token, now read by
+    `NotificationDeliveryService` as the real `PUSH`-channel `to` address
+    (falling back to the old placeholder when absent) — `LogPushProvider`
+    itself is unchanged, still dev/log-only.
+  - `packages/shared/src/i18n/messages.ts` — the `UI_MESSAGES` catalog
+    grown from 9 keys to the full ESS/MSS vocabulary (profile/leave/
+    attendance/approvals/notifications/announcements/settings/auth/common),
+    in BOTH `en` and `ar` — no new mechanism, reusing 0.9's `translate()`/
+    `interpolateTemplate`.
+  - **`apps/portal`** (Next.js 14 App Router, new): Tailwind CSS + a
+    distinct "grounded teal" design system (`tailwind.config.ts`,
+    `globals.css`, `next/font/google` Inter + Noto Kufi Arabic);
+    `lib/tenant.ts` (subdomain-mirroring in production, `x-tenant-id`
+    header fallback for local dev — the SAME strategy 0.3 built for
+    clients with no per-tenant hostname); `lib/auth/` (two-token model,
+    in-memory access token, `localStorage` refresh token, single-in-
+    flight-dedup 401 refresh retry in `lib/api/client.ts`);
+    `lib/session/SessionProvider.tsx` (resolves the caller's own Employee
+    - effective Country Pack ONCE per session — the first real feed into
+      `I18nProvider`'s `rtl`/`locale` override props, with zero changes to
+      that existing component); `lib/api/*.ts` (thin typed wrappers per
+      endpoint); `components/ui/*` (Button/Card/Badge/Field/Modal/Alert/
+      EmptyState/Spinner — logical-property (`ms-`/`me-`/`ps-`/`pe-`/
+      `text-start`) Tailwind classes throughout, no RTL plugin needed);
+      `components/layout/{Sidebar,Topbar}.tsx`; full screen set under
+      `app/(app)/{dashboard,profile,leave,attendance,approvals,team,
+org-chart,notifications,announcements,settings}` plus `app/login`.
+      `/approvals` and `/team` consume ONLY the generic 0.7 workflow routes
+      and 1.2/1.3's existing read routes — zero new backend routes for
+      MSS. `docs/conventions/i18n-timezone-rtl.md`'s `I18nProvider` itself
+      was NOT modified — `(app)/layout.tsx` mounts a second, nested instance
+      fed real resolved values, gated behind a `ready` flag (a gotcha: the
+      provider's `locale`/`rtl` props are read only on ITS OWN initial
+      mount, so the mount itself had to be deferred, not the props pushed
+      through after).
+  - **`apps/portal/tests/`** — a Playwright suite (`playwright.config.ts`,
+    `global-setup.ts` seeding two real tenants/branches/roles/Country
+    Packs/workflow templates via `@hrm/db`'s own seed helpers and real
+    argon2-hashed passwords). 14 tests across `auth.spec.ts` (login via
+    the header strategy, wrong-password generic error, a hard reload
+    surviving via a REAL `/auth/refresh` round-trip since the access
+    token is memory-only, sign-out), `ess.spec.ts` (leave submission
+    creates a real `WorkflowInstance`; clock-in creates a real `OPEN`
+    `AttendanceRecord` tagged `WEB`), `mss.spec.ts` (approving from the
+    inbox drives the real workflow to `APPROVED` AND the real
+    `LeaveBalance.usedDays` deduction, polled per 1.2's own async-listener
+    posture), `rbac.spec.ts` (a plain employee sees no "Team" nav entry,
+    gets a graceful notice not a crash at `/team`), `rtl.spec.ts` (a
+    QA-branch employee renders `dir="rtl" lang="ar"`, a US-branch
+    employee `dir="ltr" lang="en"`, identical component tree), and
+    `tenant-isolation.spec.ts` (workspace-slug login switches tenants
+    with zero leakage; a real branch-restricted `UserBranch` row hides a
+    QA-branch report from a US-restricted manager's org chart).
+  - **`apps/mobile`** (new workspace, React Native/Expo, TypeScript,
+    Expo SDK 57): scope is ESS + clock-in + push ONLY, no MSS, per this
+    step's own brief. `src/lib/tenant.ts` (mobile has no hostname of its
+    own at all — ALWAYS the `x-tenant-id` header strategy, unlike the
+    portal's subdomain-first approach), `src/lib/auth/` (refresh token in
+    `expo-secure-store`, mirroring the portal's in-memory-access-token +
+    single-flight-refresh pattern), `src/i18n/` (the `UI_MESSAGES`/RTL
+    catalog duplicated as plain TS per the SAME precedent
+    `I18nProvider.tsx`'s cross-app duplication already sets — Metro/pnpm
+    workspace resolution of a hoisted source package added real friction
+    for content this small and stable), `src/i18n/useRtlSync.ts` (RTL on
+    React Native is NOT a live flip like the web — `I18nManager.forceRTL`
+    only takes effect from the NEXT launch, so this resolves the same
+    authoritative Country-Pack `locale.rtl` signal and triggers ONE
+    `Updates.reloadAsync()` when it disagrees with the current native
+    flag — a documented, accepted platform difference), full ESS screen
+    set (profile view/edit, leave apply/balances/history, attendance
+    clock-in/out via `expo-location`/`expo-image-picker` with
+    `source: 'MOBILE'` — the entire reason that enum value exists —
+    regularization, notifications, the announcements seam, settings),
+    `src/lib/push.ts` (`expo-notifications` + `expo-device`, registers a
+    real Expo push token against the new `POST /auth/push-token` on
+    login/rotation and deregisters on logout — delivery itself still goes
+    through the backend's dev/log-only `LogPushProvider`, a real
+    FCM/Expo-push-API provider is separate future work), `src/theme/tokens.ts`
+    (the portal's exact color palette, ported to plain RN `StyleSheet`
+    constants for visual consistency, no NativeWind). `apps/mobile/package.json`'s
+    `build` script is `expo export --platform android --platform ios`
+    (not the default `ios,android,web`) — this app was never asked to run
+    in a browser, and the default would otherwise fail requiring
+    `react-native-web` for a platform nobody requested; caught by running
+    the real root `pnpm build` via Turborepo, not just the app's own
+    scripts in isolation. `pnpm-workspace.yaml`/`turbo.json` needed ZERO
+    changes — the `apps/*` glob auto-registered it and its `build`/`lint`/
+    `test` npm scripts already match Turbo's existing task names.
+  - Verified: `apps/api` grew by 4 tests (2 for `GET /employees/me`'s
+    happy path + 404, 2 for `POST /auth/push-token`'s set/clear + deny-
+    unauthenticated) to 244, all passing; `packages/db`'s 14 unchanged —
+    258 total backend tests, zero regressions. `apps/portal`'s 14
+    Playwright tests all pass against real Postgres/Redis/MinIO and a
+    real running API. `apps/mobile`'s 19 Jest tests (pure-logic: i18n
+    catalog/RTL helpers, the API client's URL/header/401-refresh logic)
+    pass; `npx tsc --noEmit` and `npx eslint .` both clean; `npx
+expo-doctor` 21/21; `npx expo export --platform android --platform ios`
+    produces real Metro bundles for both platforms — the closest thing to
+    a build-verification smoke test available in a sandbox with no
+    simulator/device/EAS tooling (explicitly NOT claimed: any on-device or
+    visual verification, since none was possible here). Full-repo `pnpm
+build` and `pnpm lint` both green across all SEVEN workspaces (the six
+    from before plus `@hrm/mobile`), confirmed via Turborepo, not just
+    each package's scripts run in isolation.

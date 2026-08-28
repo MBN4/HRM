@@ -60,6 +60,7 @@ handled by configuration and feature flags, never by branching the code.
 | `apps/api`        | NestJS backend — all business logic, REST API                 |
 | `apps/admin`      | Vendor super-admin console (Next.js App Router)               |
 | `apps/portal`     | Tenant org portal (Next.js App Router)                        |
+| `apps/mobile`     | Employee self-service mobile app (React Native / Expo)        |
 | `packages/db`     | Prisma schema + generated client (`@hrm/db`)                  |
 | `packages/shared` | Shared types, DTOs, zod validators, constants (`@hrm/shared`) |
 | `packages/config` | Shared ESLint / TypeScript / Prettier config (`@hrm/config`)  |
@@ -88,6 +89,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/employee.md`](./docs/conventions/employee.md)                               | The core HR entity — encryption at rest, country-driven required fields, custom fields, org chart, bulk import, and feeding 0.7's workflow approver-rule seams. (1.1)                                                               |
 | [`docs/conventions/leave.md`](./docs/conventions/leave.md)                                     | Leave requests as a pure consumer of the workflow engine, country-driven entitlements/holidays/weekends, balance tracking, and scheduled/idempotent accrual. (1.2)                                                                  |
 | [`docs/conventions/attendance.md`](./docs/conventions/attendance.md)                           | The first high-volume module: partition-ready clock records, timezone-correct (incl. midnight-crossing) day attribution, pack-driven weekend/overtime, the biometric device seam, and regularization via the workflow engine. (1.3) |
+| [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md)               | ESS/MSS on the tenant portal + mobile app: client auth/tenant resolution, the session-aware i18n/RTL integration, how the UI consumes workflow/leave/attendance, field-omission handling. (1.4)                                     |
 
 ## 5. Build log summary
 
@@ -143,6 +145,15 @@ per step, kept here for a fast overview.
   rules, the biometric-device seam, and regularization as just another
   `WorkflowInstance`. See
   [`docs/conventions/attendance.md`](./docs/conventions/attendance.md).
+- **1.4** — ESS/MSS self-service UI on the tenant portal (`apps/portal`,
+  Next.js) and a new mobile app (`apps/mobile`, React Native/Expo, ESS +
+  clock-in + push only) — a pure consumption layer over 0.4–0.8/1.1–1.3,
+  plus two small additive backend endpoints (`GET /employees/me`,
+  `POST /auth/push-token`). Session-aware i18n/RTL (the first real use of
+  the resolved Country Pack's `locale.rtl`), field-omission-aware UI,
+  RBAC-gated rendering, and a real-browser Playwright suite for the
+  portal. See
+  [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md).
 
 ## 6. Not yet built
 
@@ -166,7 +177,7 @@ apply automatically to any new module/route with no additional wiring.
 - [x] **1.1** Employee module (core HR entity)
 - [x] **1.2** Leave module
 - [x] **1.3** Attendance & time-tracking module
-- [ ] **1.4+** ESS/MSS, dashboard — _scope not yet defined_
+- [x] **1.4** ESS/MSS self-service UI (tenant portal + mobile app)
 - [ ] **Phase 2** — _scope not yet defined_
 - [ ] **Phase 3** — _scope not yet defined_
 - [ ] **Phase 4** — _scope not yet defined_

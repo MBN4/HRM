@@ -257,6 +257,34 @@ describe('employees (e2e)', () => {
     });
   });
 
+  describe('GET /employees/me — step 1.4 ESS: resolving the caller\'s own employee record', () => {
+    it('404s when the caller has no linked Employee record', async () => {
+      await get('/employees/me', tokenEmployeeA).expect(404);
+    });
+
+    it('returns the caller\'s own profile, still field-gated by salary.view, regardless of who created it', async () => {
+      const selfUser = await prisma.user.create({
+        data: { tenantId: tenantAId, email: `self-${++usCounter}@emp-a.test`, hashedPassword: 'unused', status: 'ACTIVE' },
+      });
+      const employeeRoleA = await prisma.role.findUniqueOrThrow({
+        where: { tenantId_name: { tenantId: tenantAId, name: SYSTEM_ROLES.EMPLOYEE } },
+      });
+      await prisma.userRole.create({ data: { tenantId: tenantAId, userId: selfUser.id, roleId: employeeRoleA.id } });
+      const selfToken = jwt.sign({ sub: selfUser.id, tenantId: tenantAId });
+
+      const createRes = await post(
+        '/employees',
+        tokenHrA,
+        usEmployeePayload({ userId: selfUser.id, compensation: { baseSalary: 60000, salaryCurrency: 'USD' } }),
+      ).expect(201);
+
+      const meRes = await get('/employees/me', selfToken).expect(200);
+      expect(meRes.body.id).toBe(createRes.body.id);
+      expect(meRes.body.userId).toBe(selfUser.id);
+      expect('compensation' in meRes.body).toBe(false);
+    });
+  });
+
   describe('encryption at rest', () => {
     it('bank details and salary are stored encrypted, not plaintext, in the database', async () => {
       const plainAccountNumber = '000123456789';

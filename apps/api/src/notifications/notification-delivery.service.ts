@@ -117,8 +117,15 @@ export class NotificationDeliveryService {
       const rendered = await this.renderer.render(tx, eventType, channel, locale.language, payload);
 
       if (channel !== 'IN_APP') {
-        const recipient = await tx.user.findUniqueOrThrow({ where: { id: recipientUserId }, select: { id: true, email: true } });
-        const to = channel === 'EMAIL' ? recipient.email : recipient.id;
+        const recipient = await tx.user.findUniqueOrThrow({
+          where: { id: recipientUserId },
+          select: { id: true, email: true, pushToken: true },
+        });
+        // PUSH prefers the real registered device token (step 1.4's
+        // `POST /auth/push-token`) and falls back to the user id — the
+        // same documented placeholder as before — when no device is
+        // registered, so an un-registered recipient never breaks delivery.
+        const to = channel === 'EMAIL' ? recipient.email : channel === 'PUSH' && recipient.pushToken ? recipient.pushToken : recipient.id;
         const provider = this.providerFor(channel);
         await this.circuitBreaker.execute(`notification-provider:${channel}`, () =>
           provider.send({

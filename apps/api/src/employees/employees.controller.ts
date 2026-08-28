@@ -96,6 +96,20 @@ export class EmployeesController {
     return this.orgChart.build(this.tenantContext.getTx(), branchId, this.tenantContext.getBranchIds());
   }
 
+  /**
+   * Also registered before `GET /employees/:id` for the same routing
+   * reason. The one genuinely missing read this step's ESS profile screen
+   * needs — see `EmployeeService.findOwn`'s doc comment — added here
+   * rather than reusing any existing route, since none can resolve
+   * "which Employee is the caller" on their own.
+   */
+  @Get('me')
+  @UseInterceptors(PermissionsGuard, PermissionSerializerInterceptor)
+  @RequirePermissions(PERMISSIONS.EMPLOYEE_READ)
+  async findOwn(): Promise<EmployeeResponseDto> {
+    return this.employees.findOwn(this.tenantContext.getTx(), this.tenantContext.userId!);
+  }
+
   @Post('import')
   @UseInterceptors(PermissionsGuard, AuditInterceptor)
   @RequirePermissions(PERMISSIONS.EMPLOYEE_WRITE)

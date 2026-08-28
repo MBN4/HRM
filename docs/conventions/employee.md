@@ -221,16 +221,24 @@ Phase 0 being "complete" (see CLAUDE.md § 6).
 - **API surface** (`apps/api/src/employees/employees.controller.ts` +
   `apps/api/src/employees/documents/employee-documents.controller.ts`):
   `POST /employees`, `GET /employees` (paginated/filtered), `GET
-/employees/org-chart` (registered BEFORE `GET /employees/:id` in the
-  controller — Nest/Express route matching needs a literal path segment
-  declared before a colliding `:id` param route), `POST /employees/import`,
-  `GET /employees/import-jobs/:jobId`, `GET /employees/:id`, `PATCH
-/employees/:id`, and (nested under `employees/:employeeId/documents`)
-  `POST`/`GET`/`GET :documentId` for document upload/list/download. Every
-  mutating route is deny-by-default (`employee.write`); reads need
-  `employee.read`; both were seeded onto system roles back in 0.4 in
-  anticipation of this module. `PermissionSerializerInterceptor` is applied
-  to every route that returns an `EmployeeResponseDto`.
+/employees/org-chart` and `GET /employees/me` (both registered BEFORE
+  `GET /employees/:id` in the controller — Nest/Express route matching
+  needs a literal path segment declared before a colliding `:id` param
+  route), `POST /employees/import`, `GET /employees/import-jobs/:jobId`,
+  `GET /employees/:id`, `PATCH /employees/:id`, and (nested under
+  `employees/:employeeId/documents`) `POST`/`GET`/`GET :documentId` for
+  document upload/list/download. Every mutating route is deny-by-default
+  (`employee.write`); reads need `employee.read`; both were seeded onto
+  system roles back in 0.4 in anticipation of this module.
+  `PermissionSerializerInterceptor` is applied to every route that returns
+  an `EmployeeResponseDto`. **`GET /employees/me`** (added in step 1.4 for
+  the ESS portal/mobile profile screen — see
+  [frontend-ess-mss.md](./frontend-ess-mss.md)) resolves the CALLER's own
+  linked `Employee` via `EmployeeService.findOwn` (`Employee.findFirst({
+where: { userId } })`, `404` if none) and delegates to the same
+  `findById` every other read uses, with branch scoping deliberately
+  bypassed (`allowedBranchIds: null`) — a caller can always see their own
+  record regardless of which branch it's in.
 - **Org chart** (`apps/api/src/employees/org-chart.service.ts`): derives
   the reporting hierarchy purely from `Employee.managerId` among `ACTIVE`
   employees (a terminated employee's old reporting line would be actively

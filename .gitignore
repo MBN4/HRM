@@ -28,6 +28,9 @@ pnpm-debug.log*
 
 # Testing
 coverage/
+apps/portal/test-results/
+apps/portal/playwright-report/
+apps/portal/tests/.fixtures.json
 
 # OS / editor
 .DS_Store

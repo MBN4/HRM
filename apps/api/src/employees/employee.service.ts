@@ -175,6 +175,25 @@ export class EmployeeService {
     return this.mapper.toDto(tx, row);
   }
 
+  /**
+   * Resolves the CALLER's own linked Employee record — the one lookup no
+   * existing route could answer (`GET /employees` has no `userId` filter,
+   * and there's no employeeId until this resolves it), needed for step
+   * 1.4's ESS "view own profile" screen. Deliberately bypasses branch
+   * scoping (`allowedBranchIds: null` on the delegated `findById` call): a
+   * branch-restricted caller can always see their OWN record regardless of
+   * which branch it's in — the same "your own data is never out of scope"
+   * posture `LeaveService`/`AttendanceClockService` already take when an
+   * employeeId is omitted from a self-service request.
+   */
+  async findOwn(tx: Prisma.TransactionClient, userId: string): Promise<EmployeeResponseDto> {
+    const employee = await tx.employee.findFirst({ where: { userId } });
+    if (!employee) {
+      throw new NotFoundException('No employee profile is linked to your account.');
+    }
+    return this.findById(tx, employee.id, null);
+  }
+
   async list(
     tx: Prisma.TransactionClient,
     filters: EmployeeListFilters,

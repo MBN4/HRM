@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "HRM",
+    "slug": "hrm-mobile",
+    "scheme": "hrm",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#faf9f6",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hrm.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "HRM uses your location to verify clock-in/clock-out at branches that require it.",
+        "NSCameraUsageDescription": "HRM uses the camera to optionally capture a photo when you clock in or out."
+      }
+    },
+    "android": {
+      "package": "com.hrm.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION", "CAMERA"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "HRM uses your location to verify clock-in/clock-out at branches that require it."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "HRM uses the camera to optionally capture a photo when you clock in or out."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#1a7f65"
+        }
+      ]
+    ]
+  }
+}
