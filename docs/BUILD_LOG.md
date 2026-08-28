@@ -1071,3 +1071,198 @@ sweepOverdueSteps` already takes), `accrual/leave-accrual.processor.ts`
     `apps/api` tests still pass with no behavior change (189 total in
     `apps/api`; 203 including `packages/db`'s 14). Full-repo `pnpm build`
     (5/5), `pnpm lint` (7/7), `pnpm test` (4/4 tasks) all green.
+- **1.3 Attendance & time-tracking module — done — 2026-08-28.** The first
+  HIGH-VOLUME module — designed partition-ready and timezone-correct from
+  day one. Consumes Country Packs (0.5) for weekend/holiday/overtime rules,
+  the Employee/manager relation (1.1) for approver resolution, the workflow
+  engine (0.7) for regularization approval, and the 0.8 BullMQ pattern for
+  the summary-computation job — no Phase 0/1 mechanism was reimplemented or
+  modified. Full design in
+  [`docs/conventions/attendance.md`](./conventions/attendance.md). Files:
+  - `packages/db/prisma/schema.prisma` — `Branch` gains three nullable
+    geo-fence columns (`geofenceLat`/`geofenceLong`/`geofenceRadiusMeters`
+    — all null means geo-fencing is OFF for that branch), the SAME "small
+    nullable seam column on an existing Phase-0 model" pattern 0.7 used for
+    `headUserId`. New enums `AttendanceSource`/`AttendanceRecordStatus`/
+    `AttendanceRegularizationStatus`/`AttendanceDayStatus`. `ShiftDefinition`
+    (tenant-scoped shift template, "HH:mm" start/end, `crossesMidnight`
+    denormalized at write time) and `RosterAssignment` (employee ->
+    shift for a date range, "most recent assignment covering this date
+    wins" resolution). `AttendanceRecord` — the high-volume table, PARTITION-
+    READY exactly like `AuditLog` (0.9): composite PRIMARY KEY
+    `(id, workDate)`, `workDate` (the branch-local working day, resolved
+    ONCE at clock-in and frozen — never recomputed at clock-out) as the
+    intended partition key, `tenantId`-leading indexes only, and
+    DELIBERATELY no `@@unique([tenantId, id])` (would violate the Postgres
+    partitioning rule that every unique constraint must include the
+    partition key) — so `shiftDefinitionId` on this table and
+    `attendanceRecordId` on `AttendanceRegularization` are both plain UUID
+    columns with no FK relation, the same "just an id" pattern
+    `WorkflowInstanceStep.delegatedToUserId`/`LeaveRequest.
+workflowInstanceId` already use. `AttendanceRegularization` (ordinary,
+    NOT partitioned — ties into 0.7 via `workflowInstanceId`, a plain UUID
+    reference, no bespoke approval state). `AttendanceDailySummary` — the
+    precomputed reporting surface (one row per employee/day,
+    `@@unique([tenantId, employeeId, workDate])`) team/period reports read
+    exclusively, so a report never aggregates `AttendanceRecord` directly.
+    Plus back-relations on `Tenant`/`Employee`/`Branch`.
+  - `packages/db/prisma/migrations/20260828105625_add_attendance_module/`
+    — generated via `prisma migrate dev` against local Postgres; the
+    `attendance_records` `CREATE TABLE` was inspected directly to confirm
+    `PRIMARY KEY ("id","work_date")`, no bare `id` unique constraint.
+  - `packages/db/prisma/migrations/20260828105700_enable_rls_for_attendance_module/`
+    — `ENABLE`/`FORCE ROW LEVEL SECURITY` + the standard `tenant_isolation`
+    policy on all five new tables, identical pattern to every other
+    tenant-owned table; this migration does not touch the partition-ready
+    shape itself.
+  - `packages/shared/src/validators/attendance.validator.ts` — closed
+    source/status/day-status catalogs (`ATTENDANCE_SOURCES`/
+    `ATTENDANCE_RECORD_STATUSES`/`ATTENDANCE_REGULARIZATION_STATUSES`/
+    `ATTENDANCE_DAY_STATUSES`), `clockInSchema`/`clockOutSchema` (validate
+    the PARSED multipart body — an optional selfie is a real `FileInterceptor`
+    upload, the SAME "binary content doesn't fit JSON" posture 1.1's
+    document upload established; `source` is restricted to `WEB`/`MOBILE` —
+    `BIOMETRIC`/`MANUAL` are set only internally, never client-supplied),
+    `manualPunchSchema` (the biometric-seam demo route),
+    `createShiftDefinitionSchema`/`createRosterAssignmentSchema`,
+    `createRegularizationSchema`, `runAttendanceSummarySchema`,
+    `branchGeofenceSchema`.
+  - `packages/shared/src/constants/permissions.ts` — four new permissions
+    (`attendance.read`/`attendance.write`/`attendance.approve`/
+    `attendance.regularize`), seeded onto `HR_MANAGER`/`MANAGER` (all four)
+    and `EMPLOYEE` (read/write/regularize, self-service — no approve);
+    also seeds the pre-existing-but-previously-unused `branch.manage`
+    (0.4) onto `HR_MANAGER`, now consumed for the first time by the
+    branch geo-fence config route.
+  - `apps/api/src/attendance/attendance-timezone.util.ts` — the ONE place
+    this module does real timezone MATH (not just rendering, which
+    `@hrm/shared`'s `formatInTimeZone` already covers): `toBranchLocal`
+    (UTC instant -> branch-local calendar date + minutes-of-day, via
+    `Intl.DateTimeFormat.formatToParts`, never string-parsing a rendered
+    date), `resolveWorkDate` (the crossing-midnight day-attribution rule —
+    a clock-in before a crossing shift's end time rolls back to the
+    PREVIOUS calendar day), `branchLocalToUtc` (the reverse conversion,
+    via iterative offset correction, used to turn a shift's scheduled
+    start into a real instant for lateness comparison).
+  - `apps/api/src/attendance/attendance-metrics.util.ts` —
+    `computeRecordMetrics`, the ONE function shared by clock-out and
+    regularization-approval for worked/overtime/late minutes, entirely
+    pack-driven (`overtimeRules.dailyThresholdHours`) — THE RULE holds, no
+    country-code branch anywhere. `weeklyThresholdHours` aggregation is a
+    documented, out-of-scope simplification for this step.
+  - `apps/api/src/attendance/attendance-country-pack.util.ts` —
+    `resolveAttendancePackConfig`, the explicit-`tx` duplicate of
+    `CountryPackResolutionService`'s branch->pack->override resolution
+    (the SAME pattern `leave-country-pack.util.ts`/`employee-country-pack.
+util.ts` established), needed here for the SAME reason: this module's
+    weekend/holiday/overtime resolution runs from both an HTTP request and
+    the context-less summary worker.
+  - `apps/api/src/attendance/attendance-scope.util.ts` — the branch-
+    scoping/self-vs-other-employee resolution helpers, duplicated from the
+    private methods `LeaveService` (1.2) already established (reuse the
+    pattern, not the file).
+  - `apps/api/src/attendance/geofence.util.ts` — `haversineDistanceMeters`/
+    `isWithinGeofence`; a branch with all three geo-fence columns null has
+    geo-fencing OFF entirely.
+  - `apps/api/src/attendance/clock/attendance-clock.service.ts` —
+    `AttendanceClockService`: `clockIn`/`clockOut` (HTTP-facing, resolve
+    the caller's own or an explicitly permitted employee) delegate to
+    `clockInForEmployee`/`clockOutForEmployee` (ALSO used directly by the
+    biometric device seam, which has already resolved a specific employee
+    and has no "caller" concept). Enforces "at most one OPEN record per
+    employee" at the application layer (Prisma's schema DSL cannot express
+    a partial-unique index), geo-fencing (only for `WEB`/`MOBILE` sources —
+    a physical device already enforces presence by construction), resolves
+    the shift/workDate via `ShiftResolutionService.resolveForClockIn` at
+    clock-in and NEVER recomputes it at clock-out (closes the SAME open
+    record instead) — this is what makes a shift crossing midnight
+    attribute correctly to one working day regardless of which local
+    calendar date the clock-out happens on.
+  - `apps/api/src/attendance/shifts/shift-resolution.service.ts` —
+    `ShiftResolutionService.resolveForDate` (plain roster lookup) and
+    `.resolveForClockIn` (the real day-attribution algorithm: checks
+    YESTERDAY's roster first via `resolveWorkDate`, only falling back to
+    today's own roster when that doesn't apply — correctly handles even a
+    SINGLE-DAY roster assignment for a crossing-midnight shift, not just a
+    multi-day continuous range).
+  - `apps/api/src/attendance/shifts/shifts.service.ts` +
+    `shifts.controller.ts` — plain CRUD for `ShiftDefinition`/
+    `RosterAssignment`, no workflow/approval involvement (an ordinary HR
+    operation, unlike regularization).
+  - `apps/api/src/attendance/devices/biometric-device.interface.ts` +
+    `manual-biometric-device.adapter.ts` — the biometric/attendance-device
+    SEAM, the SAME "swap one DI binding, no caller changes" pattern 0.4's
+    `AUTH_PROVIDER`/0.8's `NotificationProvider`s establish.
+    `ManualBiometricDeviceAdapter` (today's only binding) resolves a
+    device's `employeeCode` to a real `Employee` and delegates straight to
+    `AttendanceClockService`'s lower-level methods, tagged source
+    `BIOMETRIC` — exercised via `POST /attendance/devices/manual-punch`.
+    No real device protocol exists yet, by design — this step is the seam
+    only.
+  - `apps/api/src/attendance/regularization/` —
+    `attendance-regularization.service.ts` (`AttendanceRegularizationService.
+submit` — THE RULE applied exactly like `LeaveService`: creates the row,
+    then hands off completely to `WorkflowEngineService.startInstance`, no
+    approve/reject logic of its own), `attendance-regularization.
+controller.ts` (deliberately NO approve/reject/cancel route — those are
+    0.7's generic workflow routes), `attendance-regularization-workflow-
+events.listener.ts` (`AttendanceRegularizationWorkflowEventsListener`,
+    reacting to `workflow.approved`/`.rejected`/`.canceled` filtered to
+    `entityType === "AttendanceRegularization"` — the ONLY place this
+    module mutates an actual `AttendanceRecord`: patches an existing
+    record's `clockInAt`/`clockOutAt` and recomputes metrics via
+    `computeRecordMetrics`, or — when `attendanceRecordId` was omitted at
+    submission (a fully missing punch) — creates a brand-new record on the
+    regularization's own `workDate`, tagged source `MANUAL`).
+  - `apps/api/src/attendance/summary/` — `attendance-day-status.util.ts`
+    (`isWeekend`/`isPublicHoliday`, pure pack-driven derivation, the SAME
+    approach `leave-day-calculator.ts` already established),
+    `attendance-summary.service.ts` (`AttendanceSummaryService` — the
+    BullMQ producer, plus `report()`, the READ side of the precomputed
+    surface team/period reports use exclusively), `attendance-summary.
+processor.ts` (the worker — classifies each employee/day as WEEKEND/
+    HOLIDAY/ON_LEAVE/ABSENT/PRESENT/LATE and `upsert`s the summary row; a
+    plain recompute, so re-running it is naturally idempotent with no
+    separate idempotency layer needed, unlike 1.2's additive accrual).
+  - `apps/api/src/attendance/attendance-response.dto.ts`,
+    `attendance.constants.ts`, `attendance.controller.ts` (clock-in/out,
+    record reads, the geo-fence config route, the biometric demo route,
+    the summary-run trigger and report read), `attendance.module.ts`.
+  - `apps/api/src/queue/queue.constants.ts` — new `ATTENDANCE_SUMMARY_QUEUE`
+    constant, registered via `BullModule.registerQueue()` in
+    `attendance.module.ts`, the same reusable pattern 0.8/1.1/1.2
+    established.
+  - `apps/api/src/app.module.ts` — registers `AttendanceModule`.
+  - Five unit/integration spec files (33 tests, no HTTP bootstrap needed):
+    `attendance-timezone.util.spec.ts`, `attendance-metrics.util.spec.ts`,
+    `geofence.util.spec.ts`, `summary/attendance-day-status.util.spec.ts`
+    (all pure-function, deterministic), and `shifts/shift-resolution.
+service.spec.ts` (real Postgres, the SAME pattern `notification-locale-
+resolver.service.spec.ts` (0.8) established — proves the crossing-
+    midnight day-attribution rule precisely for two DIFFERENT branch
+    timezones, including a SINGLE-DAY roster assignment, without any
+    wall-clock dependency).
+  - `apps/api/test/attendance.e2e-spec.ts` — 18 integration tests over
+    real HTTP — see docs/conventions/attendance.md § Verified-by for the
+    full list (clock in/out incl. geo-fence enforcement and selfie
+    capture; the SAME summary job resolving WEEKEND for a QA employee vs.
+    ABSENT for a US employee on the same Friday; a regularization running
+    through the real 0.7 workflow to the real 1.1 manager with correct
+    overtime computed on approval and no record created on rejection; the
+    biometric device seam; RBAC deny-by-default; branch scoping;
+    cross-tenant isolation; and the partition-ready composite-PK +
+    tenantId-leading-index shape verified directly against
+    `information_schema`/`pg_indexes`).
+    Verified against local Postgres on `localhost:5433` / Redis on
+    `localhost:6379` / MinIO on `localhost:9000`: all 51 new tests pass
+    (33 unit/integration + 18 e2e), all 189 pre-existing `apps/api` tests
+    still pass with no behavior change (240 total in `apps/api`; 254
+    including `packages/db`'s 14). Full-repo `pnpm build` (5/5), `pnpm
+lint` (7/7) both green; `pnpm test` passed in full when run
+    `--runInBand` (the convention every e2e file in this suite already
+    documents for itself) — the default parallel-worker `pnpm test` run
+    intermittently hit one PRE-EXISTING, unrelated flake in `employees.
+e2e-spec.ts`'s bulk-import polling test under shared-infra contention
+    across concurrently-running e2e files (reproduced failing once, then
+    passing on an immediate re-run with zero code changes in between,
+    confirming it's parallelism-timing flakiness, not a regression).

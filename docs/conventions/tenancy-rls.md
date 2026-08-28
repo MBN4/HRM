@@ -82,9 +82,13 @@ NOBYPASSRLS`, created by the RLS migration, granted only
   (`WITH CHECK`), and a query issued with no tenant context at all fails
   instead of silently succeeding.
 - Deferred to later steps, tracked so they aren't silently forgotten:
-  `attendance` and `audit_log` (0.9) must be created as **partitioned**
+  `attendance_records` and `audit_log` must be created as **partitioned**
   tables from day one (partition key must be part of every PK/unique
   constraint — see the comment block above the `Tenant` model in
-  `schema.prisma`), and the same RLS pattern applies to them. `audit_log`'s
-  composite `(id, occurredAt)` PK already satisfies this — see
-  [audit-custom-fields.md](./audit-custom-fields.md).
+  `schema.prisma`), and the same RLS pattern applies to them. Both now
+  satisfy this PARTITION-READY shape: `audit_log`'s composite
+  `(id, occurredAt)` PK since 0.9 (see
+  [audit-custom-fields.md](./audit-custom-fields.md)) and
+  `attendance_records`'s composite `(id, workDate)` PK since 1.3 (see
+  [attendance.md](./attendance.md)) — the actual `PARTITION BY RANGE`
+  migration for either is still Phase 5.2, not yet done.

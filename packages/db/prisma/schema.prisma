@@ -23,7 +23,10 @@ datasource db {
 // ---------------------------------------------------------------------------
 // Future partitioned tables:
 //
-//   - attendance  — one row per clock-in/out event; extremely high volume.
+//   - attendance_records — one row per clock-in/out shift; extremely high
+//     volume. Created in step 1.3 (see AttendanceRecord below) as
+//     PARTITION-READY (composite primary key) but NOT actually partitioned
+//     yet — the `PARTITION BY RANGE` migration itself is Phase 5.2.
 //   - audit_log   — one row per mutating action across the whole system.
 //     Created in step 0.9 (see AuditLog below) as PARTITION-READY (composite
 //     primary key) but NOT actually partitioned yet — the `PARTITION BY
@@ -110,6 +113,11 @@ model Tenant {
   leaveBalances             LeaveBalance[]
   leaveRequests             LeaveRequest[]
   leaveAccrualRuns          LeaveAccrualRun[]
+  shiftDefinitions          ShiftDefinition[]
+  rosterAssignments         RosterAssignment[]
+  attendanceRecords         AttendanceRecord[]
+  attendanceRegularizations AttendanceRegularization[]
+  attendanceDailySummaries  AttendanceDailySummary[]
 
   @@map("tenants")
 }
@@ -140,15 +148,24 @@ model TenantDomain {
 // A tenant may operate branches in different countries — country resolution
 // happens at the BRANCH level, not the tenant level (see /CLAUDE.md 0.5).
 model Branch {
-  id             String  @id @default(uuid()) @db.Uuid
-  tenantId       String  @map("tenant_id") @db.Uuid
-  name           String
-  countryCode    String  @map("country_code") @db.VarChar(2)
-  timezone       String
-  parentBranchId String? @map("parent_branch_id") @db.Uuid
+  id                   String  @id @default(uuid()) @db.Uuid
+  tenantId             String  @map("tenant_id") @db.Uuid
+  name                 String
+  countryCode          String  @map("country_code") @db.VarChar(2)
+  timezone             String
+  parentBranchId       String? @map("parent_branch_id") @db.Uuid
   // Seam for the workflow engine's BRANCH_HEAD approver rule (step 0.7) —
   // see /CLAUDE.md § Conventions → Workflow engine → Approver rules.
-  headUserId     String? @map("head_user_id") @db.Uuid
+  headUserId           String? @map("head_user_id") @db.Uuid
+  // Optional geo-fence for this branch/site (step 1.3, Attendance) — all
+  // three null (the default) means geo-fencing is OFF for this branch;
+  // Attendance clock-in enforces it only when all three are set. A small,
+  // nullable, additive seam column on an existing Phase-0 model, the SAME
+  // pattern 0.7 already used for `headUserId` itself — see
+  // docs/conventions/attendance.md.
+  geofenceLat          Float?  @map("geofence_lat")
+  geofenceLong         Float?  @map("geofence_long")
+  geofenceRadiusMeters Int?    @map("geofence_radius_meters")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -158,9 +175,11 @@ model Branch {
   childBranches Branch[] @relation("BranchHierarchy")
   headUser      User?    @relation("BranchHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
-  departments  Department[]
-  userBranches UserBranch[]
-  employees    Employee[]
+  departments              Department[]
+  userBranches             UserBranch[]
+  employees                Employee[]
+  attendanceRecords        AttendanceRecord[]
+  attendanceDailySummaries AttendanceDailySummary[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -1160,12 +1179,16 @@ model Employee {
   manager       Employee?  @relation("EmployeeManager", fields: [tenantId, managerId], references: [tenantId, id], onDelete: SetNull)
   directReports Employee[] @relation("EmployeeManager")
 
-  dependents        EmployeeDependent[]
-  emergencyContacts EmployeeEmergencyContact[]
-  documents         EmployeeDocument[]
-  leaveBalances     LeaveBalance[]
-  leaveRequests     LeaveRequest[]
-  leaveAccrualRuns  LeaveAccrualRun[]
+  dependents                EmployeeDependent[]
+  emergencyContacts         EmployeeEmergencyContact[]
+  documents                 EmployeeDocument[]
+  leaveBalances             LeaveBalance[]
+  leaveRequests             LeaveRequest[]
+  leaveAccrualRuns          LeaveAccrualRun[]
+  rosterAssignments         RosterAssignment[]
+  attendanceRecords         AttendanceRecord[]
+  attendanceRegularizations AttendanceRegularization[]
+  attendanceDailySummaries  AttendanceDailySummary[]
 
   // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
@@ -1418,4 +1441,252 @@ model LeaveAccrualRun {
   @@unique([tenantId, employeeId, leaveType, periodYear, periodMonth])
   @@index([tenantId, periodYear, periodMonth])
   @@map("leave_accrual_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Attendance & time-tracking (step 1.3, Phase 1). The first HIGH-VOLUME
+// module — every employee generates a row here daily, so `AttendanceRecord`
+// is built PARTITION-READY from day one, exactly the shape flagged since 0.2
+// (see the comment block above the `Tenant` model, and
+// docs/conventions/tenancy-rls.md). Consumes, rather than reimplements:
+// Country Packs (0.5) for weekend/holiday/overtime rules, the Employee/
+// manager relation (1.1) for approver resolution, the workflow engine (0.7)
+// for regularization approval, and the 0.8 BullMQ pattern for the
+// summary-computation job. See docs/conventions/attendance.md.
+// ---------------------------------------------------------------------------
+
+enum AttendanceSource {
+  WEB
+  MOBILE
+  BIOMETRIC
+  MANUAL
+}
+
+enum AttendanceRecordStatus {
+  OPEN
+  CLOSED
+}
+
+// A tenant-defined shift (e.g. "Night Shift", 22:00-06:00 branch-local).
+// `startTime`/`endTime` are "HH:mm" branch-local wall-clock strings, NOT
+// timestamps — a shift definition has no date of its own, only a roster
+// assignment does. `crossesMidnight` (startTime >= endTime) is DENORMALIZED
+// here (computed once at write time by ShiftsService, not re-derived on
+// every read) purely for query/documentation convenience; the actual
+// day-attribution logic re-derives it from startTime/endTime directly where
+// it matters (see docs/conventions/attendance.md).
+model ShiftDefinition {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  name            String
+  startTime       String   @map("start_time") @db.VarChar(5)
+  endTime         String   @map("end_time") @db.VarChar(5)
+  breakMinutes    Int      @default(0) @map("break_minutes")
+  crossesMidnight Boolean  @default(false) @map("crosses_midnight")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rosterAssignments RosterAssignment[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, name])
+  @@map("shift_definitions")
+}
+
+// Assigns one employee to one shift for a date range (`effectiveTo: null` =
+// ongoing). Resolution (`ShiftResolutionService`) picks, for a given
+// employee + branch-local calendar date, the assignment with the latest
+// `effectiveFrom` whose range covers that date — the same "most specific/
+// most recent wins" shape used nowhere else in this schema verbatim, but
+// analogous to CountryPack's highest-version-active resolution (0.5).
+model RosterAssignment {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  employeeId        String    @map("employee_id") @db.Uuid
+  shiftDefinitionId String    @map("shift_definition_id") @db.Uuid
+  effectiveFrom     DateTime  @map("effective_from") @db.Date
+  effectiveTo       DateTime? @map("effective_to") @db.Date
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee        Employee        @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  shiftDefinition ShiftDefinition @relation(fields: [tenantId, shiftDefinitionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, employeeId, effectiveFrom])
+  @@map("roster_assignments")
+}
+
+// The high-volume clock-in/out record — see docs/conventions/attendance.md
+// for the full write-up of the day-attribution algorithm. ONE row per shift
+// (clock-in through clock-out), NOT one row per punch: a clock-out never
+// creates a new row, it closes the caller's own OPEN row (found by
+// `employeeId` + `status: OPEN`, enforced as an application-level
+// "at most one open record per employee" invariant — no DB constraint
+// expresses "unique among rows where status = OPEN" without a partial
+// index, which Prisma's schema DSL cannot express; consistent with this
+// codebase's existing acceptance of application-level invariants alongside
+// DB constraints wherever the DSL can't reach, e.g. License's
+// at-most-one-ACTIVE-per-tenant rule).
+//
+// `workDate` — the BRANCH-LOCAL working day this shift is attributed to —
+// is resolved ONCE at clock-in (see `resolveWorkDate` in
+// attendance-timezone.util.ts) and never recomputed at clock-out; this is
+// what makes a shift crossing midnight attribute correctly to a single
+// working day regardless of what local calendar date the clock-out happens
+// on. It is also THE PARTITION KEY: PARTITION-READY, not yet partitioned,
+// the SAME shape `AuditLog` already established in 0.9 (composite PK
+// `(id, workDate)`, since Postgres requires the partition key to be part of
+// every unique constraint/PK on a partitioned table) — see the comment
+// block above the `Tenant` model and docs/conventions/tenancy-rls.md.
+// Phase 5.2 is expected to add the actual `PARTITION BY RANGE (work_date)`
+// migration; this shape is chosen now so that migration is additive, not
+// breaking.
+//
+// Deliberately has NO `@@unique([tenantId, id])` (unlike almost every other
+// table in this schema) — adding one would violate the same Postgres
+// partitioning rule the composite PK exists to satisfy (every unique
+// constraint on a partitioned table must include the partition key), so
+// nothing may define a composite FK INTO this table. `shiftDefinitionId`
+// below is therefore a plain UUID SNAPSHOT column (no relation), the same
+// "just an id, not a structural relation" pattern `WorkflowInstanceStep.
+// delegatedToUserId`/`LeaveRequest.workflowInstanceId` already use — cheap
+// to write (no extra FK check on the highest-volume table in this system)
+// and correct as a point-in-time snapshot (a roster reassignment after the
+// fact must never rewrite an already-clocked shift's history).
+model AttendanceRecord {
+  id         String   @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  employeeId String   @map("employee_id") @db.Uuid
+  branchId   String   @map("branch_id") @db.Uuid
+  workDate   DateTime @map("work_date") @db.Date
+
+  // Snapshot of the roster-resolved shift at clock-in time, if any — see the
+  // model doc above for why this is a plain column, not a relation.
+  shiftDefinitionId String? @map("shift_definition_id") @db.Uuid
+
+  clockInAt       DateTime         @map("clock_in_at")
+  clockInSource   AttendanceSource @map("clock_in_source")
+  clockInLat      Float?           @map("clock_in_lat")
+  clockInLong     Float?           @map("clock_in_long")
+  // StorageService/MinIO object key (see docs/conventions/employee.md's
+  // identical convention for EmployeeDocument.storageKey) — the selfie
+  // bytes never touch this table.
+  clockInPhotoKey String?          @map("clock_in_photo_key")
+
+  clockOutAt       DateTime?         @map("clock_out_at")
+  clockOutSource   AttendanceSource? @map("clock_out_source")
+  clockOutLat      Float?            @map("clock_out_lat")
+  clockOutLong     Float?            @map("clock_out_long")
+  clockOutPhotoKey String?           @map("clock_out_photo_key")
+
+  status          AttendanceRecordStatus @default(OPEN)
+  // Populated at clock-out. `overtimeMinutes`/`lateMinutes` are resolved
+  // from the effective Country Pack's `workingTime.overtimeRules` and the
+  // snapshotted shift's `startTime` respectively — see
+  // docs/conventions/attendance.md; THE RULE (country-packs.md) still
+  // holds, nothing here branches on a country code.
+  workedMinutes   Int?                   @map("worked_minutes")
+  overtimeMinutes Int                    @default(0) @map("overtime_minutes")
+  lateMinutes     Int                    @default(0) @map("late_minutes")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([id, workDate])
+  @@index([tenantId, employeeId, workDate])
+  @@index([tenantId, branchId, workDate])
+  @@index([tenantId, employeeId, status])
+  @@map("attendance_records")
+}
+
+enum AttendanceRegularizationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELED
+}
+
+// A missed/incorrect punch correction — REUSES the 0.7 workflow engine
+// wholesale (THE RULE, workflow.md): this table owns no approve/reject
+// logic of its own, exactly like `LeaveRequest`. `attendanceRecordId` is a
+// plain UUID reference (nullable — null means "the employee has no record
+// at all for `workDate`", i.e. a fully missed punch, not just a wrong one)
+// with NO FK relation, for the SAME reason `AttendanceRecord` itself has no
+// `@@unique([tenantId, id])` to be a composite-FK target of: its PK is the
+// partition-compatible composite `(id, workDate)`. This table is itself
+// ordinary (low-volume, NOT partitioned) — only the record it may point at
+// is.
+model AttendanceRegularization {
+  id                  String                         @id @default(uuid()) @db.Uuid
+  tenantId            String                         @map("tenant_id") @db.Uuid
+  employeeId          String                         @map("employee_id") @db.Uuid
+  attendanceRecordId  String?                        @map("attendance_record_id") @db.Uuid
+  workDate            DateTime                       @map("work_date") @db.Date
+  requestedClockInAt  DateTime?                      @map("requested_clock_in_at")
+  requestedClockOutAt DateTime?                      @map("requested_clock_out_at")
+  reason              String
+  status              AttendanceRegularizationStatus @default(PENDING)
+  workflowInstanceId  String?                        @map("workflow_instance_id") @db.Uuid
+  submittedByUserId   String?                        @map("submitted_by_user_id") @db.Uuid
+  decidedAt           DateTime?                      @map("decided_at")
+  createdAt           DateTime                       @default(now()) @map("created_at")
+  updatedAt           DateTime                       @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, employeeId, status])
+  @@map("attendance_regularizations")
+}
+
+enum AttendanceDayStatus {
+  PRESENT
+  LATE
+  ABSENT
+  ON_LEAVE
+  WEEKEND
+  HOLIDAY
+}
+
+// ONE row per (employee, workDate) — the precomputed reporting surface this
+// module's brief requires ("heavy reads must not hammer the primary"):
+// team/period reports read ONLY this table, never aggregate
+// `AttendanceRecord` directly. Populated by `AttendanceSummaryProcessor`
+// (the 0.8 BullMQ pattern, reused as-is), triggered per-employee/day
+// fire-and-forget after every clock-out (cheap, bounded to one row) and by
+// the manual `POST /attendance/summary/run` trigger for a broader
+// backfill/recompute — the SAME documented, accepted "not wired to a real
+// scheduler yet" tradeoff 0.7's escalation sweep and 1.2's accrual job
+// already take. A plain `upsert` (no separate idempotency layer needed,
+// unlike leave accrual's ADDITIVE accrual): this is a full RECOMPUTE of one
+// day's totals, so re-running it for the same period is naturally
+// idempotent — same inputs, same output, not a running total that could
+// double-count.
+model AttendanceDailySummary {
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  employeeId      String              @map("employee_id") @db.Uuid
+  branchId        String              @map("branch_id") @db.Uuid
+  workDate        DateTime            @map("work_date") @db.Date
+  status          AttendanceDayStatus
+  workedMinutes   Int                 @default(0) @map("worked_minutes")
+  overtimeMinutes Int                 @default(0) @map("overtime_minutes")
+  lateMinutes     Int                 @default(0) @map("late_minutes")
+  computedAt      DateTime            @default(now()) @map("computed_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  branch   Branch   @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, employeeId, workDate])
+  @@index([tenantId, branchId, workDate])
+  @@index([tenantId, workDate, status])
+  @@map("attendance_daily_summaries")
 }

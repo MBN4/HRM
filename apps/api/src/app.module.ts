@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AttendanceModule } from './attendance/attendance.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { I18nModule } from './common/i18n/i18n.module';
@@ -48,6 +49,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     StorageModule,
     EmployeesModule,
     LeaveModule,
+    AttendanceModule,
   ],
   controllers: [AppController],
   providers: [AppService],
