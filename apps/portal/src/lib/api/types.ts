@@ -296,3 +296,36 @@ export interface EffectiveCountryPackConfig {
   publicHolidays: Record<string, { date: string; name: string }[]>;
   [key: string]: unknown;
 }
+
+/** Mirrors `AnalyticsDashboardResponseDto` (apps/api/src/analytics/dashboard) — see docs/conventions/analytics-dashboard.md. Every number here comes from a precomputed rollup table, never a live aggregate. */
+export interface AnalyticsDashboard {
+  range: { from: string; to: string };
+  headcount: {
+    asOfDate: string | null;
+    total: number;
+    byBranch: { branchId: string; count: number }[];
+    byDepartment: { departmentId: string | null; count: number }[];
+    byEmploymentType: { employmentType: string; count: number }[];
+    byGender: { gender: string | null; count: number }[];
+  };
+  movement: {
+    joiners: number;
+    leavers: number;
+    attritionRate: number;
+    byBranch: { branchId: string; joiners: number; leavers: number }[];
+  };
+  attendance: {
+    presentCount: number;
+    absentCount: number;
+    lateCount: number;
+    onLeaveCount: number;
+    weekendCount: number;
+    holidayCount: number;
+    employeeDays: number;
+    attendanceRate: number;
+    trend: { date: string; presentCount: number; absentCount: number; lateCount: number; employeeCount: number }[];
+  };
+  leave: {
+    byType: { leaveType: string; entitledDays: number; usedToDate: number; usedInPeriod: number; utilizationRate: number }[];
+  };
+}

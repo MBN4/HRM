@@ -79,45 +79,49 @@ model Tenant {
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
-  branches                  Branch[]
-  departments               Department[]
-  designations              Designation[]
-  costCenters               CostCenter[]
-  users                     User[]
-  domains                   TenantDomain[]
-  permissions               Permission[]
-  roles                     Role[]
-  rolePermissions           RolePermission[]
-  userRoles                 UserRole[]
-  userBranches              UserBranch[]
-  countryOverrides          TenantCountryOverride[]
-  subscription              Subscription?
-  licenses                  License[]
-  featureFlagOverrides      TenantFeatureFlagOverride[]
-  workflowTemplates         WorkflowTemplate[]
-  workflowSteps             WorkflowStep[]
-  workflowInstances         WorkflowInstance[]
-  workflowInstanceSteps     WorkflowInstanceStep[]
-  workflowActions           WorkflowAction[]
-  notifications             Notification[]
-  notificationDeliveries    NotificationDelivery[]
-  notificationPreferences   NotificationPreference[]
-  auditLogs                 AuditLog[]
-  customFieldDefinitions    CustomFieldDefinition[]
-  customFieldValueSets      CustomFieldValueSet[]
-  employees                 Employee[]
-  employeeDependents        EmployeeDependent[]
-  employeeEmergencyContacts EmployeeEmergencyContact[]
-  employeeDocuments         EmployeeDocument[]
-  employeeImportJobs        EmployeeImportJob[]
-  leaveBalances             LeaveBalance[]
-  leaveRequests             LeaveRequest[]
-  leaveAccrualRuns          LeaveAccrualRun[]
-  shiftDefinitions          ShiftDefinition[]
-  rosterAssignments         RosterAssignment[]
-  attendanceRecords         AttendanceRecord[]
-  attendanceRegularizations AttendanceRegularization[]
-  attendanceDailySummaries  AttendanceDailySummary[]
+  branches                       Branch[]
+  departments                    Department[]
+  designations                   Designation[]
+  costCenters                    CostCenter[]
+  users                          User[]
+  domains                        TenantDomain[]
+  permissions                    Permission[]
+  roles                          Role[]
+  rolePermissions                RolePermission[]
+  userRoles                      UserRole[]
+  userBranches                   UserBranch[]
+  countryOverrides               TenantCountryOverride[]
+  subscription                   Subscription?
+  licenses                       License[]
+  featureFlagOverrides           TenantFeatureFlagOverride[]
+  workflowTemplates              WorkflowTemplate[]
+  workflowSteps                  WorkflowStep[]
+  workflowInstances              WorkflowInstance[]
+  workflowInstanceSteps          WorkflowInstanceStep[]
+  workflowActions                WorkflowAction[]
+  notifications                  Notification[]
+  notificationDeliveries         NotificationDelivery[]
+  notificationPreferences        NotificationPreference[]
+  auditLogs                      AuditLog[]
+  customFieldDefinitions         CustomFieldDefinition[]
+  customFieldValueSets           CustomFieldValueSet[]
+  employees                      Employee[]
+  employeeDependents             EmployeeDependent[]
+  employeeEmergencyContacts      EmployeeEmergencyContact[]
+  employeeDocuments              EmployeeDocument[]
+  employeeImportJobs             EmployeeImportJob[]
+  leaveBalances                  LeaveBalance[]
+  leaveRequests                  LeaveRequest[]
+  leaveAccrualRuns               LeaveAccrualRun[]
+  shiftDefinitions               ShiftDefinition[]
+  rosterAssignments              RosterAssignment[]
+  attendanceRecords              AttendanceRecord[]
+  attendanceRegularizations      AttendanceRegularization[]
+  attendanceDailySummaries       AttendanceDailySummary[]
+  headcountDailySnapshots        HeadcountDailySnapshot[]
+  workforceMovementDailyCounts   WorkforceMovementDailyCount[]
+  attendanceDailyBranchSummaries AttendanceDailyBranchSummary[]
+  leaveUtilizationDailySnapshots LeaveUtilizationDailySnapshot[]
 
   @@map("tenants")
 }
@@ -175,11 +179,15 @@ model Branch {
   childBranches Branch[] @relation("BranchHierarchy")
   headUser      User?    @relation("BranchHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
-  departments              Department[]
-  userBranches             UserBranch[]
-  employees                Employee[]
-  attendanceRecords        AttendanceRecord[]
-  attendanceDailySummaries AttendanceDailySummary[]
+  departments                    Department[]
+  userBranches                   UserBranch[]
+  employees                      Employee[]
+  attendanceRecords              AttendanceRecord[]
+  attendanceDailySummaries       AttendanceDailySummary[]
+  headcountDailySnapshots        HeadcountDailySnapshot[]
+  workforceMovementDailyCounts   WorkforceMovementDailyCount[]
+  attendanceDailyBranchSummaries AttendanceDailyBranchSummary[]
+  leaveUtilizationDailySnapshots LeaveUtilizationDailySnapshot[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -1157,6 +1165,15 @@ model Employee {
   employmentType EmploymentType @map("employment_type")
   joinDate       DateTime       @map("join_date") @db.Date
   status         EmployeeStatus @default(ACTIVE)
+  // Set by EmployeeService.update the moment `status` transitions INTO
+  // TERMINATED (cleared back to null on a reactivation) — a small,
+  // additive capture column (step 1.5, Analytics dashboard) in the same
+  // "nullable seam column" spirit as Branch.geofenceLat/User.pushToken.
+  // Without a real termination DATE, leaver/attrition KPIs are
+  // undecidable — leave.md already documents this exact absence as an
+  // accepted gap; this is its narrow, capture-only fix. See
+  // docs/conventions/analytics-dashboard.md.
+  terminatedAt   DateTime?      @map("terminated_at")
   managerId      String?        @map("manager_id") @db.Uuid
 
   // Country-driven required statutory identifiers — see the model doc above.
@@ -1698,4 +1715,148 @@ model AttendanceDailySummary {
   @@index([tenantId, branchId, workDate])
   @@index([tenantId, workDate, status])
   @@map("attendance_daily_summaries")
+}
+
+// ---------------------------------------------------------------------------
+// Analytics dashboard (step 1.5, Phase 1 finale). The whole point of this
+// module — see docs/conventions/analytics-dashboard.md — is that a
+// dashboard load is a cheap indexed read of PRE-AGGREGATED rows, never a
+// live scan/GROUP BY over `employees`/`attendance_records`/`leave_requests`/
+// `leave_balances`. All four tables below are computed by
+// `AnalyticsRollupProcessor` (a real, scheduled BullMQ job — see
+// apps/api/src/analytics), never written from an HTTP request path.
+//
+// `departmentId` is NULLABLE (an employee may have no department) — which
+// matters a lot here, because Postgres treats every NULL as DISTINCT in a
+// unique index. An upsert keyed on a unique constraint that includes this
+// column would silently insert a fresh duplicate row on every job re-run
+// for any "no department" combination, rather than updating the existing
+// one. The fix, applied uniformly by every rollup job in this file: DELETE
+// every existing row for the (tenantId, theDate) grain first, then one bulk
+// `createMany` of the freshly computed rows, rather than a per-row upsert —
+// the same "a full RECOMPUTE from source data is naturally idempotent"
+// argument `AttendanceDailySummary`'s own doc comment already makes for
+// itself, just applied as delete+bulk-insert (one job run produces MANY
+// rows at once here) instead of a per-row upsert. The `@@unique` below
+// documents the intended grain / gives defense-in-depth against a genuine
+// application bug within one computation pass; it is NOT what the job
+// relies on to stay idempotent across re-runs.
+// ---------------------------------------------------------------------------
+
+enum WorkforceMovementType {
+  JOINER
+  LEAVER
+}
+
+// One row per (tenant, snapshotDate, branchId, departmentId, employmentType,
+// gender) — a point-in-time CROSS-SECTION of active headcount, not an
+// additive daily delta. Querying a date RANGE means reading the single
+// latest `snapshotDate` within that range (see AnalyticsDashboardService) —
+// summing `activeCount` across multiple days would double-count the same
+// people.
+model HeadcountDailySnapshot {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @map("tenant_id") @db.Uuid
+  snapshotDate   DateTime       @map("snapshot_date") @db.Date
+  branchId       String         @map("branch_id") @db.Uuid
+  departmentId   String?        @map("department_id") @db.Uuid
+  employmentType EmploymentType @map("employment_type")
+  gender         Gender?
+  activeCount    Int            @map("active_count")
+  computedAt     DateTime       @default(now()) @map("computed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, snapshotDate, branchId, departmentId, employmentType, gender])
+  @@index([tenantId, snapshotDate, branchId])
+  @@map("headcount_daily_snapshots")
+}
+
+// One row per (tenant, movementDate, branchId, departmentId, movementType) —
+// JOINER counts `Employee.joinDate = movementDate`; LEAVER counts
+// `Employee.terminatedAt`'s calendar date `= movementDate`. Both grouped by
+// the employee's CURRENT branch/department (this schema has no historical
+// branch/department assignment log anywhere else either — a documented
+// simplification, same spirit as attendance.md's un-rostered-employee gap).
+// A date RANGE query SUMS `count` across days — each day's count is a
+// distinct-day event count, unlike headcount above.
+model WorkforceMovementDailyCount {
+  id           String                @id @default(uuid()) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  movementDate DateTime              @map("movement_date") @db.Date
+  branchId     String                @map("branch_id") @db.Uuid
+  departmentId String?               @map("department_id") @db.Uuid
+  movementType WorkforceMovementType @map("movement_type")
+  count        Int
+  computedAt   DateTime              @default(now()) @map("computed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, movementDate, branchId, departmentId, movementType])
+  @@index([tenantId, movementDate, branchId])
+  @@map("workforce_movement_daily_counts")
+}
+
+// One row per (tenant, workDate, branchId, departmentId) — a ROLLUP OF A
+// ROLLUP: computed by grouping 1.3's own `AttendanceDailySummary` (already
+// at most one row per employee per day) by (branchId, departmentId,
+// status), joined to `Employee` only for `departmentId` (which
+// `AttendanceDailySummary` doesn't carry) — this job never touches
+// `AttendanceRecord` itself. `employeeCount` is the denominator for rate
+// calculations (e.g. attendance rate = presentCount / employeeCount).
+model AttendanceDailyBranchSummary {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @map("tenant_id") @db.Uuid
+  workDate             DateTime @map("work_date") @db.Date
+  branchId             String   @map("branch_id") @db.Uuid
+  departmentId         String?  @map("department_id") @db.Uuid
+  presentCount         Int      @default(0) @map("present_count")
+  absentCount          Int      @default(0) @map("absent_count")
+  lateCount            Int      @default(0) @map("late_count")
+  onLeaveCount         Int      @default(0) @map("on_leave_count")
+  weekendCount         Int      @default(0) @map("weekend_count")
+  holidayCount         Int      @default(0) @map("holiday_count")
+  totalWorkedMinutes   Int      @default(0) @map("total_worked_minutes")
+  totalOvertimeMinutes Int      @default(0) @map("total_overtime_minutes")
+  totalLateMinutes     Int      @default(0) @map("total_late_minutes")
+  employeeCount        Int      @default(0) @map("employee_count")
+  computedAt           DateTime @default(now()) @map("computed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, workDate, branchId, departmentId])
+  @@index([tenantId, workDate, branchId])
+  @@map("attendance_daily_branch_summaries")
+}
+
+// One row per (tenant, snapshotDate, branchId, departmentId, leaveType) —
+// computed by grouping the CURRENT-YEAR `LeaveBalance` rows (already at
+// most one row per employee/type/year) joined to `Employee` for branch/
+// department. `totalUsedDays` is CUMULATIVE for the year, same as the
+// `LeaveBalance` row it's summed from — reading "utilization within
+// [from, to]" means diffing the latest snapshot on/before `to` against the
+// latest on/before `from` (see AnalyticsDashboardService), not summing
+// this table across days.
+model LeaveUtilizationDailySnapshot {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  snapshotDate      DateTime  @map("snapshot_date") @db.Date
+  branchId          String    @map("branch_id") @db.Uuid
+  departmentId      String?   @map("department_id") @db.Uuid
+  leaveType         LeaveType @map("leave_type")
+  totalEntitledDays Float     @default(0) @map("total_entitled_days")
+  totalAccruedDays  Float     @default(0) @map("total_accrued_days")
+  totalUsedDays     Float     @default(0) @map("total_used_days")
+  employeeCount     Int       @default(0) @map("employee_count")
+  computedAt        DateTime  @default(now()) @map("computed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, snapshotDate, branchId, departmentId, leaveType])
+  @@index([tenantId, snapshotDate, branchId])
+  @@map("leave_utilization_daily_snapshots")
 }

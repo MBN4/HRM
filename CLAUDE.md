@@ -90,6 +90,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/leave.md`](./docs/conventions/leave.md)                                     | Leave requests as a pure consumer of the workflow engine, country-driven entitlements/holidays/weekends, balance tracking, and scheduled/idempotent accrual. (1.2)                                                                  |
 | [`docs/conventions/attendance.md`](./docs/conventions/attendance.md)                           | The first high-volume module: partition-ready clock records, timezone-correct (incl. midnight-crossing) day attribution, pack-driven weekend/overtime, the biometric device seam, and regularization via the workflow engine. (1.3) |
 | [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md)               | ESS/MSS on the tenant portal + mobile app: client auth/tenant resolution, the session-aware i18n/RTL integration, how the UI consumes workflow/leave/attendance, field-omission handling. (1.4)                                     |
+| [`docs/conventions/analytics-dashboard.md`](./docs/conventions/analytics-dashboard.md)         | The KPI set, the precomputed-rollup scale strategy (incl. the nullable-dimension delete-recreate gotcha), the first real scheduled BullMQ job, and branch-scope/RBAC in analytics. (1.5)                                            |
 
 ## 5. Build log summary
 
@@ -154,6 +155,14 @@ per step, kept here for a fast overview.
   RBAC-gated rendering, and a real-browser Playwright suite for the
   portal. See
   [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md).
+- **1.5** — Analytics dashboard (Phase 1's final step): tenant/branch-scoped
+  KPIs (headcount, joiners/leavers/attrition, attendance rate, leave
+  utilization) on the tenant portal, computed via the codebase's first real
+  SCHEDULED BullMQ job into four precomputed rollup tables — a dashboard
+  load is always a cheap indexed read of those, never a live aggregate
+  over `employees`/`attendance_records`/`leave_requests`/`leave_balances`.
+  **PHASE 1 COMPLETE as of this step** — see
+  [`docs/conventions/analytics-dashboard.md`](./docs/conventions/analytics-dashboard.md).
 
 ## 6. Not yet built
 
@@ -178,6 +187,15 @@ apply automatically to any new module/route with no additional wiring.
 - [x] **1.2** Leave module
 - [x] **1.3** Attendance & time-tracking module
 - [x] **1.4** ESS/MSS self-service UI (tenant portal + mobile app)
+- [x] **1.5** Analytics dashboard (tenant/branch-scoped KPIs, precomputed
+      rollups, the first real scheduled BullMQ job)
+
+**PHASE 1 COMPLETE.** The product is now a sellable MVP — Core HR (1.1) +
+Leave (1.2) + Attendance (1.3) + ESS/MSS (1.4) + Analytics dashboard (1.5),
+all built on top of Phase 0's tenancy/RLS, auth/RBAC, country packs,
+licensing, workflow engine, notifications, audit/custom-fields/i18n, and
+resilience chassis. Phase 2 (Payroll, Performance, Recruitment) builds next.
+
 - [ ] **Phase 2** — _scope not yet defined_
 - [ ] **Phase 3** — _scope not yet defined_
 - [ ] **Phase 4** — _scope not yet defined_

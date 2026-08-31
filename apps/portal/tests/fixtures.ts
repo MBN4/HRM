@@ -13,6 +13,7 @@ export interface PortalTestFixtures {
   employeeBEmail: string;
   branchAUsId: string;
   branchAQaId: string;
+  analyticsDate: string;
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

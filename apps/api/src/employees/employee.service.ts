@@ -126,6 +126,22 @@ export class EmployeeService {
       await this.assertStatutoryFieldsSatisfied(tx, tenantId, nextBranchId, nextStatutoryFields);
     }
 
+    // Analytics dashboard (step 1.5) leaver/attrition KPIs need a real
+    // termination DATE — see docs/conventions/analytics-dashboard.md.
+    // Captured here, narrowly, on the status transition itself: `new
+    // Date()` the moment status moves INTO TERMINATED from something else,
+    // cleared back to null on a reactivation OUT of TERMINATED — a small,
+    // additive seam column, same pattern as Branch.geofenceLat/
+    // User.pushToken, not a leave/payroll pro-ration change.
+    const terminatedAtPatch =
+      input.status !== undefined && input.status !== existing.status
+        ? input.status === 'TERMINATED'
+          ? { terminatedAt: new Date() }
+          : existing.status === 'TERMINATED'
+            ? { terminatedAt: null }
+            : {}
+        : {};
+
     const row = await tx.employee.update({
       where: { id },
       data: {
@@ -142,6 +158,7 @@ export class EmployeeService {
         ...(input.employmentType !== undefined && { employmentType: input.employmentType }),
         ...(input.joinDate !== undefined && { joinDate: input.joinDate }),
         ...(input.status !== undefined && { status: input.status }),
+        ...terminatedAtPatch,
         ...(input.managerId !== undefined && { managerId: input.managerId }),
         ...(input.statutoryFields !== undefined && {
           statutoryFields: {

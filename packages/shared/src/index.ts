@@ -24,3 +24,4 @@ export * from './validators/idempotency.validator';
 export * from './validators/employee.validator';
 export * from './validators/leave.validator';
 export * from './validators/attendance.validator';
+export * from './validators/analytics.validator';

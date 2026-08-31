@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  BarChart3,
   Bell,
   CalendarClock,
   CalendarDays,
@@ -43,6 +44,9 @@ export function Sidebar() {
     mssItems.push({ href: '/team', label: t('nav.team'), icon: Users });
   }
   mssItems.push({ href: '/org-chart', label: t('nav.orgChart'), icon: Network });
+  if (can(PERMISSIONS.ANALYTICS_READ)) {
+    mssItems.push({ href: '/analytics', label: t('nav.analytics'), icon: BarChart3 });
+  }
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e border-ink-100 bg-white">

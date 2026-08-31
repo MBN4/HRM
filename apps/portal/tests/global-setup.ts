@@ -166,6 +166,60 @@ export default async function globalSetup(): Promise<void> {
     });
   }
 
+  // Analytics dashboard (step 1.5) rollup rows, seeded DIRECTLY into the
+  // four precomputed tables rather than via the real BullMQ job — this
+  // suite's job is proving the UI RENDERS rollup data correctly (locale/
+  // RTL/branch-scoping), not re-proving the rollup computation itself,
+  // which apps/api/test/analytics.e2e-spec.ts already covers end to end.
+  // Dated "yesterday" (UTC) — the dashboard's own default `to`, so no
+  // spec needs to touch the date filters at all.
+  const analyticsDate = new Date();
+  analyticsDate.setUTCDate(analyticsDate.getUTCDate() - 1);
+  analyticsDate.setUTCHours(0, 0, 0, 0);
+
+  await prisma.headcountDailySnapshot.createMany({
+    data: [
+      { tenantId: tenantA.id, snapshotDate: analyticsDate, branchId: branchAUs.id, employmentType: 'FULL_TIME', gender: 'FEMALE', activeCount: 2 },
+      { tenantId: tenantA.id, snapshotDate: analyticsDate, branchId: branchAUs.id, employmentType: 'FULL_TIME', gender: 'MALE', activeCount: 1 },
+      { tenantId: tenantA.id, snapshotDate: analyticsDate, branchId: branchAQa.id, employmentType: 'FULL_TIME', gender: 'MALE', activeCount: 1 },
+    ],
+  });
+  await prisma.workforceMovementDailyCount.createMany({
+    data: [
+      { tenantId: tenantA.id, movementDate: analyticsDate, branchId: branchAUs.id, movementType: 'JOINER', count: 2 },
+      { tenantId: tenantA.id, movementDate: analyticsDate, branchId: branchAUs.id, movementType: 'LEAVER', count: 1 },
+      { tenantId: tenantA.id, movementDate: analyticsDate, branchId: branchAQa.id, movementType: 'LEAVER', count: 1 },
+    ],
+  });
+  await prisma.attendanceDailyBranchSummary.createMany({
+    data: [
+      {
+        tenantId: tenantA.id,
+        workDate: analyticsDate,
+        branchId: branchAUs.id,
+        presentCount: 5,
+        absentCount: 1,
+        lateCount: 2,
+        employeeCount: 8,
+        totalWorkedMinutes: 2400,
+      },
+    ],
+  });
+  await prisma.leaveUtilizationDailySnapshot.createMany({
+    data: [
+      {
+        tenantId: tenantA.id,
+        snapshotDate: analyticsDate,
+        branchId: branchAUs.id,
+        leaveType: 'ANNUAL',
+        totalEntitledDays: 100,
+        totalAccruedDays: 60,
+        totalUsedDays: 25,
+        employeeCount: 10,
+      },
+    ],
+  });
+
   const fixtures = {
     tenantASlug: TENANT_A_SLUG,
     tenantBSlug: TENANT_B_SLUG,
@@ -179,6 +233,7 @@ export default async function globalSetup(): Promise<void> {
     employeeBEmail: 'employee@portal-e2e-b.test',
     branchAUsId: branchAUs.id,
     branchAQaId: branchAQa.id,
+    analyticsDate: analyticsDate.toISOString().slice(0, 10),
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 

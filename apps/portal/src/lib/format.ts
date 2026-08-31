@@ -41,6 +41,10 @@ export function formatNumber(value: number, locale: string): string {
   return new Intl.NumberFormat(localeTag(locale)).format(value);
 }
 
+export function formatPercent(ratio: number, locale: string): string {
+  return new Intl.NumberFormat(localeTag(locale), { style: 'percent', maximumFractionDigits: 1 }).format(ratio);
+}
+
 export function formatCurrency(amount: number, currencyCode: string | null | undefined, locale: string): string {
   if (!currencyCode) return formatNumber(amount, locale);
   try {

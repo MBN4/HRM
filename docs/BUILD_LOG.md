@@ -1387,3 +1387,96 @@ expo-doctor` 21/21; `npx expo export --platform android --platform ios`
 build` and `pnpm lint` both green across all SEVEN workspaces (the six
     from before plus `@hrm/mobile`), confirmed via Turborepo, not just
     each package's scripts run in isolation.
+
+- **1.5 Analytics dashboard — done — 2026-08-31. PHASE 1 COMPLETE.** The
+  final Phase 1 step: a read-only KPI dashboard on the tenant portal,
+  backed entirely by precomputed rollup tables computed by a real
+  SCHEDULED BullMQ job — the codebase's first genuine cron, not another
+  "manual trigger only" gap. Full design in
+  [`docs/conventions/analytics-dashboard.md`](./conventions/analytics-dashboard.md).
+  Files:
+  - **`packages/db`**: one additive column,
+    `Employee.terminatedAt DateTime?` (migration
+    `20260831104151_add_analytics_module`) — set by
+    `EmployeeService.update` the moment `status` transitions INTO
+    `TERMINATED`, cleared on a reactivation out of it; the narrow capture
+    fix for leave.md's long-documented "no termination date" gap, needed
+    for leaver/attrition KPIs. Four new tenant-scoped rollup tables, RLS
+    enabled by the matching `20260831104200_enable_rls_for_analytics_module`
+    migration: `HeadcountDailySnapshot` (point-in-time cross-section, by
+    branch/department/employmentType/gender), `WorkforceMovementDailyCount`
+    (JOINER/LEAVER, one row per calendar day), `AttendanceDailyBranchSummary`
+    (a rollup OF 1.3's own `AttendanceDailySummary` rollup — never touches
+    raw `AttendanceRecord`), `LeaveUtilizationDailySnapshot` (rolled up
+    from current-year `LeaveBalance`). Every index leads with `tenant_id`.
+    `departmentId` is nullable on all four — Postgres treats every `NULL`
+    as distinct in a unique index, so the rollup job DELETES the existing
+    rows for `(tenantId, theDate)` and bulk-`createMany`s fresh ones every
+    run, rather than upserting by the documented `@@unique` grain (a real
+    gotcha, called out in the schema doc comments and in the conventions
+    doc).
+  - **`packages/shared`**: `PERMISSIONS.ANALYTICS_READ` (`analytics.read`),
+    seeded onto `HR_MANAGER`/`MANAGER` (plus `TENANT_ADMIN` via
+    `ALL_PERMISSIONS` as always) — a manager+ feature with no "view your
+    own" carve-out, since there's no per-employee row to narrow to, only
+    branch scope. `validators/analytics.validator.ts`
+    (`runAnalyticsRollupSchema`). `i18n/messages.ts` grows an `analytics.*`
+    block in both `en`/`ar`, plus `nav.analytics`/`common.type`.
+  - **`apps/api/src/analytics`** (new module): `rollup/analytics-rollup.util.ts`
+    (pure aggregation functions, DB-independent, unit-tested directly —
+    `analytics-rollup.util.spec.ts`, 9 tests); `rollup/analytics-rollup.service.ts`
+    (producer; `onModuleInit` registers ONE repeatable BullMQ job via the
+    plain `repeat: { pattern }` option — already available in the pinned
+    `bullmq@^5.28.2`, no new infra — that fans out one `rollup-tenant` job
+    per `TRIAL`/`ACTIVE` tenant, discovered via the OWNER `prisma` client,
+    same posture `ReadinessService` already takes for its own
+    infrastructure-only DB check); `rollup/analytics-rollup.processor.ts`
+    (worker; computes all four rollup tables for one tenant/one date per
+    job, each a context-less `withTenantContext` transaction, same shape
+    every Phase 1 processor already takes); `dashboard/analytics-dashboard.service.ts`
+    (read side — reads ONLY the four rollup tables, branch-scoped the same
+    two-layer way `AttendanceSummaryService.report` already is: an
+    out-of-scope `branchId` filter returns an empty/zero dashboard, never
+    a 403); `analytics.controller.ts` (`GET /analytics/dashboard`,
+    `POST /analytics/rollup/run` — a manual backfill/test lever alongside
+    the module's own real schedule, both gated by `analytics.read`).
+  - **`apps/portal`**: new `/analytics` screen (nav entry in the "Team"
+    sidebar group, gated by `can(PERMISSIONS.ANALYTICS_READ)`) — branch +
+    date-range filters, KPI tiles (headcount/joiners/leavers/attrition
+    rate/attendance rate), a headcount-by-branch bar chart and an
+    attendance trend line chart (new dependency: `recharts`, no chart lib
+    existed in this app yet), employment-type/gender breakdown lists (the
+    diversity-split KPI), and a leave-utilization-by-type table — all
+    locale/currency-free-number-formatted via the existing `lib/format.ts`
+    (`formatPercent` added there), reusing the 1.4 design system
+    (`Card`/`Field`/`EmptyState`/`Spinner`/`Alert`) with no new UI
+    primitives. `lib/api/analytics.ts` + a plain `AnalyticsDashboard`
+    interface in `lib/api/types.ts` (this codebase's established
+    "duplicate the response shape as a plain interface" convention).
+  - **Scope discipline**: no existing module's business logic, RLS, or
+    auth changed. `packages/db`'s only other-module touch is the single
+    additive `Employee.terminatedAt` column (plus its one-branch capture
+    site in `EmployeeService.update`) — the same "small nullable seam
+    column, tiny capture site" pattern 0.7/0.8/1.3 already established for
+    `Branch.headUserId`/`User.pushToken`/`Branch.geofenceLat`.
+  - Verified end to end by `apps/api/test/analytics.e2e-spec.ts` (5 tests:
+    KPI numbers computed correctly from seeded employees/leave/attendance
+    across two branches; **a direct, not just trusted, proof that
+    dashboard reads are rollup-only** — every Employee row for the tenant
+    is deleted after the rollup runs, and the dashboard's response is
+    byte-identical before and after, since none of the four rollup tables
+    carry an FK to `Employee`; branch-scoped visibility incl. an
+    out-of-scope filter returning zeros, not a 403; RBAC deny-by-default;
+    cross-tenant isolation via RLS) plus `analytics-rollup.util.spec.ts`
+    (9 pure-function tests) — 272 backend tests total (258 + 14 new),
+    zero regressions. `apps/portal` grows to 17 Playwright tests
+    (`analytics.spec.ts`, 3 new: tenant-wide KPIs summed correctly across
+    branches for an unrestricted manager, a branch-restricted manager
+    seeing fewer than the tenant-wide view, and a plain employee getting
+    a graceful notice rather than a crash) — rollup rows seeded directly
+    into the four tables by `global-setup.ts` rather than via the real
+    BullMQ job, since this suite's job is proving the UI renders rollup
+    data correctly (and respects RBAC/branch-scope/locale), not
+    re-proving the rollup computation itself. Full-repo `pnpm build`/
+    `pnpm lint` green across all seven workspaces; `apps/mobile` untouched
+    by this step.
