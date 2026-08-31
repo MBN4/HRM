@@ -13,9 +13,14 @@
  * — simpler and safer to over-redact (a field named `token` nested three
  * levels deep is still a token) than to maintain a path list that silently
  * misses a new nesting as modules evolve. See
- * docs/conventions/audit-custom-fields.md.
+ * docs/conventions/audit-custom-fields.md. Extended in step 2.1 (Payroll)
+ * to also match `grossPay`/`netPay`/`employerCost`/`componentBreakdown` —
+ * a `PayrollRunLine`'s computed amounts are exactly as sensitive as
+ * `compensation`, redacted the same "over-redact the whole value, don't
+ * enumerate leaf fields" way.
  */
-const REDACTED_KEY_PATTERN = /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation/i;
+const REDACTED_KEY_PATTERN =
+  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown/i;
 
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 

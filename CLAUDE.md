@@ -91,6 +91,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/attendance.md`](./docs/conventions/attendance.md)                           | The first high-volume module: partition-ready clock records, timezone-correct (incl. midnight-crossing) day attribution, pack-driven weekend/overtime, the biometric device seam, and regularization via the workflow engine. (1.3) |
 | [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md)               | ESS/MSS on the tenant portal + mobile app: client auth/tenant resolution, the session-aware i18n/RTL integration, how the UI consumes workflow/leave/attendance, field-omission handling. (1.4)                                     |
 | [`docs/conventions/analytics-dashboard.md`](./docs/conventions/analytics-dashboard.md)         | The KPI set, the precomputed-rollup scale strategy (incl. the nullable-dimension delete-recreate gotcha), the first real scheduled BullMQ job, and branch-scope/RBAC in analytics. (1.5)                                            |
+| [`docs/conventions/payroll.md`](./docs/conventions/payroll.md)                                 | THE pack-driven boundary statement, CALCULATE vs. DELEGATE, money/multi-currency, idempotency+resumability, run lifecycle + workflow approval, payslip + bank-export seams, and "how to add a new country". (2.1)                   |
 
 ## 5. Build log summary
 
@@ -163,6 +164,16 @@ per step, kept here for a fast overview.
   over `employees`/`attendance_records`/`leave_requests`/`leave_balances`.
   **PHASE 1 COMPLETE as of this step** — see
   [`docs/conventions/analytics-dashboard.md`](./docs/conventions/analytics-dashboard.md).
+- **2.1** — Payroll module (Phase 2's first step, THE HIGHEST-RISK MODULE):
+  an engine that computes strictly what the resolved Country Pack declares
+  — the SAME code produces a correct US run (4-layer tax) and a correct
+  Qatar run (no income tax, tiered end-of-service gratuity) from the two
+  existing reference packs. CALCULATE (in-house engine) vs. DELEGATE
+  (external-provider adapter seam) per pack; `Decimal`-only money with a
+  snapshotted multi-currency rollup; two-layer idempotent, resumable
+  BullMQ runs; approval via the 0.7 workflow engine (no bespoke logic);
+  payslip PDFs in the pack's own language; a bank-export adapter seam. See
+  [`docs/conventions/payroll.md`](./docs/conventions/payroll.md).
 
 ## 6. Not yet built
 
@@ -196,7 +207,11 @@ all built on top of Phase 0's tenancy/RLS, auth/RBAC, country packs,
 licensing, workflow engine, notifications, audit/custom-fields/i18n, and
 resilience chassis. Phase 2 (Payroll, Performance, Recruitment) builds next.
 
-- [ ] **Phase 2** — _scope not yet defined_
+- [x] **2.1** Payroll module (pack-driven CALCULATE/DELEGATE engine,
+      multi-currency, idempotent/resumable runs, workflow approval,
+      payslips, bank export)
+- [ ] **Phase 2 (remaining)** — Performance, Recruitment — _scope not yet
+      defined_
 - [ ] **Phase 3** — _scope not yet defined_
 - [ ] **Phase 4** — _scope not yet defined_
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to

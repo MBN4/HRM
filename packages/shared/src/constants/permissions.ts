@@ -32,6 +32,8 @@ export const PERMISSIONS = {
   ATTENDANCE_APPROVE: 'attendance.approve',
   ATTENDANCE_REGULARIZE: 'attendance.regularize',
   ANALYTICS_READ: 'analytics.read',
+  PAYROLL_APPROVE: 'payroll.approve',
+  PAYSLIP_VIEW: 'payslip.view',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -69,6 +71,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.ATTENDANCE_APPROVE,
     PERMISSIONS.ATTENDANCE_REGULARIZE,
     PERMISSIONS.ANALYTICS_READ,
+    PERMISSIONS.PAYSLIP_VIEW,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

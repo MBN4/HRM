@@ -15,6 +15,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { LeaveModule } from './leave/leave.module';
 import { LicensingModule } from './licensing/licensing.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PayrollModule } from './payroll/payroll.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -52,6 +53,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     LeaveModule,
     AttendanceModule,
     AnalyticsModule,
+    PayrollModule,
   ],
   controllers: [AppController],
   providers: [AppService],

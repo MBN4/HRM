@@ -75,6 +75,11 @@ export class DomainEventAuditListener {
     this.record(payload);
   }
 
+  @OnEvent('payroll.*')
+  handlePayroll(payload: DomainEventPayload): void {
+    this.record(payload);
+  }
+
   private record(payload: DomainEventPayload): void {
     const [namespace] = payload.type.split('.');
     const entityType = namespace.charAt(0).toUpperCase() + namespace.slice(1);

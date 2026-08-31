@@ -76,6 +76,12 @@ model Tenant {
   // the fallback used where a branch hasn't been assigned one.
   defaultCountryCode String        @map("default_country_code") @db.VarChar(2)
   hostingRegion      String        @map("hosting_region")
+  // ISO 4217 — the tenant's REPORTING currency for multi-branch/
+  // multi-currency payroll rollups (step 2.1). A small, additive seam
+  // column, same pattern as Branch.geofenceLat/Employee.terminatedAt — see
+  // docs/conventions/payroll.md. Defaults to USD so no existing tenant row
+  // is left null.
+  baseCurrencyCode   String        @default("USD") @map("base_currency_code") @db.VarChar(3)
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
@@ -122,6 +128,11 @@ model Tenant {
   workforceMovementDailyCounts   WorkforceMovementDailyCount[]
   attendanceDailyBranchSummaries AttendanceDailyBranchSummary[]
   leaveUtilizationDailySnapshots LeaveUtilizationDailySnapshot[]
+  payrollComponentDefinitions    PayrollComponentDefinition[]
+  payrollRuns                    PayrollRun[]
+  payrollRunLines                PayrollRunLine[]
+  payslipDocuments               PayslipDocument[]
+  payrollBankExports             PayrollBankExport[]
 
   @@map("tenants")
 }
@@ -188,6 +199,8 @@ model Branch {
   workforceMovementDailyCounts   WorkforceMovementDailyCount[]
   attendanceDailyBranchSummaries AttendanceDailyBranchSummary[]
   leaveUtilizationDailySnapshots LeaveUtilizationDailySnapshot[]
+  payrollRuns                    PayrollRun[]
+  payrollRunLines                PayrollRunLine[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -1215,6 +1228,7 @@ model Employee {
   attendanceRecords         AttendanceRecord[]
   attendanceRegularizations AttendanceRegularization[]
   attendanceDailySummaries  AttendanceDailySummary[]
+  payrollRunLines           PayrollRunLine[]
 
   // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
@@ -1859,4 +1873,238 @@ model LeaveUtilizationDailySnapshot {
   @@unique([tenantId, snapshotDate, branchId, departmentId, leaveType])
   @@index([tenantId, snapshotDate, branchId])
   @@map("leave_utilization_daily_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Payroll (step 2.1, Phase 2's first step). THE HIGHEST-RISK MODULE — see
+// docs/conventions/payroll.md for the full write-up. The one hard rule this
+// entire schema exists to serve: mandatory tax/statutory deductions are
+// NEVER modeled here — they come straight from the resolved CountryPack's
+// `tax.layers`/`statutory.components` (0.5), computed by the EXISTING,
+// UNMODIFIED `computeMultiLayerTax`/`computeStatutoryComponents`. Every
+// table below is either (a) payroll's own additive SALARY-STRUCTURE concept
+// (earnings/allowances/discretionary deductions — never a substitute for
+// pack-driven tax/statutory), or (b) run/execution bookkeeping. Money is
+// ALWAYS `Decimal`, never `Float` — see payroll.md's money-representation
+// note.
+// ---------------------------------------------------------------------------
+
+enum PayrollComponentType {
+  EARNING
+  ALLOWANCE
+  DEDUCTION
+}
+
+enum PayrollComponentCalcKind {
+  FIXED_AMOUNT
+  PERCENTAGE_OF_BASE
+  FORMULA
+}
+
+// One tenant's salary-structure line item for one country — EARNING/
+// ALLOWANCE/discretionary DEDUCTION only (mandatory tax/statutory
+// deductions are NEVER modeled here, see the header comment above).
+// `formula` (only meaningful when `calcKind: FORMULA`) is validated against
+// 0.5's own `exprSchema` at every write AND read — the SAME closed AST,
+// imported not redefined (see
+// packages/shared/src/validators/payroll.validator.ts) — and may reference
+// ONLY `basicSalary`/`yearsOfService` (not `grossSalary`/`monthlySalary`/
+// `annualSalary`, which the engine only knows AFTER every component sums
+// up — a documented evaluation-order rule enforced by
+// `PayrollEngineService`, not by this schema). `percentageOfBase` is a
+// plain string (one of 0.5's `SALARY_BASES`) rather than a second Prisma
+// enum that would need to stay byte-for-byte in sync with that TS union —
+// validated by `createPayrollComponentSchema`, the same "opaque
+// string, meaning enforced by the validator" posture
+// `Employee.statutoryFields`' keys already take.
+model PayrollComponentDefinition {
+  id               String                   @id @default(uuid()) @db.Uuid
+  tenantId         String                   @map("tenant_id") @db.Uuid
+  countryCode      String                   @map("country_code") @db.VarChar(2)
+  key              String
+  name             String
+  type             PayrollComponentType
+  calcKind         PayrollComponentCalcKind @map("calc_kind")
+  fixedAmount      Decimal?                 @map("fixed_amount") @db.Decimal(14, 2)
+  percentageOfBase String?                  @map("percentage_of_base")
+  percentageRate   Float?                   @map("percentage_rate")
+  formula          Json?
+  order            Int                      @default(0)
+  isActive         Boolean                  @default(true) @map("is_active")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, countryCode, key])
+  @@index([tenantId, countryCode, isActive])
+  @@map("payroll_component_definitions")
+}
+
+// Global reference data, deliberately RLS-EXEMPT — the SAME posture
+// `CountryPack` already takes (see docs/conventions/tenancy-rls.md):
+// exchange rates are objective market data, not tenant-owned. `hrm_app` is
+// granted SELECT only; writable today only through the owner role
+// (seeding) — a real rate-provider integration is future work, tracked as
+// a documented seam in payroll.md, not built this step.
+model ExchangeRate {
+  id            String   @id @default(uuid()) @db.Uuid
+  baseCurrency  String   @map("base_currency") @db.VarChar(3)
+  quoteCurrency String   @map("quote_currency") @db.VarChar(3)
+  // 1 unit of baseCurrency = `rate` units of quoteCurrency.
+  rate          Decimal  @db.Decimal(18, 8)
+  asOfDate      DateTime @map("as_of_date") @db.Date
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([baseCurrency, quoteCurrency, asOfDate])
+  @@index([baseCurrency, quoteCurrency, asOfDate])
+  @@map("exchange_rates")
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  CALCULATED
+  APPROVED
+  FINALIZED
+  PAID
+}
+
+// One row per (tenant, branch, period) — the run-level idempotency anchor
+// (`@@unique` below). `payrollMode` is SNAPSHOTTED from the resolved
+// CountryPack at run creation (CALCULATE vs. DELEGATE — see
+// docs/conventions/payroll.md) so a later pack edit never changes how an
+// in-flight or historical run was actually processed. `workflowInstanceId`
+// is a plain id, no FK relation — the SAME polymorphic "just an id"
+// pattern `LeaveRequest.workflowInstanceId` already establishes (THE RULE:
+// approval is the generic 0.7 workflow engine, this module owns no
+// approve/reject logic of its own). `exchangeRateToBase`/`totalGrossBase`/
+// `totalNetBase` are snapshotted once at calculation time, never
+// re-resolved later — the same "snapshot, don't re-derive" posture
+// `LeaveBalance.entitledDays` already takes, so a later exchange-rate
+// update never retroactively rewrites a past run's reported totals.
+model PayrollRun {
+  id                 String           @id @default(uuid()) @db.Uuid
+  tenantId           String           @map("tenant_id") @db.Uuid
+  branchId           String           @map("branch_id") @db.Uuid
+  periodYear         Int              @map("period_year")
+  periodMonth        Int              @map("period_month")
+  status             PayrollRunStatus @default(DRAFT)
+  payrollMode        String           @map("payroll_mode") @db.VarChar(16)
+  workflowInstanceId String?          @map("workflow_instance_id") @db.Uuid
+  currencyCode       String           @map("currency_code") @db.VarChar(3)
+  exchangeRateToBase Decimal?         @map("exchange_rate_to_base") @db.Decimal(18, 8)
+  totalGross         Decimal          @default(0) @map("total_gross") @db.Decimal(14, 2)
+  totalNet           Decimal          @default(0) @map("total_net") @db.Decimal(14, 2)
+  totalEmployerCost  Decimal          @default(0) @map("total_employer_cost") @db.Decimal(14, 2)
+  totalGrossBase     Decimal?         @map("total_gross_base") @db.Decimal(14, 2)
+  totalNetBase       Decimal?         @map("total_net_base") @db.Decimal(14, 2)
+  createdByUserId    String?          @map("created_by_user_id") @db.Uuid
+  approvedAt         DateTime?        @map("approved_at")
+  finalizedAt        DateTime?        @map("finalized_at")
+  paidAt             DateTime?        @map("paid_at")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch              @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  lines       PayrollRunLine[]
+  bankExports PayrollBankExport[]
+
+  // Lets PayrollRunLine/PayrollBankExport define a composite FK of
+  // (tenantId, id) -> this table, same pattern as every other entity here.
+  @@unique([tenantId, id])
+  @@unique([tenantId, branchId, periodYear, periodMonth])
+  @@index([tenantId, branchId, periodYear, periodMonth])
+  @@map("payroll_runs")
+}
+
+enum PayrollRunLineStatus {
+  PENDING
+  COMPUTED
+  FAILED
+}
+
+enum PayrollComputedVia {
+  ENGINE
+  DELEGATE
+}
+
+// One row per (run, employee) — THE resumability + idempotency unit.
+// `@@unique([tenantId, payrollRunId, employeeId])` is the DB-level backstop
+// requested "on (tenant, branch, period, employee)": since `PayrollRun`
+// already carries its own `@@unique([tenantId, branchId, periodYear,
+// periodMonth])`, a line's `(tenantId, payrollRunId, employeeId)`
+// uniqueness transitively provides exactly that guarantee one level down
+// — see docs/conventions/payroll.md for the explicit equivalence note.
+// `PayrollRunProcessor` uses THIS table's own `status` to resume a
+// partially-failed run: any employee already `COMPUTED` is skipped on a
+// re-run, never reprocessed.
+model PayrollRunLine {
+  id                 String               @id @default(uuid()) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  payrollRunId       String               @map("payroll_run_id") @db.Uuid
+  employeeId         String               @map("employee_id") @db.Uuid
+  branchId           String               @map("branch_id") @db.Uuid
+  status             PayrollRunLineStatus @default(PENDING)
+  computedVia        PayrollComputedVia?  @map("computed_via")
+  grossPay           Decimal?             @map("gross_pay") @db.Decimal(14, 2)
+  netPay             Decimal?             @map("net_pay") @db.Decimal(14, 2)
+  employerCost       Decimal?             @map("employer_cost") @db.Decimal(14, 2)
+  // Ordered `{ key, label, type, amount }[]` mirroring the resolved pack's
+  // own `payslipTemplate.lineItems` keys, so the payslip renderer maps
+  // directly with no per-country branching.
+  componentBreakdown Json?                @map("component_breakdown")
+  errorMessage       String?              @map("error_message")
+  computedAt         DateTime?            @map("computed_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payrollRun PayrollRun       @relation(fields: [tenantId, payrollRunId], references: [tenantId, id], onDelete: Cascade)
+  employee   Employee         @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  branch     Branch           @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  payslip    PayslipDocument?
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, payrollRunId, employeeId])
+  @@index([tenantId, payrollRunId, status])
+  @@index([tenantId, employeeId])
+  @@map("payroll_run_lines")
+}
+
+// One generated payslip PDF per run line — metadata in Postgres, bytes in
+// S3/MinIO via 1.1's `StorageService`, the SAME "metadata here, bytes
+// there" pattern `EmployeeDocument` already established.
+model PayslipDocument {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  payrollRunLineId String   @map("payroll_run_line_id") @db.Uuid
+  storageKey       String   @map("storage_key")
+  language         String   @db.VarChar(8)
+  generatedAt      DateTime @default(now()) @map("generated_at")
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payrollRunLine PayrollRunLine @relation(fields: [tenantId, payrollRunLineId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, payrollRunLineId])
+  @@map("payslip_documents")
+}
+
+// One generated bank-payment export file per run — see
+// docs/conventions/payroll.md's bank-export seam note (one reference
+// format, `GENERIC_CSV`, bound today via the `BankExportAdapter` DI seam).
+model PayrollBankExport {
+  id                String   @id @default(uuid()) @db.Uuid
+  tenantId          String   @map("tenant_id") @db.Uuid
+  payrollRunId      String   @map("payroll_run_id") @db.Uuid
+  format            String   @db.VarChar(32)
+  storageKey        String   @map("storage_key")
+  generatedByUserId String   @map("generated_by_user_id") @db.Uuid
+  generatedAt       DateTime @default(now()) @map("generated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payrollRun PayrollRun @relation(fields: [tenantId, payrollRunId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, payrollRunId])
+  @@map("payroll_bank_exports")
 }

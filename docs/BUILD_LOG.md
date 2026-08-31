@@ -1480,3 +1480,83 @@ build` and `pnpm lint` both green across all SEVEN workspaces (the six
     re-proving the rollup computation itself. Full-repo `pnpm build`/
     `pnpm lint` green across all seven workspaces; `apps/mobile` untouched
     by this step.
+
+- **2.1 Payroll module — done — 2026-08-31. Phase 2's first step.** THE
+  HIGHEST-RISK MODULE in this codebase — full design in
+  [`docs/conventions/payroll.md`](./conventions/payroll.md), including THE
+  BOUNDARY statement ("the engine computes strictly what the resolved
+  Country Pack declares; pack legal correctness is a per-country authoring
+  responsibility"), the variable-semantics decisions, and two real
+  correctness bugs caught and fixed during this step (the annualize/
+  de-annualize tax pitfall, and the tiered-gratuity cumulative-vs-
+  incremental double-counting trap). Files:
+  - **`packages/db`**: `Tenant.baseCurrencyCode` (additive, defaults
+    `"USD"`). New tables: `PayrollComponentDefinition` (salary structure —
+    earnings/allowances/discretionary deductions ONLY, never a substitute
+    for pack-driven tax/statutory), `ExchangeRate` (global, RLS-exempt like
+    `CountryPack`), `PayrollRun` (`@@unique([tenantId, branchId,
+periodYear, periodMonth])`), `PayrollRunLine` (`@@unique([tenantId,
+payrollRunId, employeeId])` — the DB-level idempotency backstop),
+    `PayslipDocument`, `PayrollBankExport`. Money is `Decimal` everywhere,
+    never `Float`. Two migrations (`add_payroll_module`,
+    `enable_rls_for_payroll_module`) — the standard "add tables" +
+    "enable RLS" pair every prior module's schema step already
+    establishes. `packages/db/src/seed-exchange-rates.ts` (new, illustrative
+    USD⇄QAR reference rates, wired into `prisma/seed.ts`).
+  - **`packages/shared`**: `PERMISSIONS.PAYROLL_APPROVE`/`PAYSLIP_VIEW`;
+    `validators/payroll.validator.ts` (`createPayrollComponentSchema` —
+    reuses 0.5's `exprSchema` as-is; `runPayrollSchema`);
+    `notifications/event-notification-mapping.ts` gains
+    `'payroll.payslip_ready'` (the only new event this step needs — "run
+    approved" arrives for free via the already-mapped
+    `workflow.approved`); `audit/redact.ts`'s `REDACTED_KEY_PATTERN` gains
+    `grossPay`/`netPay`/`employerCost`/`componentBreakdown`.
+  - **`apps/api/src/payroll`** (new module): `payroll-pack.util.ts`
+    (`resolvePayrollPackConfig`, the duplicated-tx-resolver pattern 1.2/1.3
+    already establish); `payroll-variables.util.ts` (pure functions —
+    years-of-service, period start/end dates, the variable-build contract);
+    `components/` (`PayrollComponentDefinitionService`, with a static
+    pre-gross-variable-only check over component formulas — no second
+    evaluator); `engine/payroll-engine.service.ts` (THE CALCULATE-mode
+    engine, proven against both reference packs); `delegate/`
+    (`PAYROLL_PROVIDER_ADAPTER` seam + `StubPayrollProviderAdapter`);
+    `bank-export/` (`BANK_EXPORT_ADAPTER` seam +
+    `GenericCsvBankExportAdapter`); `payslip/` (`PayslipPdfService` via a
+    new `pdfkit` dependency + bundled `DejaVuSans(-Bold).ttf` fonts under
+    `apps/api/assets/fonts/` for Arabic glyph coverage — no PDF-generation
+    skill was actually available in this environment;
+    `PayslipService` orchestrates render/store/notify); `runs/`
+    (`PayrollRunService` orchestration, `PayrollRunQueueService` producer,
+    `PayrollRunProcessor` worker — resumable, two-layer-idempotent, the
+    SAME "bootstrap transaction then per-employee short transactions"
+    shape `LeaveAccrualProcessor` already establishes;
+    `PayrollWorkflowEventsListener`, `ExchangeRateService`,
+    `MultiCurrencyRollupService`); `payroll.controller.ts` (every route
+    `@RequireFeature(MULTI_COUNTRY_PAYROLL)` + permission-gated; no
+    approve/reject route — THE RULE). `app.module.ts`,
+    `notification-dispatch.listener.ts`, `domain-event-audit.listener.ts`
+    each gained one mechanical, additive line for the new module/event
+    namespace.
+  - **A real bug caught and fixed during this step**: `POST /payroll/runs/
+:id/bank-export` originally carried `@AuditLog`, but the route returns a
+    `StreamableFile` wrapping a live Node stream — `AuditInterceptor`
+    tried to redact it as the audit row's `after` value and overflowed the
+    stack on every call (surfacing as a BullMQ job silently retrying a
+    crashing bank-export in one e2e run, and a clean 500 in another). Fixed
+    by following `EmployeeDocumentsController.download`'s own existing
+    precedent: a `StreamableFile`-returning route never carries
+    `AuditInterceptor` — the DB row the service itself writes
+    (`PayrollBankExport`) is the durable record instead. See
+    docs/conventions/payroll.md for the full account.
+  - Verified end-to-end over real HTTP by `apps/api/test/payroll.e2e-spec.ts`
+    (8 tests — see docs/conventions/payroll.md's own closing paragraph for
+    the full list: US/QA divergence with real hand-computed numbers
+    including the gratuity regression proof, DELEGATE-mode routing,
+    idempotency, resumability, workflow approval through to finalize/
+    bank-export/payslip in both languages, `salary.view`/`payslip.view`
+    gating, cross-tenant isolation) plus `payroll-variables.util.spec.ts`
+    (5 pure-function unit tests). `apps/api` grows from 258 to 271 tests;
+    `packages/db`'s 14 unchanged — 285 backend tests total, zero
+    regressions. Full-repo `pnpm build`/`pnpm lint` green across all seven
+    workspaces; `apps/portal`/`apps/mobile` untouched by this step (no
+    portal work was in this step's scope).

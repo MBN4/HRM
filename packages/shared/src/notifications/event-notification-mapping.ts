@@ -28,6 +28,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'workflow.escalated',
   'licensing.issued',
   'licensing.revoked',
+  'payroll.payslip_ready',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -45,4 +46,5 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'workflow.escalated': ['IN_APP', 'EMAIL'],
   'licensing.issued': ['IN_APP'],
   'licensing.revoked': ['IN_APP'],
+  'payroll.payslip_ready': ['IN_APP', 'EMAIL'],
 };

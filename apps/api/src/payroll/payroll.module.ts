@@ -1,0 +1,68 @@
+import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { PAYROLL_RUN_QUEUE } from '../queue/queue.constants';
+import { LicensingModule } from '../licensing/licensing.module';
+import { WorkflowModule } from '../workflow/workflow.module';
+import { PayrollController } from './payroll.controller';
+import { PayrollComponentDefinitionService } from './components/payroll-component-definition.service';
+import { PayrollEngineService } from './engine/payroll-engine.service';
+import { PAYROLL_PROVIDER_ADAPTER } from './delegate/payroll-provider.interface';
+import { StubPayrollProviderAdapter } from './delegate/stub-payroll-provider.adapter';
+import { BANK_EXPORT_ADAPTER } from './bank-export/bank-export-adapter.interface';
+import { GenericCsvBankExportAdapter } from './bank-export/generic-csv-bank-export.adapter';
+import { PayrollBankExportService } from './bank-export/payroll-bank-export.service';
+import { PayslipPdfService } from './payslip/payslip-pdf.service';
+import { PayslipService } from './payslip/payslip.service';
+import { ExchangeRateService } from './runs/exchange-rate.service';
+import { MultiCurrencyRollupService } from './runs/multi-currency-rollup.service';
+import { PayrollRunQueueService } from './runs/payroll-run-queue.service';
+import { PayrollRunProcessor } from './runs/payroll-run.processor';
+import { PayrollRunService } from './runs/payroll-run.service';
+import { PayrollWorkflowEventsListener } from './runs/payroll-workflow-events.listener';
+
+/**
+ * The Payroll module (step 2.1, Phase 2's first step) — THE HIGHEST-RISK
+ * MODULE in this codebase, see docs/conventions/payroll.md. Imports
+ * `WorkflowModule` to inject `WorkflowEngineService` directly (a payroll
+ * run's approval just starts a `WorkflowInstance` — THE RULE, see
+ * docs/conventions/workflow.md), the SAME reuse `LeaveModule`/
+ * `AttendanceModule` already establish. `LicensingModule` is imported for
+ * `FeatureFlagGuard`'s own dependency (`FeatureFlagResolutionService`) —
+ * every route in this controller is `@RequireFeature(MULTI_COUNTRY_PAYROLL)`-gated.
+ * `EncryptionService`/
+ * `StorageService`/`TenantContextService`/`IdempotencyService` need no
+ * explicit import — all `@Global()`. `BullModule.registerQueue({name:
+ * PAYROLL_RUN_QUEUE})` is the SAME reusable pattern every other Phase 1
+ * queue-backed module already establishes. `PAYROLL_PROVIDER_ADAPTER`/
+ * `BANK_EXPORT_ADAPTER` bind to their dev/reference implementations today
+ * — the SAME "swap one DI binding, no caller changes" seam pattern 0.4/
+ * 0.8/1.3 already establish.
+ */
+@Module({
+  imports: [
+    WorkflowModule,
+    LicensingModule,
+    BullModule.registerQueue({
+      name: PAYROLL_RUN_QUEUE,
+      defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 1000 } },
+    }),
+  ],
+  controllers: [PayrollController],
+  providers: [
+    PayrollComponentDefinitionService,
+    PayrollEngineService,
+    { provide: PAYROLL_PROVIDER_ADAPTER, useClass: StubPayrollProviderAdapter },
+    { provide: BANK_EXPORT_ADAPTER, useClass: GenericCsvBankExportAdapter },
+    PayrollBankExportService,
+    PayslipPdfService,
+    PayslipService,
+    ExchangeRateService,
+    MultiCurrencyRollupService,
+    PayrollRunQueueService,
+    PayrollRunProcessor,
+    PayrollRunService,
+    PayrollWorkflowEventsListener,
+  ],
+  exports: [PayrollRunService],
+})
+export class PayrollModule {}
