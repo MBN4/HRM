@@ -36,5 +36,10 @@ import { TokenService } from './token.service';
     // SAML/OIDC provider later means changing this binding, not AuthService.
     { provide: AUTH_PROVIDER, useExisting: LocalAuthProvider },
   ],
+  // `TokenService` exported (step 2.3) for Offboarding's access-revocation
+  // handoff (`TokenService.revokeAllForUser`) — see
+  // docs/conventions/recruitment-lifecycle.md. Nothing else in this module
+  // needs to be importable elsewhere yet.
+  exports: [TokenService],
 })
 export class AuthModule {}

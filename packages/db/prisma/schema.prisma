@@ -140,6 +140,17 @@ model Tenant {
   reviewAssignments              ReviewAssignment[]
   reviews                        Review[]
   appraisalRatingDistributions   AppraisalRatingDistributionSnapshot[]
+  jobRequisitions                JobRequisition[]
+  jobPostings                    JobPosting[]
+  candidates                     Candidate[]
+  applications                   Application[]
+  interviews                     Interview[]
+  interviewScorecards            InterviewScorecard[]
+  offers                         Offer[]
+  onboardingProcesses            OnboardingProcess[]
+  offboardingProcesses           OffboardingProcess[]
+  checklistTemplates             ChecklistTemplate[]
+  checklistTaskInstances         ChecklistTaskInstance[]
 
   @@map("tenants")
 }
@@ -209,6 +220,8 @@ model Branch {
   payrollRuns                    PayrollRun[]
   payrollRunLines                PayrollRunLine[]
   appraisalRatingDistributions   AppraisalRatingDistributionSnapshot[]
+  jobRequisitions                JobRequisition[]
+  offers                         Offer[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -237,8 +250,10 @@ model Department {
   childDepartments Department[] @relation("DepartmentHierarchy")
   headUser         User?        @relation("DepartmentHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
-  employees Employee[]
-  goals     Goal[]
+  employees       Employee[]
+  goals           Goal[]
+  jobRequisitions JobRequisition[]
+  offers          Offer[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, branchId, name])
@@ -254,7 +269,9 @@ model Designation {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  employees Employee[]
+  employees       Employee[]
+  jobRequisitions JobRequisition[]
+  offers          Offer[]
 
   // Lets Employee.designation define a composite FK of
   // (tenantId, designationId) -> (tenantId, id) against this table, same
@@ -1242,6 +1259,9 @@ model Employee {
   appraisals                Appraisal[]
   reviewAssignments         ReviewAssignment[]
   reviewsGiven              Review[]
+  onboardingProcess         OnboardingProcess?
+  offboardingProcesses      OffboardingProcess[]
+  payrollFinalSettlements   PayrollRun[]               @relation("PayrollFinalSettlement")
 
   // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
@@ -1982,8 +2002,18 @@ enum PayrollRunStatus {
   PAID
 }
 
-// One row per (tenant, branch, period) — the run-level idempotency anchor
-// (`@@unique` below). `payrollMode` is SNAPSHOTTED from the resolved
+// `REGULAR` (the only kind before step 2.3) vs `FINAL_SETTLEMENT` — the ONE
+// additive seam Offboarding (2.3) needed from Payroll's ORCHESTRATION layer
+// (see docs/conventions/recruitment-lifecycle.md); `PayrollEngineService`'s
+// tax/statutory calculation code is completely untouched by this — see the
+// `settlementEmployeeId` note below for exactly what changed and why.
+enum PayrollRunType {
+  REGULAR
+  FINAL_SETTLEMENT
+}
+
+// One row per (tenant, branch, period) for a `REGULAR` run — the run-level
+// idempotency anchor. `payrollMode` is SNAPSHOTTED from the resolved
 // CountryPack at run creation (CALCULATE vs. DELEGATE — see
 // docs/conventions/payroll.md) so a later pack edit never changes how an
 // in-flight or historical run was actually processed. `workflowInstanceId`
@@ -1995,39 +2025,76 @@ enum PayrollRunStatus {
 // re-resolved later — the same "snapshot, don't re-derive" posture
 // `LeaveBalance.entitledDays` already takes, so a later exchange-rate
 // update never retroactively rewrites a past run's reported totals.
+//
+// `runType`/`settlementEmployeeId` (step 2.3, additive) let Offboarding
+// trigger exactly ONE MORE run for an employee who has already left
+// `ACTIVE` status (and so would otherwise never appear in any future
+// REGULAR run's employee-selection query again) — see
+// `PayrollRunProcessor.process`, the ONLY other file this seam touches.
+// `PayrollEngineService.computeForEmployee` itself is called EXACTLY as it
+// always was, unmodified: a FINAL_SETTLEMENT run computes that period's
+// ordinary incremental result (including, for a country like Qatar, that
+// period's incremental `TIERED_BY_YEARS_OF_SERVICE` gratuity delta) — see
+// docs/conventions/recruitment-lifecycle.md for the honest, documented
+// limitation this implies (no cumulative lump-sum gratuity payout; solving
+// that correctly would mean touching the engine itself, explicitly out of
+// this step's scope).
+//
+// The ORIGINAL blanket `@@unique([tenantId, branchId, periodYear,
+// periodMonth])` could not simply gain a nullable `settlementEmployeeId`
+// column to its key — Postgres treats every `NULL` as DISTINCT in a unique
+// index, which would have SILENTLY WEAKENED the existing REGULAR-run
+// idempotency guarantee (multiple REGULAR runs, all with
+// `settlementEmployeeId IS NULL`, would stop colliding against each
+// other). Instead, TWO hand-written PARTIAL unique indexes (Prisma has no
+// partial-index DSL, the same "hand-written SQL" posture RLS itself
+// already takes — see docs/conventions/tenancy-rls.md) replace it exactly:
+// one scoped `WHERE run_type = 'REGULAR'` (byte-identical to the original
+// constraint), one scoped `WHERE run_type = 'FINAL_SETTLEMENT'` (one
+// settlement run per employee per period) — see the
+// `add_payroll_final_settlement_seam` migration.
 model PayrollRun {
-  id                 String           @id @default(uuid()) @db.Uuid
-  tenantId           String           @map("tenant_id") @db.Uuid
-  branchId           String           @map("branch_id") @db.Uuid
-  periodYear         Int              @map("period_year")
-  periodMonth        Int              @map("period_month")
-  status             PayrollRunStatus @default(DRAFT)
-  payrollMode        String           @map("payroll_mode") @db.VarChar(16)
-  workflowInstanceId String?          @map("workflow_instance_id") @db.Uuid
-  currencyCode       String           @map("currency_code") @db.VarChar(3)
-  exchangeRateToBase Decimal?         @map("exchange_rate_to_base") @db.Decimal(18, 8)
-  totalGross         Decimal          @default(0) @map("total_gross") @db.Decimal(14, 2)
-  totalNet           Decimal          @default(0) @map("total_net") @db.Decimal(14, 2)
-  totalEmployerCost  Decimal          @default(0) @map("total_employer_cost") @db.Decimal(14, 2)
-  totalGrossBase     Decimal?         @map("total_gross_base") @db.Decimal(14, 2)
-  totalNetBase       Decimal?         @map("total_net_base") @db.Decimal(14, 2)
-  createdByUserId    String?          @map("created_by_user_id") @db.Uuid
-  approvedAt         DateTime?        @map("approved_at")
-  finalizedAt        DateTime?        @map("finalized_at")
-  paidAt             DateTime?        @map("paid_at")
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @updatedAt @map("updated_at")
+  id                   String           @id @default(uuid()) @db.Uuid
+  tenantId             String           @map("tenant_id") @db.Uuid
+  branchId             String           @map("branch_id") @db.Uuid
+  periodYear           Int              @map("period_year")
+  periodMonth          Int              @map("period_month")
+  status               PayrollRunStatus @default(DRAFT)
+  runType              PayrollRunType   @default(REGULAR) @map("run_type")
+  settlementEmployeeId String?          @map("settlement_employee_id") @db.Uuid
+  payrollMode          String           @map("payroll_mode") @db.VarChar(16)
+  workflowInstanceId   String?          @map("workflow_instance_id") @db.Uuid
+  currencyCode         String           @map("currency_code") @db.VarChar(3)
+  exchangeRateToBase   Decimal?         @map("exchange_rate_to_base") @db.Decimal(18, 8)
+  totalGross           Decimal          @default(0) @map("total_gross") @db.Decimal(14, 2)
+  totalNet             Decimal          @default(0) @map("total_net") @db.Decimal(14, 2)
+  totalEmployerCost    Decimal          @default(0) @map("total_employer_cost") @db.Decimal(14, 2)
+  totalGrossBase       Decimal?         @map("total_gross_base") @db.Decimal(14, 2)
+  totalNetBase         Decimal?         @map("total_net_base") @db.Decimal(14, 2)
+  createdByUserId      String?          @map("created_by_user_id") @db.Uuid
+  approvedAt           DateTime?        @map("approved_at")
+  finalizedAt          DateTime?        @map("finalized_at")
+  paidAt               DateTime?        @map("paid_at")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
 
-  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch      Branch              @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
-  lines       PayrollRunLine[]
-  bankExports PayrollBankExport[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch             Branch              @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  settlementEmployee Employee?           @relation("PayrollFinalSettlement", fields: [tenantId, settlementEmployeeId], references: [tenantId, id], onDelete: Cascade)
+  lines              PayrollRunLine[]
+  bankExports        PayrollBankExport[]
 
   // Lets PayrollRunLine/PayrollBankExport define a composite FK of
   // (tenantId, id) -> this table, same pattern as every other entity here.
+  // NOTE: the REGULAR-run uniqueness on (tenantId, branchId, periodYear,
+  // periodMonth) and the FINAL_SETTLEMENT-run uniqueness on (tenantId,
+  // settlementEmployeeId, periodYear, periodMonth) are both hand-written
+  // PARTIAL unique indexes in the `add_payroll_final_settlement_seam`
+  // migration, not expressible as a Prisma `@@unique` — see the model doc
+  // comment above.
   @@unique([tenantId, id])
-  @@unique([tenantId, branchId, periodYear, periodMonth])
   @@index([tenantId, branchId, periodYear, periodMonth])
+  @@index([tenantId, settlementEmployeeId])
   @@map("payroll_runs")
 }
 
@@ -2436,4 +2503,444 @@ model AppraisalRatingDistributionSnapshot {
   @@unique([tenantId, cycleId, branchId, departmentId, ratingValue])
   @@index([tenantId, cycleId, branchId])
   @@map("appraisal_rating_distribution_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Recruitment (ATS) + Onboarding + Offboarding — the employee LIFECYCLE
+// (step 2.3, Phase 2's final step). See
+// docs/conventions/recruitment-lifecycle.md. Recruitment deals in
+// CANDIDATES, not yet Employees — `Candidate`/`Application`/`Interview`/
+// `Offer` carry NO `employeeId` anywhere. `OnboardingProcess` is the ONE
+// bridge that CREATES a real `Employee` (1.1) from an ACCEPTED `Offer`;
+// `OffboardingProcess` is the ONE bridge that hands a leaving `Employee`'s
+// final pay to Payroll (2.1, via the additive `PayrollRun.runType` seam
+// above) and revokes their access (0.4). Every approval in this step
+// (requisition, offer, offboarding) is a real 0.7 `WorkflowInstance` — THE
+// RULE, no bespoke approval logic anywhere here.
+// ---------------------------------------------------------------------------
+
+enum JobRequisitionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+// A headcount request, tied to branch/department — approved via the REAL
+// 0.7 workflow engine (`entityType: "JobRequisition"`) like every approval
+// in this step. `JobPosting` may only be created from an `APPROVED`
+// requisition (see `JobPosting` below) — a posting can never exist without
+// an approved headcount behind it.
+model JobRequisition {
+  id                 String               @id @default(uuid()) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  title              String
+  branchId           String               @map("branch_id") @db.Uuid
+  departmentId       String?              @map("department_id") @db.Uuid
+  designationId      String?              @map("designation_id") @db.Uuid
+  employmentType     EmploymentType       @map("employment_type")
+  headcount          Int                  @default(1)
+  justification      String?
+  status             JobRequisitionStatus @default(DRAFT)
+  workflowInstanceId String?              @map("workflow_instance_id") @db.Uuid
+  createdByUserId    String               @map("created_by_user_id") @db.Uuid
+  approvedAt         DateTime?            @map("approved_at")
+  closedAt           DateTime?            @map("closed_at")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch       @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  department  Department?  @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: SetNull)
+  designation Designation? @relation(fields: [tenantId, designationId], references: [tenantId, id], onDelete: SetNull)
+  postings    JobPosting[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@index([tenantId, branchId])
+  @@map("job_requisitions")
+}
+
+enum JobPostingStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+// The PUBLIC-facing side of a requisition. `publicSlug` is what the
+// unauthenticated careers API resolves by (`GET /careers/postings/:slug`,
+// scoped to whichever tenant the request's Host header already resolved to
+// — see docs/conventions/recruitment-lifecycle.md → The public careers
+// API). Only `PUBLISHED` postings are ever visible through that public
+// route; `DRAFT`/`CLOSED` are internal-only.
+model JobPosting {
+  id            String           @id @default(uuid()) @db.Uuid
+  tenantId      String           @map("tenant_id") @db.Uuid
+  requisitionId String           @map("requisition_id") @db.Uuid
+  title         String
+  description   String
+  publicSlug    String           @map("public_slug")
+  status        JobPostingStatus @default(DRAFT)
+  publishedAt   DateTime?        @map("published_at")
+  closedAt      DateTime?        @map("closed_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requisition  JobRequisition @relation(fields: [tenantId, requisitionId], references: [tenantId, id], onDelete: Cascade)
+  applications Application[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, publicSlug])
+  @@index([tenantId, status])
+  @@index([tenantId, requisitionId])
+  @@map("job_postings")
+}
+
+// A candidate's IDENTITY — deduplicated per tenant by email (a re-applicant
+// reuses the SAME row; only a new `Application` is created for the new
+// posting — see the public `apply` endpoint). Deliberately carries NO
+// `employeeId`/`userId`: a Candidate is not yet, and may never become, an
+// Employee — see `OnboardingProcess` below for the one bridge that
+// converts one into the other.
+model Candidate {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  firstName        String   @map("first_name")
+  lastName         String   @map("last_name")
+  email            String
+  phone            String?
+  resumeStorageKey String?  @map("resume_storage_key")
+  source           String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  applications        Application[]
+  onboardingProcesses OnboardingProcess[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, email])
+  @@map("candidates")
+}
+
+enum ApplicationStage {
+  APPLIED
+  SCREEN
+  INTERVIEW
+  OFFER
+  HIRED
+  REJECTED
+}
+
+// One candidate's pipeline progress against one posting. Stage transitions
+// are `@AuditLog`'d at the route (0.9) — no separate history table, the
+// generic audit log's `before`/`after` capture already records every
+// transition; adding a dedicated history table here would duplicate a
+// mechanism this codebase already has.
+model Application {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @map("tenant_id") @db.Uuid
+  candidateId  String           @map("candidate_id") @db.Uuid
+  jobPostingId String           @map("job_posting_id") @db.Uuid
+  stage        ApplicationStage @default(APPLIED)
+  appliedAt    DateTime         @default(now()) @map("applied_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  candidate  Candidate   @relation(fields: [tenantId, candidateId], references: [tenantId, id], onDelete: Cascade)
+  jobPosting JobPosting  @relation(fields: [tenantId, jobPostingId], references: [tenantId, id], onDelete: Cascade)
+  interviews Interview[]
+  offers     Offer[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, candidateId, jobPostingId])
+  @@index([tenantId, jobPostingId, stage])
+  @@map("applications")
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+// `interviewerUserIds` is a JSON `string[]` (a panel) — the same "just a
+// snapshot of user ids, no dedicated join table" posture
+// `WorkflowInstanceStep.eligibleApproverIds` already establishes.
+model Interview {
+  id                 String          @id @default(uuid()) @db.Uuid
+  tenantId           String          @map("tenant_id") @db.Uuid
+  applicationId      String          @map("application_id") @db.Uuid
+  scheduledAt        DateTime        @map("scheduled_at")
+  durationMinutes    Int             @map("duration_minutes")
+  interviewerUserIds Json            @map("interviewer_user_ids")
+  location           String?
+  status             InterviewStatus @default(SCHEDULED)
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application Application          @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Cascade)
+  scorecards  InterviewScorecard[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, applicationId])
+  @@map("interviews")
+}
+
+enum ScorecardRecommendation {
+  STRONG_YES
+  YES
+  NO
+  STRONG_NO
+}
+
+// One row per (interview, interviewer) — an interviewer submits at most one
+// scorecard for an interview they're on the panel for
+// (`interviewerUserId` is a plain id, no FK relation to `User` — the same
+// "just a log fact" posture `PayrollRun.createdByUserId`/
+// `WorkflowInstanceStep.delegatedToUserId` already take, deliberately, to
+// avoid cluttering `User` with a named back-relation for every module that
+// merely records who did something).
+model InterviewScorecard {
+  id                String                  @id @default(uuid()) @db.Uuid
+  tenantId          String                  @map("tenant_id") @db.Uuid
+  interviewId       String                  @map("interview_id") @db.Uuid
+  interviewerUserId String                  @map("interviewer_user_id") @db.Uuid
+  rating            Int
+  recommendation    ScorecardRecommendation
+  notes             String?
+  submittedAt       DateTime                @default(now()) @map("submitted_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  interview Interview @relation(fields: [tenantId, interviewId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, interviewId, interviewerUserId])
+  @@map("interview_scorecards")
+}
+
+enum OfferStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  ACCEPTED
+  DECLINED
+}
+
+// An offer, approved via the REAL 0.7 workflow (`entityType: "Offer"`) like
+// every approval in this step. `ACCEPTED` is the one status this whole
+// step's lifecycle hinges on: acceptance is what starts onboarding (see
+// `OnboardingProcess` — a `recruitment.offer_accepted` domain event, reacted
+// to by an Onboarding-owned listener, never a direct
+// Recruitment -> Onboarding service call, the SAME fire-and-forget
+// event-listener shape every cross-module reaction in this codebase already
+// uses). Money is `Decimal`, never `Float` — this codebase's universal
+// monetary convention (see docs/conventions/payroll.md). Deliberately ONE
+// offer per application (`@@unique([tenantId, applicationId])`) — a
+// documented simplification; a revised offer after a decline needs a new
+// `Application` row in this schema's current design.
+model Offer {
+  id                 String         @id @default(uuid()) @db.Uuid
+  tenantId           String         @map("tenant_id") @db.Uuid
+  applicationId      String         @map("application_id") @db.Uuid
+  branchId           String         @map("branch_id") @db.Uuid
+  departmentId       String?        @map("department_id") @db.Uuid
+  designationId      String?        @map("designation_id") @db.Uuid
+  employmentType     EmploymentType @map("employment_type")
+  proposedSalary     Decimal        @map("proposed_salary") @db.Decimal(14, 2)
+  salaryCurrency     String         @map("salary_currency") @db.VarChar(3)
+  proposedJoinDate   DateTime       @map("proposed_join_date") @db.Date
+  status             OfferStatus    @default(DRAFT)
+  workflowInstanceId String?        @map("workflow_instance_id") @db.Uuid
+  acceptedAt         DateTime?      @map("accepted_at")
+  declinedAt         DateTime?      @map("declined_at")
+  createdByUserId    String         @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  application       Application        @relation(fields: [tenantId, applicationId], references: [tenantId, id], onDelete: Cascade)
+  branch            Branch             @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  department        Department?        @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: SetNull)
+  designation       Designation?       @relation(fields: [tenantId, designationId], references: [tenantId, id], onDelete: SetNull)
+  onboardingProcess OnboardingProcess?
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, applicationId])
+  @@index([tenantId, status])
+  @@map("offers")
+}
+
+enum OnboardingProcessStatus {
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// The BRIDGE from CANDIDATE to EMPLOYEE — see
+// docs/conventions/recruitment-lifecycle.md. Started automatically the
+// moment an `Offer` reaches `ACCEPTED` (via an event listener reacting to
+// `recruitment.offer_accepted` — never a direct service call between the
+// two modules). `employeeId` is null until `OnboardingService.createEmployee`
+// calls the REAL, UNMODIFIED 1.1 `EmployeeService.create` — which is what
+// enforces the new hire's branch country pack's required fields (US
+// SSN/W4, QA QATAR_ID/VISA_SPONSORSHIP, ...) with ZERO new validation logic
+// in this module. Checklist tasks (IT setup, HR docs, manager intro, asset
+// assignment) are tracked via the shared `ChecklistTaskInstance` table
+// below — they do NOT gate employee creation; a real onboarding flow needs
+// the new hire to already have system access before every checklist item
+// (e.g. asset assignment) is necessarily done.
+model OnboardingProcess {
+  id          String                  @id @default(uuid()) @db.Uuid
+  tenantId    String                  @map("tenant_id") @db.Uuid
+  offerId     String                  @map("offer_id") @db.Uuid
+  candidateId String                  @map("candidate_id") @db.Uuid
+  employeeId  String?                 @map("employee_id") @db.Uuid
+  status      OnboardingProcessStatus @default(IN_PROGRESS)
+  startedAt   DateTime                @default(now()) @map("started_at")
+  completedAt DateTime?               @map("completed_at")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  offer     Offer     @relation(fields: [tenantId, offerId], references: [tenantId, id], onDelete: Cascade)
+  candidate Candidate @relation(fields: [tenantId, candidateId], references: [tenantId, id], onDelete: Cascade)
+  employee  Employee? @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: SetNull)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, offerId])
+  @@unique([tenantId, employeeId])
+  @@index([tenantId, status])
+  @@map("onboarding_processes")
+}
+
+enum OffboardingReason {
+  RESIGNATION
+  TERMINATION
+}
+
+enum OffboardingProcessStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+// The clean EXIT bridge — see docs/conventions/recruitment-lifecycle.md.
+// Routed via the REAL 0.7 workflow (`entityType: "OffboardingProcess"`)
+// like every approval in this step; on `workflow.approved`,
+// `OffboardingWorkflowEventsListener` flips this to `APPROVED` and
+// instantiates the tenant's `OFFBOARDING` `ChecklistTemplate` (clearance
+// tasks — asset return, access-revocation, exit interview, ...).
+// `OffboardingService.complete` (gated on every checklist task for this
+// process being `COMPLETED`) is the one action that: (1) flips the real
+// `Employee.status` to `TERMINATED` via the UNMODIFIED 1.1
+// `EmployeeService.update` (which itself already captures `terminatedAt`,
+// since 1.5 — zero new capture logic here); (2) creates + calculates a
+// `FINAL_SETTLEMENT` `PayrollRun` for the employee via the REAL, UNMODIFIED
+// 2.1 payroll lifecycle — see `settlementPayrollRunId`; (3) revokes the
+// linked `User`'s access (`TokenService.revokeAllForUser` + `User.status =
+// DISABLED`). `settlementPayrollRunId` is a plain id, no FK relation — the
+// SAME polymorphic "just an id" pattern `PayrollRun.workflowInstanceId`
+// itself already establishes, here for the same reason in reverse
+// (Payroll's schema stays fully unaware this module exists).
+model OffboardingProcess {
+  id                     String                   @id @default(uuid()) @db.Uuid
+  tenantId               String                   @map("tenant_id") @db.Uuid
+  employeeId             String                   @map("employee_id") @db.Uuid
+  reason                 OffboardingReason
+  lastWorkingDate        DateTime                 @map("last_working_date") @db.Date
+  status                 OffboardingProcessStatus @default(PENDING_APPROVAL)
+  workflowInstanceId     String?                  @map("workflow_instance_id") @db.Uuid
+  settlementPayrollRunId String?                  @map("settlement_payroll_run_id") @db.Uuid
+  initiatedByUserId      String                   @map("initiated_by_user_id") @db.Uuid
+  completedAt            DateTime?                @map("completed_at")
+  createdAt              DateTime                 @default(now()) @map("created_at")
+  updatedAt              DateTime                 @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, employeeId])
+  @@index([tenantId, status])
+  @@map("offboarding_processes")
+}
+
+enum ChecklistProcessType {
+  ONBOARDING
+  OFFBOARDING
+}
+
+enum ChecklistTaskStatus {
+  PENDING
+  COMPLETED
+}
+
+// ONE generic, tenant-configurable checklist mini-engine shared by BOTH
+// Onboarding and Offboarding — see docs/conventions/recruitment-lifecycle.md.
+// `tasks` is an ordered `ChecklistTaskDefinition[]` (`@hrm/shared`'s
+// `checklistTaskDefinitionSchema` — key/title/category/`assigneeRule`
+// (`SPECIFIC_USER`/`ROLE`/`MANAGER` — a SMALL, PURPOSE-BUILT shape, NOT
+// 0.7's `ApproverRule`: a checklist task needs "who does this land on",
+// never routing/multi-step approval)/`requiresDocument`), re-validated on
+// every write AND read like every other JSON-configured feature in this
+// codebase. `@@unique([tenantId, processType, name])` lets a tenant define
+// one onboarding checklist and one offboarding checklist (or several,
+// versioned by name) side by side.
+model ChecklistTemplate {
+  id          String               @id @default(uuid()) @db.Uuid
+  tenantId    String               @map("tenant_id") @db.Uuid
+  processType ChecklistProcessType @map("process_type")
+  name        String
+  isActive    Boolean              @default(true) @map("is_active")
+  tasks       Json
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, processType, name])
+  @@map("checklist_templates")
+}
+
+// One instantiated task — POLYMORPHIC via `processType` + `processId` (the
+// owning `OnboardingProcess`/`OffboardingProcess` row), the SAME "no FK,
+// the owning module doesn't need to be a hard dependency of this generic
+// mechanism" pattern `WorkflowInstance.entityType`/`entityId` already
+// establishes for the identical reason. `assigneeUserId` is resolved ONCE,
+// at instantiation (`ChecklistService.instantiate`), from the template
+// task's `assigneeRule` — a later org-chart change never rewrites an
+// already-assigned task, the same "snapshot, don't re-derive" posture this
+// whole codebase takes for anything resolved once and acted on later.
+model ChecklistTaskInstance {
+  id                 String               @id @default(uuid()) @db.Uuid
+  tenantId           String               @map("tenant_id") @db.Uuid
+  processType        ChecklistProcessType @map("process_type")
+  processId          String               @map("process_id") @db.Uuid
+  key                String
+  title              String
+  category           String
+  assigneeUserId     String?              @map("assignee_user_id") @db.Uuid
+  requiresDocument   Boolean              @default(false) @map("requires_document")
+  documentStorageKey String?              @map("document_storage_key")
+  status             ChecklistTaskStatus  @default(PENDING)
+  completedAt        DateTime?            @map("completed_at")
+  completedByUserId  String?              @map("completed_by_user_id") @db.Uuid
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, processType, processId, key])
+  @@index([tenantId, assigneeUserId, status])
+  @@index([tenantId, processType, processId])
+  @@map("checklist_task_instances")
 }

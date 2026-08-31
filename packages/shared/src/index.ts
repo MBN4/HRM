@@ -27,3 +27,7 @@ export * from './validators/attendance.validator';
 export * from './validators/analytics.validator';
 export * from './validators/payroll.validator';
 export * from './validators/performance.validator';
+export * from './validators/checklist.validator';
+export * from './validators/recruitment.validator';
+export * from './validators/onboarding.validator';
+export * from './validators/offboarding.validator';

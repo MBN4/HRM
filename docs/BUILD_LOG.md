@@ -1658,3 +1658,146 @@ payrollRunId, employeeId])` — the DB-level idempotency backstop),
     regressions. Full-repo `pnpm build`/`pnpm lint` green across all seven
     workspaces; `apps/portal`/`apps/mobile` untouched by this step (no
     portal/mobile work was in this step's scope).
+
+- **2.3 Recruitment (ATS) + Onboarding + Offboarding — done — 2026-08-31.
+  PHASE 2 COMPLETE.** The employee LIFECYCLE — full design in
+  [`docs/conventions/recruitment-lifecycle.md`](./conventions/recruitment-lifecycle.md).
+  A thin consumer of five Phase 0/1/2 systems: the workflow engine (every
+  approval), the Employee module (the candidate → Employee conversion),
+  country packs (required-field enforcement, via 1.1), the notification
+  hub (checklist reminders), and — the two hardest reuse problems this
+  step solved — Payroll (a `FINAL_SETTLEMENT` run for a leaver) and Auth
+  (access revocation). Files:
+  - **`packages/db`**: eleven new tenant-scoped tables —
+    `JobRequisition`, `JobPosting` (`publicSlug` unique per tenant — what
+    the public careers API resolves by), `Candidate` (deduplicated per
+    tenant by email), `Application` (`ApplicationStage` closed enum),
+    `Interview`/`InterviewScorecard`, `Offer` (`OfferStatus` has both
+    `REJECTED` — internal approval denied — and `DECLINED` — candidate
+    turned it down, distinct terminal states), `OnboardingProcess`
+    (`employeeId` null until conversion), `OffboardingProcess`,
+    `ChecklistTemplate`/`ChecklistTaskInstance` (ONE generic engine shared
+    by Onboarding and Offboarding, polymorphic via `processType`/
+    `processId`, the `WorkflowInstance.entityType`/`entityId` pattern).
+    PLUS the one additive seam on Payroll's EXISTING `PayrollRun` table:
+    `runType` (`REGULAR`|`FINAL_SETTLEMENT`) + `settlementEmployeeId`,
+    replacing the original blanket `@@unique([tenantId, branchId,
+periodYear, periodMonth])` with two hand-written PARTIAL unique
+    indexes (Prisma has no partial-index DSL) so the REGULAR-run
+    idempotency guarantee stays byte-identical while a NEW,
+    equally-strict one-settlement-per-employee-per-period guarantee is
+    added alongside it — see recruitment-lifecycle.md's own write-up of
+    why a naive shared `@@unique` would have silently weakened the
+    original constraint (Postgres NULL-distinctness). Also added
+    `OfferStatus.REJECTED` (one small follow-up migration, before any
+    code consumed the enum). Four migrations total
+    (`add_recruitment_lifecycle_module`,
+    `enable_rls_for_recruitment_lifecycle_module`,
+    `add_offer_rejected_status`, plus the settlement seam folded into the
+    first) — RLS enabled on every new table, no RLS-exempt table this step
+    (unlike Payroll's `exchange_rates` — everything here is tenant-owned).
+  - **`packages/shared`**: `PERMISSIONS.RECRUITMENT_READ/WRITE/MANAGE`,
+    `ONBOARDING_MANAGE`, `OFFBOARDING_MANAGE`; five new validator files
+    (`recruitment.validator.ts`, `checklist.validator.ts` —
+    `ChecklistAssigneeRule` deliberately mirrors 0.7's `ApproverRule`
+    SHAPE without reusing its type/engine, `onboarding.validator.ts` —
+    `completeOnboardingSchema` built by `.omit()`ing from the REAL
+    `createEmployeeSchema` rather than redefined by hand, so it can never
+    drift from what `POST /employees` itself accepts,
+    `offboarding.validator.ts`); `event-notification-mapping.ts` gains
+    ONE new event, `checklist.task_assigned` (sign-off notifications
+    arrive for free via the already-mapped `workflow.submitted`/
+    `.approved` — THE RULE's payoff for the fourth module in a row);
+    `redact.ts`'s `REDACTED_KEY_PATTERN` gains `proposedSalary`.
+  - **`apps/api/src/recruitment`** (new module): `requisitions/`
+    (`JobRequisitionService` + its workflow-events listener),
+    `postings/` (`JobPostingService` — a posting requires an `APPROVED`
+    requisition), `candidates/` (`CandidateService`, upsert-by-email),
+    `applications/` (`ApplicationService` — stage transitions, no bespoke
+    history table, 0.9's audit log already gives one), `interviews/`
+    (`InterviewService` — scheduling + row-level-gated scorecards),
+    `offers/` (`OfferService` + its workflow-events listener; `accept`
+    emits `recruitment.offer_accepted`), `careers/` (`CareersService` +
+    `CareersController`, `@AllowAnonymous()` throughout — the SAME
+    "public but tenant-required" pattern `POST /auth/login` already
+    establishes, NOT `@Public()`), `recruitment.controller.ts` (the
+    internal surface — deliberately no approve/reject route anywhere,
+    THE RULE).
+  - **`apps/api/src/checklists`** (new, shared module): `checklist.service.ts`
+    (instantiate/complete/list, generic over `processType`/`processId`),
+    `checklist-template.service.ts` (CRUD), `checklist-assignee-resolver.util.ts`
+    (`SPECIFIC_USER`/`ROLE`/`MANAGER` — `MANAGER` resolves through the
+    REAL 1.1 org chart, the same data `ApproverResolverService`/
+    Performance's `resolveAutoReviewers` already resolve through). No
+    controller of its own — Onboarding and Offboarding each expose their
+    OWN checklist routes with their own fixed `processType` and
+    permission gate.
+  - **`apps/api/src/onboarding`** (new module): `onboarding.service.ts`
+    (`start` — idempotent against a redelivered event; `createEmployee` —
+    the ONE call to the REAL, UNMODIFIED `EmployeeService.create`,
+    followed immediately by checklist instantiation against the
+    brand-new employee, since a `MANAGER`-rule task has nothing to
+    resolve against before the Employee exists), `onboarding-offer-accepted.listener.ts`
+    (`@OnEvent('recruitment.offer_accepted')` — no direct
+    Recruitment → Onboarding service dependency at all).
+  - **`apps/api/src/offboarding`** (new module): `offboarding.service.ts`
+    (`initiate` — `requesterId` = the departing employee's OWN linked
+    `User.id`, the same reuse Leave/Performance already establish so a
+    `MANAGER` approver rule resolves correctly; `complete` — gated on
+    every clearance checklist task being `COMPLETED`, then: the REAL
+    `EmployeeService.update` status transition, a REAL Payroll
+    `FINAL_SETTLEMENT` run via the additive seam above, and REAL access
+    revocation via `TokenService.revokeAllForUser` (newly exported from
+    `AuthModule`, one additive line) + `User.status = DISABLED`),
+    `offboarding-workflow-events.listener.ts` (instantiates the clearance
+    checklist on `workflow.approved`).
+  - **The two files Payroll's ORCHESTRATION layer gained** (its ENGINE —
+    `PayrollEngineService`, the rules engine — is 100% untouched):
+    `payroll-run.service.ts`'s `createRun` gained one optional
+    `settlement?: { employeeId }` parameter; `payroll-run.processor.ts`'s
+    employee-selection query branches on `run.runType` (one `id =
+settlementEmployeeId` lookup instead of the branch-wide `ACTIVE`
+    query for a `FINAL_SETTLEMENT` run). `auth.module.ts` gained one
+    additive `exports: [TokenService]` line. `app.module.ts`,
+    `notification-dispatch.listener.ts`, `domain-event-audit.listener.ts`,
+    `notification-recipient-resolver.service.ts` each gained mechanical,
+    additive lines for the new modules/event namespaces
+    (`recruitment.*`/`checklist.*`).
+  - Verified end-to-end over real HTTP by
+    `apps/api/test/recruitment-lifecycle.e2e-spec.ts` (14 tests: a job
+    requisition approved through the real workflow; a posting created
+    from it and published; the PUBLIC careers API listing/serving it and
+    accepting an application with a resume upload with NO auth, rejecting
+    a duplicate apply; candidate pipeline stage transitions captured in
+    the 0.9 audit trail; a real interview + scorecard; an offer created,
+    approved through the real workflow, and accepted; offer acceptance
+    starting a real onboarding process via the fire-and-forget event;
+    creating the Employee correctly rejecting a US-branch submission
+    missing SSN/W4 and succeeding once supplied; the onboarding checklist
+    instantiated from tenant-configurable data with real 0.8 notifications
+    landing and a `requiresDocument` task enforcing an attachment; a
+    termination routed through the real workflow to the real manager; the
+    clearance checklist gating completion; completing offboarding setting
+    status/terminatedAt, revoking access (DB flag AND a live previously-
+    valid token now rejected), and triggering a real Payroll
+    `FINAL_SETTLEMENT` run with Qatar's gratuity accrual correctly
+    period-scoped, explicitly bounded below the cumulative-total figure
+    the engine's own documented bug guard exists for; cross-tenant
+    isolation via RLS, including the public careers route). `apps/api`
+    grows from 283 to 297 tests (283 existing + 14 new e2e); `packages/db`'s
+    14 unchanged — 311 backend tests total, zero regressions. Full-repo
+    `pnpm build`/`pnpm lint` green across all seven workspaces;
+    `apps/portal`/`apps/mobile` untouched by this step (no portal/mobile
+    work was in this step's scope).
+
+**PHASE 2 COMPLETE.** Payroll (2.1) + Performance (2.2) + Recruitment/
+Onboarding/Offboarding (2.3) — the full compensation and employee-lifecycle
+layer, all built on Phase 0's chassis and Phase 1's Core HR/Leave/
+Attendance/ESS/Analytics foundation with zero modifications to any of it
+beyond small, additive, precedented seam columns/exports. Phase 3's scope
+is not yet defined (see CLAUDE.md § 6) — candidates for what it might cover
+include Recruitment/Performance/Payroll UI on `apps/portal` (all three
+landed API-only this phase, the same "backend first, UI later" sequencing
+1.1-1.3 took before 1.4 caught the portal up), the transactional-outbox
+upgrade flagged in notifications-queues.md, and/or the Phase 5.2 partition
+migrations flagged since 0.2.

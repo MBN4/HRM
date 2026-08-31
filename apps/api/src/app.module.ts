@@ -17,6 +17,9 @@ import { LicensingModule } from './licensing/licensing.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { PerformanceModule } from './performance/performance.module';
+import { RecruitmentModule } from './recruitment/recruitment.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
+import { OffboardingModule } from './offboarding/offboarding.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -56,6 +59,9 @@ import { WorkflowModule } from './workflow/workflow.module';
     AnalyticsModule,
     PayrollModule,
     PerformanceModule,
+    RecruitmentModule,
+    OnboardingModule,
+    OffboardingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -71,28 +71,29 @@ Every app/package that needs environment variables documents them in its own
 
 ## 4. Docs index
 
-| File                                                                                           | Covers                                                                                                                                                                                                                                                 |
-| ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`docs/BUILD_LOG.md`](./docs/BUILD_LOG.md)                                                     | Full append-only build history — every step, its files, bugs caught, and verification notes.                                                                                                                                                           |
-| [`docs/conventions/tenancy-rls.md`](./docs/conventions/tenancy-rls.md)                         | Tenant data model, Row-Level Security, the two-DB-role design, `withTenantContext`. (0.2)                                                                                                                                                              |
-| [`docs/conventions/tenant-resolution.md`](./docs/conventions/tenant-resolution.md)             | Request → tenant binding (subdomain/custom-domain/header), `TenantScopeInterceptor`, `AsyncLocalStorage` context, the platform (no-tenant) seam. (0.3)                                                                                                 |
-| [`docs/conventions/auth-rbac.md`](./docs/conventions/auth-rbac.md)                             | Login/JWT/refresh-rotation, DB-backed deny-by-default RBAC, branch scoping, the SSO seam. (0.4)                                                                                                                                                        |
-| [`docs/conventions/field-level-permissions.md`](./docs/conventions/field-level-permissions.md) | The reusable `@RequiresPermission()` DTO-field-gating pattern. (0.4)                                                                                                                                                                                   |
-| [`docs/conventions/country-packs.md`](./docs/conventions/country-packs.md)                     | Per-country legal/cultural config, the sandboxed tax/statutory rules engine, tenant overrides. (0.5)                                                                                                                                                   |
-| [`docs/conventions/licensing-feature-flags.md`](./docs/conventions/licensing-feature-flags.md) | Edition → feature flags, SaaS subscription vs. signed lifetime license, offline activation, platform admin routes. (0.6)                                                                                                                               |
-| [`docs/conventions/workflow.md`](./docs/conventions/workflow.md)                               | The one generic approval engine — sequential/parallel/conditional steps, approver rules, delegation, escalation. (0.7)                                                                                                                                 |
-| [`docs/conventions/notifications-queues.md`](./docs/conventions/notifications-queues.md)       | Multi-channel notification delivery, the reusable BullMQ queue pattern, templates, recipient/locale resolution. (0.8)                                                                                                                                  |
-| [`docs/conventions/audit-custom-fields.md`](./docs/conventions/audit-custom-fields.md)         | Append-only DB-immutable audit log (HTTP + domain-event capture) and tenant-extensible custom fields. (0.9)                                                                                                                                            |
-| [`docs/conventions/i18n-timezone-rtl.md`](./docs/conventions/i18n-timezone-rtl.md)             | UTC-storage/local-render timestamp convention, RTL resolution, the two string-externalization catalogs. (0.9)                                                                                                                                          |
-| [`docs/conventions/resilience.md`](./docs/conventions/resilience.md)                           | Per-tenant rate limiting, circuit breakers, load shedding, connection-pool protection, idempotency, health/graceful shutdown. (0.10)                                                                                                                   |
-| [`docs/conventions/tooling-eslint-config.md`](./docs/conventions/tooling-eslint-config.md)     | ESLint/pre-commit conventions for adding a new workspace (`root: true`, `parserOptions.project` overrides).                                                                                                                                            |
-| [`docs/conventions/employee.md`](./docs/conventions/employee.md)                               | The core HR entity — encryption at rest, country-driven required fields, custom fields, org chart, bulk import, and feeding 0.7's workflow approver-rule seams. (1.1)                                                                                  |
-| [`docs/conventions/leave.md`](./docs/conventions/leave.md)                                     | Leave requests as a pure consumer of the workflow engine, country-driven entitlements/holidays/weekends, balance tracking, and scheduled/idempotent accrual. (1.2)                                                                                     |
-| [`docs/conventions/attendance.md`](./docs/conventions/attendance.md)                           | The first high-volume module: partition-ready clock records, timezone-correct (incl. midnight-crossing) day attribution, pack-driven weekend/overtime, the biometric device seam, and regularization via the workflow engine. (1.3)                    |
-| [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md)               | ESS/MSS on the tenant portal + mobile app: client auth/tenant resolution, the session-aware i18n/RTL integration, how the UI consumes workflow/leave/attendance, field-omission handling. (1.4)                                                        |
-| [`docs/conventions/analytics-dashboard.md`](./docs/conventions/analytics-dashboard.md)         | The KPI set, the precomputed-rollup scale strategy (incl. the nullable-dimension delete-recreate gotcha), the first real scheduled BullMQ job, and branch-scope/RBAC in analytics. (1.5)                                                               |
-| [`docs/conventions/payroll.md`](./docs/conventions/payroll.md)                                 | THE pack-driven boundary statement, CALCULATE vs. DELEGATE, money/multi-currency, idempotency+resumability, run lifecycle + workflow approval, payslip + bank-export seams, and "how to add a new country". (2.1)                                      |
-| [`docs/conventions/performance.md`](./docs/conventions/performance.md)                         | Rating scales + cycle review-type/eligibility config as DATA (not enums), reviewer resolution via the real org chart, enrollment, the review-vs-assignment split, workflow-driven sign-off, reminders, and pre-aggregated calibration analytics. (2.2) |
+| File                                                                                           | Covers                                                                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`docs/BUILD_LOG.md`](./docs/BUILD_LOG.md)                                                     | Full append-only build history — every step, its files, bugs caught, and verification notes.                                                                                                                                                                                             |
+| [`docs/conventions/tenancy-rls.md`](./docs/conventions/tenancy-rls.md)                         | Tenant data model, Row-Level Security, the two-DB-role design, `withTenantContext`. (0.2)                                                                                                                                                                                                |
+| [`docs/conventions/tenant-resolution.md`](./docs/conventions/tenant-resolution.md)             | Request → tenant binding (subdomain/custom-domain/header), `TenantScopeInterceptor`, `AsyncLocalStorage` context, the platform (no-tenant) seam. (0.3)                                                                                                                                   |
+| [`docs/conventions/auth-rbac.md`](./docs/conventions/auth-rbac.md)                             | Login/JWT/refresh-rotation, DB-backed deny-by-default RBAC, branch scoping, the SSO seam. (0.4)                                                                                                                                                                                          |
+| [`docs/conventions/field-level-permissions.md`](./docs/conventions/field-level-permissions.md) | The reusable `@RequiresPermission()` DTO-field-gating pattern. (0.4)                                                                                                                                                                                                                     |
+| [`docs/conventions/country-packs.md`](./docs/conventions/country-packs.md)                     | Per-country legal/cultural config, the sandboxed tax/statutory rules engine, tenant overrides. (0.5)                                                                                                                                                                                     |
+| [`docs/conventions/licensing-feature-flags.md`](./docs/conventions/licensing-feature-flags.md) | Edition → feature flags, SaaS subscription vs. signed lifetime license, offline activation, platform admin routes. (0.6)                                                                                                                                                                 |
+| [`docs/conventions/workflow.md`](./docs/conventions/workflow.md)                               | The one generic approval engine — sequential/parallel/conditional steps, approver rules, delegation, escalation. (0.7)                                                                                                                                                                   |
+| [`docs/conventions/notifications-queues.md`](./docs/conventions/notifications-queues.md)       | Multi-channel notification delivery, the reusable BullMQ queue pattern, templates, recipient/locale resolution. (0.8)                                                                                                                                                                    |
+| [`docs/conventions/audit-custom-fields.md`](./docs/conventions/audit-custom-fields.md)         | Append-only DB-immutable audit log (HTTP + domain-event capture) and tenant-extensible custom fields. (0.9)                                                                                                                                                                              |
+| [`docs/conventions/i18n-timezone-rtl.md`](./docs/conventions/i18n-timezone-rtl.md)             | UTC-storage/local-render timestamp convention, RTL resolution, the two string-externalization catalogs. (0.9)                                                                                                                                                                            |
+| [`docs/conventions/resilience.md`](./docs/conventions/resilience.md)                           | Per-tenant rate limiting, circuit breakers, load shedding, connection-pool protection, idempotency, health/graceful shutdown. (0.10)                                                                                                                                                     |
+| [`docs/conventions/tooling-eslint-config.md`](./docs/conventions/tooling-eslint-config.md)     | ESLint/pre-commit conventions for adding a new workspace (`root: true`, `parserOptions.project` overrides).                                                                                                                                                                              |
+| [`docs/conventions/employee.md`](./docs/conventions/employee.md)                               | The core HR entity — encryption at rest, country-driven required fields, custom fields, org chart, bulk import, and feeding 0.7's workflow approver-rule seams. (1.1)                                                                                                                    |
+| [`docs/conventions/leave.md`](./docs/conventions/leave.md)                                     | Leave requests as a pure consumer of the workflow engine, country-driven entitlements/holidays/weekends, balance tracking, and scheduled/idempotent accrual. (1.2)                                                                                                                       |
+| [`docs/conventions/attendance.md`](./docs/conventions/attendance.md)                           | The first high-volume module: partition-ready clock records, timezone-correct (incl. midnight-crossing) day attribution, pack-driven weekend/overtime, the biometric device seam, and regularization via the workflow engine. (1.3)                                                      |
+| [`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md)               | ESS/MSS on the tenant portal + mobile app: client auth/tenant resolution, the session-aware i18n/RTL integration, how the UI consumes workflow/leave/attendance, field-omission handling. (1.4)                                                                                          |
+| [`docs/conventions/analytics-dashboard.md`](./docs/conventions/analytics-dashboard.md)         | The KPI set, the precomputed-rollup scale strategy (incl. the nullable-dimension delete-recreate gotcha), the first real scheduled BullMQ job, and branch-scope/RBAC in analytics. (1.5)                                                                                                 |
+| [`docs/conventions/payroll.md`](./docs/conventions/payroll.md)                                 | THE pack-driven boundary statement, CALCULATE vs. DELEGATE, money/multi-currency, idempotency+resumability, run lifecycle + workflow approval, payslip + bank-export seams, and "how to add a new country". (2.1)                                                                        |
+| [`docs/conventions/performance.md`](./docs/conventions/performance.md)                         | Rating scales + cycle review-type/eligibility config as DATA (not enums), reviewer resolution via the real org chart, enrollment, the review-vs-assignment split, workflow-driven sign-off, reminders, and pre-aggregated calibration analytics. (2.2)                                   |
+| [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md)     | ATS pipeline (requisitions/postings/candidates/offers via workflow), the public careers API, the candidate→Employee onboarding bridge + required-field enforcement, the shared checklist mini-engine, and offboarding + access revocation + the Payroll FINAL_SETTLEMENT hand-off. (2.3) |
 
 ## 5. Build log summary
 
@@ -184,6 +185,17 @@ per step, kept here for a fast overview.
   types, not a fifth type); calibration/distribution analytics via the
   same precomputed-rollup discipline 1.5 established. See
   [`docs/conventions/performance.md`](./docs/conventions/performance.md).
+- **2.3** — Recruitment (ATS) + Onboarding + Offboarding, the employee
+  lifecycle (Phase 2's final step): job requisitions/offers approved via
+  the workflow engine; a public, unauthenticated-but-tenant-scoped careers
+  API; onboarding as the one bridge that creates a real 1.1 Employee from
+  an accepted offer (enforcing country-pack required fields with zero new
+  validation logic); a shared, tenant-configurable checklist mini-engine
+  for both onboarding and offboarding; offboarding as the one bridge that
+  hands a leaver's final pay to Payroll (a new `PayrollRun.runType` seam,
+  additive to orchestration only, never the tax/statutory engine) and
+  revokes their access via Auth's existing token-revocation primitive. See
+  [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md).
 
 ## 6. Not yet built
 
@@ -215,7 +227,8 @@ apply automatically to any new module/route with no additional wiring.
 Leave (1.2) + Attendance (1.3) + ESS/MSS (1.4) + Analytics dashboard (1.5),
 all built on top of Phase 0's tenancy/RLS, auth/RBAC, country packs,
 licensing, workflow engine, notifications, audit/custom-fields/i18n, and
-resilience chassis. Phase 2 (Payroll, Performance, Recruitment) builds next.
+resilience chassis. Phase 2 (Payroll, Performance, Recruitment/Onboarding/
+Offboarding) is now complete — see below.
 
 - [x] **2.1** Payroll module (pack-driven CALCULATE/DELEGATE engine,
       multi-currency, idempotent/resumable runs, workflow approval,
@@ -224,8 +237,21 @@ resilience chassis. Phase 2 (Payroll, Performance, Recruitment) builds next.
       rating scales + cycle review-type/eligibility config as data,
       org-chart-resolved reviewers, workflow-driven sign-off, reminders,
       pre-aggregated calibration analytics)
-- [ ] **Phase 2 (remaining)** — Recruitment — _scope not yet defined_
-- [ ] **Phase 3** — _scope not yet defined_
+- [x] **2.3** Recruitment (ATS) + Onboarding + Offboarding — the employee
+      lifecycle (workflow-approved requisitions/offers, a public careers
+      API, the candidate→Employee onboarding bridge with country-pack
+      required-field enforcement, a shared checklist mini-engine, and
+      offboarding's Payroll final-settlement + access-revocation hand-off)
+
+**PHASE 2 COMPLETE.** Payroll (2.1) + Performance (2.2) + Recruitment/
+Onboarding/Offboarding (2.3) — the full compensation and employee-lifecycle
+layer, on top of Phase 0's chassis and Phase 1's Core HR/Leave/Attendance/
+ESS/Analytics foundation.
+
+- [ ] **Phase 3** — _scope not yet defined_ (candidates: Recruitment/
+      Performance/Payroll UI on `apps/portal` — all three landed API-only
+      in Phase 2, the same "backend first, UI later" sequencing 1.1-1.3
+      took before 1.4 caught the portal up)
 - [ ] **Phase 4** — _scope not yet defined_
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see

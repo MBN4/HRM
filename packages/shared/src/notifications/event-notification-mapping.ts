@@ -31,6 +31,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'payroll.payslip_ready',
   'performance.cycle_opened',
   'performance.review_due',
+  'checklist.task_assigned',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -51,4 +52,5 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'payroll.payslip_ready': ['IN_APP', 'EMAIL'],
   'performance.cycle_opened': ['IN_APP'],
   'performance.review_due': ['IN_APP', 'EMAIL'],
+  'checklist.task_assigned': ['IN_APP', 'EMAIL'],
 };

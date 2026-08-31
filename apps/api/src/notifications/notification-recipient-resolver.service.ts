@@ -81,6 +81,9 @@ export class NotificationRecipientResolverService {
       case 'performance.review_due':
         return typeof payload.reviewerUserId === 'string' ? [payload.reviewerUserId] : [];
 
+      case 'checklist.task_assigned':
+        return typeof payload.assigneeUserId === 'string' ? [payload.assigneeUserId] : [];
+
       case 'licensing.issued':
       case 'licensing.revoked': {
         const admins = await tx.userRole.findMany({

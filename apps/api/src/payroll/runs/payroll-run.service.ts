@@ -20,7 +20,23 @@ export class PayrollRunService {
     private readonly queue: PayrollRunQueueService,
   ) {}
 
-  async createRun(tx: Prisma.TransactionClient, tenantId: string, callerUserId: string, branchId: string, periodYear: number, periodMonth: number) {
+  /**
+   * `settlement` (step 2.3, additive) creates a `FINAL_SETTLEMENT` run for
+   * exactly one (already possibly non-`ACTIVE`) employee instead of the
+   * branch's whole `ACTIVE` roster — see the `PayrollRunType` doc comment
+   * in schema.prisma and docs/conventions/recruitment-lifecycle.md for the
+   * full "why". Everything else about run creation (pack-driven
+   * `payrollMode`/`currencyCode` resolution) is IDENTICAL for both kinds.
+   */
+  async createRun(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    callerUserId: string,
+    branchId: string,
+    periodYear: number,
+    periodMonth: number,
+    settlement?: { employeeId: string },
+  ) {
     const pack = await resolvePayrollPackConfig(tx, tenantId, branchId);
 
     return tx.payrollRun.create({
@@ -33,6 +49,8 @@ export class PayrollRunService {
         payrollMode: pack.config.payrollMode,
         currencyCode: pack.config.locale.currencyCode,
         createdByUserId: callerUserId,
+        runType: settlement ? 'FINAL_SETTLEMENT' : 'REGULAR',
+        settlementEmployeeId: settlement?.employeeId ?? null,
       },
     });
   }

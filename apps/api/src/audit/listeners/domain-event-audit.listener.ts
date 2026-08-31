@@ -9,7 +9,18 @@ interface DomainEventPayload {
 }
 
 /** Checked in order — the first of these present (and a string) on a payload becomes the audit row's `entityId`. */
-const ENTITY_ID_FIELDS = ['instanceId', 'licenseId', 'deliveryId', 'notificationId', 'userId', 'flagKey', 'cycleId', 'assignmentId'] as const;
+const ENTITY_ID_FIELDS = [
+  'instanceId',
+  'licenseId',
+  'deliveryId',
+  'notificationId',
+  'userId',
+  'flagKey',
+  'cycleId',
+  'assignmentId',
+  'offerId',
+  'taskId',
+] as const;
 
 /**
  * These licensing event types are ALWAYS emitted from `LicensingAdminService`
@@ -82,6 +93,16 @@ export class DomainEventAuditListener {
 
   @OnEvent('performance.*')
   handlePerformance(payload: DomainEventPayload): void {
+    this.record(payload);
+  }
+
+  @OnEvent('recruitment.*')
+  handleRecruitment(payload: DomainEventPayload): void {
+    this.record(payload);
+  }
+
+  @OnEvent('checklist.*')
+  handleChecklist(payload: DomainEventPayload): void {
     this.record(payload);
   }
 

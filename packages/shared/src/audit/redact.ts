@@ -17,10 +17,12 @@
  * to also match `grossPay`/`netPay`/`employerCost`/`componentBreakdown` —
  * a `PayrollRunLine`'s computed amounts are exactly as sensitive as
  * `compensation`, redacted the same "over-redact the whole value, don't
- * enumerate leaf fields" way.
+ * enumerate leaf fields" way. Extended in step 2.3 (Recruitment lifecycle)
+ * to also match `proposedSalary` — an `Offer`'s proposed compensation is
+ * exactly as sensitive as an `Employee`'s, redacted the same way.
  */
 const REDACTED_KEY_PATTERN =
-  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown/i;
+  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown|proposedSalary/i;
 
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 

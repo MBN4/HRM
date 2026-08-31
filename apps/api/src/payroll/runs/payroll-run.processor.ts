@@ -59,7 +59,16 @@ export class PayrollRunProcessor extends WorkerHost {
     const { run, pack, employees, completedIds } = await withTenantContext(tenantId, async (tx: Prisma.TransactionClient) => {
       const run = await tx.payrollRun.findUniqueOrThrow({ where: { id: payrollRunId } });
       const pack = await resolvePayrollPackConfig(tx, tenantId, run.branchId);
-      const employees = await tx.employee.findMany({ where: { branchId: run.branchId, status: 'ACTIVE' } });
+      // FINAL_SETTLEMENT (step 2.3, additive — see docs/conventions/
+      // recruitment-lifecycle.md): exactly the one (already possibly
+      // non-ACTIVE) employee this run was created for, instead of the
+      // branch's whole ACTIVE roster. `PayrollEngineService.computeForEmployee`
+      // below is invoked identically either way — nothing about the
+      // ENGINE changes, only which employees this WORKER iterates.
+      const employees =
+        run.runType === 'FINAL_SETTLEMENT'
+          ? await tx.employee.findMany({ where: { id: run.settlementEmployeeId! } })
+          : await tx.employee.findMany({ where: { branchId: run.branchId, status: 'ACTIVE' } });
       const alreadyComputed = await tx.payrollRunLine.findMany({
         where: { payrollRunId, status: 'COMPUTED' },
         select: { employeeId: true },
