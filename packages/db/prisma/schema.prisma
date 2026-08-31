@@ -133,6 +133,13 @@ model Tenant {
   payrollRunLines                PayrollRunLine[]
   payslipDocuments               PayslipDocument[]
   payrollBankExports             PayrollBankExport[]
+  ratingScales                   RatingScale[]
+  appraisalCycles                AppraisalCycle[]
+  goals                          Goal[]
+  appraisals                     Appraisal[]
+  reviewAssignments              ReviewAssignment[]
+  reviews                        Review[]
+  appraisalRatingDistributions   AppraisalRatingDistributionSnapshot[]
 
   @@map("tenants")
 }
@@ -201,6 +208,7 @@ model Branch {
   leaveUtilizationDailySnapshots LeaveUtilizationDailySnapshot[]
   payrollRuns                    PayrollRun[]
   payrollRunLines                PayrollRunLine[]
+  appraisalRatingDistributions   AppraisalRatingDistributionSnapshot[]
 
   // Lets other tenant-scoped tables define a composite FK of
   // (tenantId, branchId) -> (tenantId, id) against this table.
@@ -230,6 +238,7 @@ model Department {
   headUser         User?        @relation("DepartmentHead", fields: [tenantId, headUserId], references: [tenantId, id], onDelete: SetNull)
 
   employees Employee[]
+  goals     Goal[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, branchId, name])
@@ -1229,6 +1238,10 @@ model Employee {
   attendanceRegularizations AttendanceRegularization[]
   attendanceDailySummaries  AttendanceDailySummary[]
   payrollRunLines           PayrollRunLine[]
+  goals                     Goal[]
+  appraisals                Appraisal[]
+  reviewAssignments         ReviewAssignment[]
+  reviewsGiven              Review[]
 
   // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
@@ -2107,4 +2120,320 @@ model PayrollBankExport {
 
   @@index([tenantId, payrollRunId])
   @@map("payroll_bank_exports")
+}
+
+// ---------------------------------------------------------------------------
+// Performance management (step 2.2, Phase 2). A THIN CONSUMER of existing
+// systems — see docs/conventions/performance.md: routing/sign-off is a real
+// 0.7 `WorkflowInstance` (THE RULE, no bespoke approval logic anywhere in
+// this module), reviewers are resolved via 1.1's `Employee.managerId`/
+// `directReports` org chart, and reminders/notifications ride the 0.8 hub.
+// The genuinely NEW concepts this step introduces are `RatingScale` and an
+// `AppraisalCycle`'s review-type/eligibility configuration — both modeled as
+// tenant-editable DATA (JSON, validated at the app layer), never a closed
+// code-level enum, so a tenant can run a 5-point cycle and a 4-point
+// probation scale side by side with zero code change.
+// ---------------------------------------------------------------------------
+
+// A tenant-configurable rating scale — DATA, not a hardcoded enum, per this
+// step's explicit brief. `levels` is a `RatingLevel[]` (`{ value, label,
+// description? }`, `packages/shared/src/validators/performance.validator.ts`)
+// re-validated on every write AND read, the same "JSON column has no
+// schema-level guarantee of its own" posture as Country Pack config/workflow
+// approver rules elsewhere in this schema. `key` lets a cycle reference a
+// scale by a stable short name (e.g. "5_POINT", "PROBATION_PASS_FAIL")
+// instead of its opaque id.
+model RatingScale {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  key       String
+  name      String
+  levels    Json
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cycles AppraisalCycle[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, key])
+  @@map("rating_scales")
+}
+
+enum AppraisalCycleType {
+  ANNUAL
+  QUARTERLY
+  PROBATION
+}
+
+enum AppraisalCycleStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+// The tenant-configurable review cycle — DATA drives which review types
+// apply ("360" is simply a cycle whose `enabledReviewTypes` includes all
+// four `ReviewType`s, not a separate model) and who is eligible
+// (`eligibleBranchIds`/`eligibleDepartmentIds`, JSON string-id arrays —
+// empty means "every branch/department in the tenant", the same "opaque
+// JSON id array, validated at the app layer, no FK" pattern
+// `WorkflowInstanceStep.eligibleApproverIds` already establishes; an FK
+// array isn't representable in Postgres/Prisma without a join table this
+// step's tests don't call for). `AppraisalCycleService.open` is what
+// actually reads this configuration to ENROLL eligible employees — see
+// `Appraisal` below.
+model AppraisalCycle {
+  id                    String               @id @default(uuid()) @db.Uuid
+  tenantId              String               @map("tenant_id") @db.Uuid
+  name                  String
+  cycleType             AppraisalCycleType   @map("cycle_type")
+  status                AppraisalCycleStatus @default(DRAFT)
+  startDate             DateTime             @map("start_date") @db.Date
+  endDate               DateTime             @map("end_date") @db.Date
+  ratingScaleId         String               @map("rating_scale_id") @db.Uuid
+  enabledReviewTypes    Json                 @map("enabled_review_types")
+  eligibleBranchIds     Json                 @default("[]") @map("eligible_branch_ids")
+  eligibleDepartmentIds Json                 @default("[]") @map("eligible_department_ids")
+  openedAt              DateTime?            @map("opened_at")
+  closedAt              DateTime?            @map("closed_at")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ratingScale RatingScale @relation(fields: [tenantId, ratingScaleId], references: [tenantId, id], onDelete: Restrict)
+  goals       Goal[]
+  appraisals  Appraisal[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@index([tenantId, ratingScaleId])
+  @@map("appraisal_cycles")
+}
+
+enum GoalLevel {
+  COMPANY
+  TEAM
+  INDIVIDUAL
+}
+
+enum GoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  AT_RISK
+  COMPLETED
+  CANCELLED
+}
+
+// Goals/OKRs, cascading COMPANY -> TEAM -> INDIVIDUAL via the self-relation
+// `parentGoalId` (same composite-self-relation pattern as
+// `Branch.parentBranchId`/`Department.parentDepartmentId` — see
+// docs/conventions/tenancy-rls.md). Exactly one of `employeeId`
+// (INDIVIDUAL) / `departmentId` (TEAM) is set; COMPANY goals have neither —
+// enforced by `createGoalSchema`'s `.refine()`, the same "shape validated
+// outside the DB" posture this codebase always takes for a JSON-adjacent
+// business rule a plain FK can't express. `cycleId` is optional — a goal
+// can be set independently of any appraisal cycle, or scoped to one when a
+// cycle is running ("a cycle runs: goals set, ..." per this step's tests).
+// `progressPercent` is a snapshot recomputed by `GoalService` on every
+// progress update (from `currentValue`/`targetValue` when both are set,
+// otherwise taken directly from the caller) rather than derived at read
+// time — cheap either way at this table's scale, but keeps one code path.
+model Goal {
+  id              String     @id @default(uuid()) @db.Uuid
+  tenantId        String     @map("tenant_id") @db.Uuid
+  level           GoalLevel
+  employeeId      String?    @map("employee_id") @db.Uuid
+  departmentId    String?    @map("department_id") @db.Uuid
+  parentGoalId    String?    @map("parent_goal_id") @db.Uuid
+  cycleId         String?    @map("cycle_id") @db.Uuid
+  title           String
+  description     String?
+  targetValue     Float?     @map("target_value")
+  currentValue    Float      @default(0) @map("current_value")
+  unit            String?
+  progressPercent Float      @default(0) @map("progress_percent")
+  status          GoalStatus @default(NOT_STARTED)
+  startDate       DateTime   @map("start_date") @db.Date
+  endDate         DateTime   @map("end_date") @db.Date
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee   Employee?       @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  department Department?     @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: Cascade)
+  cycle      AppraisalCycle? @relation(fields: [tenantId, cycleId], references: [tenantId, id], onDelete: SetNull)
+
+  // Composite self-relation, same pattern as Employee.manager/Branch.parentBranch.
+  parentGoal Goal?  @relation("GoalHierarchy", fields: [tenantId, parentGoalId], references: [tenantId, id], onDelete: SetNull)
+  childGoals Goal[] @relation("GoalHierarchy")
+
+  @@unique([tenantId, id])
+  @@index([tenantId, employeeId])
+  @@index([tenantId, departmentId])
+  @@index([tenantId, parentGoalId])
+  @@index([tenantId, cycleId])
+  @@map("goals")
+}
+
+enum AppraisalStatus {
+  DRAFT
+  IN_PROGRESS
+  PENDING_SIGNOFF
+  COMPLETED
+  REJECTED
+}
+
+// One row per (cycle, employee) — created by `AppraisalCycleService.open`'s
+// ENROLLMENT step for every employee the cycle's eligibility filter
+// matches. `overallRating` is computed ONCE, when every `ReviewAssignment`
+// for this appraisal reaches `SUBMITTED` (a simple average across submitted
+// `Review.overallRating` rows — a documented simplification, no weighting
+// by review type; see docs/conventions/performance.md), at the moment
+// `AppraisalService.submitForApproval` is called — never recomputed after,
+// the same "snapshot, don't re-derive" posture `PayrollRun.totalGrossBase`/
+// `LeaveBalance.entitledDays` already take. `workflowInstanceId` is a plain
+// id, no FK — THE RULE (docs/conventions/workflow.md): sign-off is a real
+// `WorkflowInstance`, this module owns no approve/reject logic of its own.
+model Appraisal {
+  id                     String          @id @default(uuid()) @db.Uuid
+  tenantId               String          @map("tenant_id") @db.Uuid
+  cycleId                String          @map("cycle_id") @db.Uuid
+  employeeId             String          @map("employee_id") @db.Uuid
+  status                 AppraisalStatus @default(DRAFT)
+  overallRating          Float?          @map("overall_rating")
+  workflowInstanceId     String?         @map("workflow_instance_id") @db.Uuid
+  submittedForApprovalAt DateTime?       @map("submitted_for_approval_at")
+  completedAt            DateTime?       @map("completed_at")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  cycle       AppraisalCycle     @relation(fields: [tenantId, cycleId], references: [tenantId, id], onDelete: Cascade)
+  employee    Employee           @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  assignments ReviewAssignment[]
+  reviews     Review[]
+
+  // Lets ReviewAssignment/Review define a composite FK of (tenantId, id) ->
+  // this table, same pattern as every other entity in this schema.
+  @@unique([tenantId, id])
+  @@unique([tenantId, cycleId, employeeId])
+  @@index([tenantId, status])
+  @@index([tenantId, employeeId])
+  @@map("appraisals")
+}
+
+enum ReviewType {
+  SELF
+  MANAGER
+  PEER
+  UPWARD
+}
+
+enum ReviewAssignmentStatus {
+  PENDING
+  SUBMITTED
+}
+
+// The ROSTER of expected reviews for one `Appraisal` — who owes a review of
+// what type. SELF/MANAGER/UPWARD rows are auto-created by
+// `AppraisalCycleService.open`'s enrollment (SELF: the employee themselves;
+// MANAGER: `Employee.managerId`, when one exists; UPWARD: each of the
+// employee's `directReports`, when any exist — all resolved via the REAL
+// 1.1 org chart, reusing `Employee.managerId`/the manager self-relation
+// exactly as `ApproverResolverService`'s own `MANAGER` rule does, but at
+// the Employee level rather than resolving all the way to a User the way a
+// workflow approver rule does) — a row is simply never created for a type
+// the org chart can't resolve (e.g. an employee with no manager gets no
+// MANAGER assignment), a documented gap, not a silent failure. PEER rows
+// are NEVER auto-created — they require an explicit
+// `POST /performance/appraisals/:id/peer-assignments` call (`performance.manage`),
+// per this step's "explicit peer assignment" brief. `@@unique` allows
+// multiple PEER (or UPWARD) rows per appraisal, one per distinct reviewer.
+model ReviewAssignment {
+  id          String                 @id @default(uuid()) @db.Uuid
+  tenantId    String                 @map("tenant_id") @db.Uuid
+  appraisalId String                 @map("appraisal_id") @db.Uuid
+  reviewType  ReviewType             @map("review_type")
+  reviewerId  String                 @map("reviewer_id") @db.Uuid
+  status      ReviewAssignmentStatus @default(PENDING)
+  dueAt       DateTime?              @map("due_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appraisal Appraisal @relation(fields: [tenantId, appraisalId], references: [tenantId, id], onDelete: Cascade)
+  reviewer  Employee  @relation(fields: [tenantId, reviewerId], references: [tenantId, id], onDelete: Cascade)
+  review    Review?
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, appraisalId, reviewType, reviewerId])
+  @@index([tenantId, reviewerId, status])
+  @@map("review_assignments")
+}
+
+// The SUBMITTED content of one fulfilled `ReviewAssignment` — kept as a
+// separate table from the assignment/roster above (both explicitly named
+// in this step's own schema scope) so "who owes a review" can be queried
+// cheaply (`GET /performance/my-review-assignments`, mirroring
+// `GET /workflow/my-pending-approvals`) with no join to review content, and
+// so a submitted review reads as an immutable record of what was actually
+// said. `ratingScaleId` is snapshotted from the cycle at submission time —
+// the same "snapshot, don't re-derive" posture this whole module takes —
+// so a later rating-scale edit never rewrites a historical review's frame
+// of reference.
+model Review {
+  id            String     @id @default(uuid()) @db.Uuid
+  tenantId      String     @map("tenant_id") @db.Uuid
+  assignmentId  String     @map("assignment_id") @db.Uuid
+  appraisalId   String     @map("appraisal_id") @db.Uuid
+  reviewType    ReviewType @map("review_type")
+  reviewerId    String     @map("reviewer_id") @db.Uuid
+  ratingScaleId String     @map("rating_scale_id") @db.Uuid
+  overallRating Float      @map("overall_rating")
+  strengths     String?
+  improvements  String?
+  comments      String?
+  submittedAt   DateTime   @default(now()) @map("submitted_at")
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignment ReviewAssignment @relation(fields: [tenantId, assignmentId], references: [tenantId, id], onDelete: Cascade)
+  appraisal  Appraisal        @relation(fields: [tenantId, appraisalId], references: [tenantId, id], onDelete: Cascade)
+  reviewer   Employee         @relation(fields: [tenantId, reviewerId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, assignmentId])
+  @@index([tenantId, appraisalId])
+  @@map("reviews")
+}
+
+// The calibration/distribution READ side's ONLY data source — see
+// docs/conventions/performance.md and docs/conventions/analytics-dashboard.md
+// (the SAME pre-aggregation discipline: a calibration view must never
+// live-`GROUP BY` a tenant's `appraisals` table on the hot path, no matter
+// how many employees are enrolled in a cycle). One row per (tenant, cycle,
+// branch, department, ratingValue) — computed by
+// `PerformanceCalibrationProcessor` grouping `Appraisal.overallRating`
+// (rounded to the nearest `RatingScale` level, a documented simplification)
+// joined to `Employee` for branch/department, via the SAME delete-then-
+// bulk-`createMany` recompute `AnalyticsRollupProcessor` already uses (see
+// analytics-dashboard.md's nullable-`departmentId`-breaks-upsert gotcha —
+// applies identically here).
+model AppraisalRatingDistributionSnapshot {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  cycleId       String   @map("cycle_id") @db.Uuid
+  branchId      String   @map("branch_id") @db.Uuid
+  departmentId  String?  @map("department_id") @db.Uuid
+  ratingValue   Float    @map("rating_value")
+  employeeCount Int      @default(0) @map("employee_count")
+  computedAt    DateTime @default(now()) @map("computed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, cycleId, branchId, departmentId, ratingValue])
+  @@index([tenantId, cycleId, branchId])
+  @@map("appraisal_rating_distribution_snapshots")
 }

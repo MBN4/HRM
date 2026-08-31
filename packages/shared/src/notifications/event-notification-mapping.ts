@@ -29,6 +29,8 @@ export const NOTIFICATION_EVENT_TYPES = [
   'licensing.issued',
   'licensing.revoked',
   'payroll.payslip_ready',
+  'performance.cycle_opened',
+  'performance.review_due',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -47,4 +49,6 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'licensing.issued': ['IN_APP'],
   'licensing.revoked': ['IN_APP'],
   'payroll.payslip_ready': ['IN_APP', 'EMAIL'],
+  'performance.cycle_opened': ['IN_APP'],
+  'performance.review_due': ['IN_APP', 'EMAIL'],
 };

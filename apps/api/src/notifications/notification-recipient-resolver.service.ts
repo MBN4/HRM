@@ -64,6 +64,23 @@ export class NotificationRecipientResolverService {
       case 'workflow.escalated':
         return typeof payload.escalatedToUserId === 'string' ? [payload.escalatedToUserId] : [];
 
+      case 'performance.cycle_opened': {
+        const appraisals = await tx.appraisal.findMany({
+          where: { cycleId: payload.cycleId as string },
+          select: { employee: { select: { userId: true } } },
+        });
+        const ids = new Set<string>();
+        for (const appraisal of appraisals) {
+          if (appraisal.employee.userId) {
+            ids.add(appraisal.employee.userId);
+          }
+        }
+        return [...ids];
+      }
+
+      case 'performance.review_due':
+        return typeof payload.reviewerUserId === 'string' ? [payload.reviewerUserId] : [];
+
       case 'licensing.issued':
       case 'licensing.revoked': {
         const admins = await tx.userRole.findMany({

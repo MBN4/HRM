@@ -1560,3 +1560,101 @@ payrollRunId, employeeId])` — the DB-level idempotency backstop),
     regressions. Full-repo `pnpm build`/`pnpm lint` green across all seven
     workspaces; `apps/portal`/`apps/mobile` untouched by this step (no
     portal work was in this step's scope).
+
+- **2.2 Performance management module — done — 2026-08-31.** A THIN
+  CONSUMER of existing systems — full design in
+  [`docs/conventions/performance.md`](./conventions/performance.md).
+  Routing/sign-off is a real 0.7 `WorkflowInstance` (THE RULE — this module
+  owns zero approve/reject logic), reviewers resolve via 1.1's real
+  `Employee.managerId`/`directReports` org chart, and reminders ride the
+  0.8 notification hub. The genuinely new concepts are `RatingScale` and an
+  `AppraisalCycle`'s review-type/eligibility configuration — both modeled
+  as tenant-editable DATA (JSON, app-layer validated), never a closed
+  code-level enum: "360" is simply a cycle whose `enabledReviewTypes`
+  includes all four `ReviewType`s, not a fifth type. Files:
+  - **`packages/db`**: seven new tenant-scoped tables —
+    `RatingScale` (`levels: Json`, a `RatingLevel[]`), `AppraisalCycle`
+    (`enabledReviewTypes`/`eligibleBranchIds`/`eligibleDepartmentIds: Json`,
+    empty eligibility arrays = every branch/department), `Goal` (cascading
+    COMPANY -> TEAM -> INDIVIDUAL via the same composite-self-relation
+    pattern `Branch.parentBranchId`/`Employee.managerId` already
+    establish), `Appraisal` (one row per cycle x employee,
+    `@@unique([tenantId, cycleId, employeeId])`), `ReviewAssignment` (the
+    roster of who owes a review — SELF/MANAGER/UPWARD auto-created at
+    enrollment, PEER always explicit), `Review` (the submitted content,
+    1:1 with a fulfilled assignment), and
+    `AppraisalRatingDistributionSnapshot` (the calibration rollup — same
+    delete-then-bulk-`createMany` shape `AnalyticsRollupProcessor`
+    established, for the identical nullable-`departmentId` reason). Two
+    migrations (`add_performance_module`, `enable_rls_for_performance_module`)
+    — the standard pair every prior module's schema step establishes; no
+    RLS-exempt table this time (unlike Payroll's `exchange_rates`) — every
+    row here is tenant-authored configuration or data, never global
+    reference data.
+  - **`packages/shared`**: `PERMISSIONS.PERFORMANCE_READ/WRITE/REVIEW/MANAGE`
+    (`REVIEW` seeded onto `EMPLOYEE`/`MANAGER`/`HR_MANAGER` — anyone may be
+    asked to peer-review a colleague; `MANAGE` is `HR_MANAGER`/
+    `TENANT_ADMIN` only — cycle/rating-scale administration);
+    `validators/performance.validator.ts` (`ratingLevelSchema`,
+    `createRatingScaleSchema`, `createAppraisalCycleSchema`,
+    `createGoalSchema`, `updateGoalProgressSchema`,
+    `assignPeerReviewersSchema`, `submitReviewSchema`);
+    `notifications/event-notification-mapping.ts` gains
+    `'performance.cycle_opened'`/`'performance.review_due'` (sign-off
+    itself needs no new event — `workflow.submitted`/`workflow.approved`
+    already notify for free, THE RULE's payoff yet again).
+  - **`apps/api/src/performance`** (new module): `rating-scales/`
+    (`RatingScaleService`, upsert-by-`(tenantId, key)`); `goals/`
+    (`GoalService`, the "own vs. `performance.manage`" two-layer shape
+    Leave already establishes); `reviews/` (`reviewer-resolver.util.ts` —
+    resolves SELF/MANAGER/UPWARD via the REAL 1.1 org chart, stopping at
+    the Employee rather than continuing on to a User the way a workflow
+    approver rule does; `ReviewService` — peer assignment, submission,
+    "my pending assignments"); `cycles/appraisal-cycle.service.ts` (cycle
+    lifecycle + ENROLLMENT — the one place eligibility config turns into
+    real `Appraisal`/`ReviewAssignment` rows, synchronous and cheap, no
+    BullMQ queue needed unlike Payroll's per-employee salary computation);
+    `appraisals/` (`AppraisalService.submitForApproval` — requires every
+    assignment `SUBMITTED`, averages `Review.overallRating` unweighted,
+    starts the `WorkflowInstance`; `AppraisalWorkflowEventsListener`
+    reacting to `workflow.approved`/`workflow.rejected`, mirroring
+    `PayrollWorkflowEventsListener`/`LeaveWorkflowEventsListener` exactly);
+    `calibration/` (`calibration-rollup.util.ts` — pure, unit-tested
+    grouping function; `CalibrationQueueService`/`CalibrationProcessor` —
+    the SAME pre-aggregation discipline `AnalyticsRollupProcessor`
+    established, enqueued once per appraisal that reaches `COMPLETED`, plus
+    a manual backfill/test lever mirroring `POST /analytics/rollup/run`;
+    `CalibrationService` — reads ONLY the snapshot table, never live-
+    aggregates `Appraisal`). `performance.controller.ts` — RBAC-gated only,
+    no feature-flag gating (unlike Payroll's ENTERPRISE-only flag; this
+    module is the same posture as Leave/Attendance/Employee); deliberately
+    no approve/reject route — THE RULE. `app.module.ts`,
+    `notification-dispatch.listener.ts`, `domain-event-audit.listener.ts`,
+    `notification-recipient-resolver.service.ts`, `queue.constants.ts` each
+    gained mechanical, additive lines for the new module/event namespace
+    (the recipient resolver's two new cases: `performance.review_due`
+    reads a direct `reviewerUserId` payload field, same shape
+    `workflow.escalated` already uses; `performance.cycle_opened` queries
+    enrolled `Appraisal` rows for the cycle, same shape `workflow.submitted`
+    already uses).
+  - Verified end-to-end over real HTTP by
+    `apps/api/test/performance.e2e-spec.ts` (7 tests: two tenant-authored
+    rating scales with different level shapes driving two different
+    cycles through the same code path, incl. a 404 for an unknown scale
+    key; a full cycle run — goals cascading COMPANY/TEAM/INDIVIDUAL with
+    progress tracking, the MANAGER review assignment resolving through the
+    real 1.1 org chart, reminders landing via the real 0.8 hub as
+    assignments are created, self+manager+peer reviews submitted and an
+    explicit peer assignment, routing + sign-off through the real 0.7
+    workflow to the real manager, the averaged `overallRating` landing
+    correctly; calibration/distribution correct, pre-aggregated,
+    branch-scoped — an HR user restricted to a branch with no completed
+    appraisals sees an empty distribution for the SAME cycle, never a
+    403 — and RBAC-gated for a plain employee; cross-tenant isolation via
+    RLS) plus `calibration-rollup.util.spec.ts` (5 pure-function tests,
+    including the nullable-`departmentId` non-double-counting proof).
+    `apps/api` grows from 271 to 283 tests (271 existing + 7 e2e + 5 unit);
+    `packages/db`'s 14 unchanged — 297 backend tests total, zero
+    regressions. Full-repo `pnpm build`/`pnpm lint` green across all seven
+    workspaces; `apps/portal`/`apps/mobile` untouched by this step (no
+    portal/mobile work was in this step's scope).
