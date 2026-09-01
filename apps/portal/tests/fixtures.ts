@@ -14,6 +14,17 @@ export interface PortalTestFixtures {
   branchAUsId: string;
   branchAQaId: string;
   analyticsDate: string;
+  payrollNoSalaryEmail: string;
+  managerAEmployeeId: string;
+  qaEmployeeAEmployeeId: string;
+  ratingScaleKey: string;
+  ratingScaleName: string;
+  calibrationCycleId: string;
+  seededCandidateId: string;
+  seededCandidateName: string;
+  seededApplicationId: string;
+  seededPostingId: string;
+  offboardingTargetEmployeeId: string;
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

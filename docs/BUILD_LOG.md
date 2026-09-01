@@ -1801,3 +1801,72 @@ landed API-only this phase, the same "backend first, UI later" sequencing
 1.1-1.3 took before 1.4 caught the portal up), the transactional-outbox
 upgrade flagged in notifications-queues.md, and/or the Phase 5.2 partition
 migrations flagged since 0.2.
+
+- **3.1 — Admin/HR Console (Payroll · Performance · Recruitment/Onboarding/
+  Offboarding UI), Phase 3's first slice.** The "UI catches up" pass 2.3's
+  own closing note named as a Phase 3 candidate: `apps/portal` now surfaces
+  all three Phase 2 modules as a functional, demoable admin console — a
+  pure consumption layer over already-shipped, already-tested APIs, built
+  on 1.4's exact conventions (auth/session, i18n/RTL, RBAC-gated
+  rendering, field-omission, `useAsync`, the `components/ui/*` design
+  system). Full detail, every file touched, and every bug/race caught
+  along the way is in
+  [`docs/conventions/frontend-admin-console.md`](./conventions/frontend-admin-console.md)
+  — summary:
+  - **One additive backend endpoint**: `GET /payroll/runs` (list, with
+    `branchId`/`periodYear`/`periodMonth` filters) —
+    `apps/api/src/payroll/runs/payroll-run.service.ts`'s new `findMany` +
+    `apps/api/src/payroll/payroll.controller.ts`'s new `@Get('runs')`
+    route, gated and field-omission-checked identically to the existing
+    by-id route. Zero other backend changes anywhere — the payroll engine,
+    workflow engine, and every other Phase 2 module's business logic are
+    completely untouched.
+  - **`apps/portal/src/lib/api/{payroll,performance,recruitment,onboarding,offboarding}.ts`**
+    (new) + `lib/api/types.ts` additions, mirroring `leave.ts`/
+    `attendance.ts`'s exact function-per-endpoint shape; `lib/api/client.ts`
+    gained `apiFetchBlob` (binary downloads — payslip PDF, bank-export
+    CSV) and `apps/portal/src/lib/download.ts`'s `triggerBrowserDownload`.
+  - **`apps/portal/src/components/workflow/{WorkflowStatusPanel,WorkflowActionForm}.tsx`**
+    (new) — one shared inline sign-off panel used by Payroll/Performance/
+    Recruitment(requisitions+offers)/Offboarding, with `WorkflowActionForm`
+    extracted (behavior-preserving) out of the existing `ApprovalCard.tsx`
+    so both share one approve/reject/comment implementation instead of a
+    fifth copy. The pre-existing `/approvals` inbox needed ZERO code
+    changes to start surfacing all five new `WorkflowInstance.entityType`s
+    — only five new `approvals.entity.*` i18n keys.
+  - **New pages**: `app/(app)/payroll/{page,[id]/page}.tsx`,
+    `app/(app)/performance/{page,[id]/page,appraisals/[id]/page,my-reviews/page}.tsx`,
+    `app/(app)/recruitment/{page,candidates/page,candidates/[id]/page,offers/page,onboarding/page,offboarding/page}.tsx`
+    - matching `components/{payroll,performance,recruitment,onboarding,offboarding,checklists}/*`
+      form/list components, all following `leave/page.tsx`'s established
+      page shape. `components/layout/Sidebar.tsx` gained a third
+      permission-gated nav section (`adminItems`); `components/ui/Badge.tsx`
+      gained additive `STATUS_TONE` entries for the new status vocabularies.
+  - **Known, documented gaps carried forward, not silently dropped**: no
+    department/designation pickers anywhere (no listing endpoint exists,
+    and every consuming field is optional); no download route for a
+    candidate's resume or a checklist task's uploaded document (only the
+    storage key is exposed, inherited from 2.3); `AppraisalDetail.employee`
+    is a raw, unredacted embed on the frontend type — deliberately narrowed
+    to identity-only fields.
+  - **Real bugs/races found and fixed while writing this step's own
+    tests** (all detailed in the conventions doc): `apiFetchBlob` was
+    initially hardcoded to `GET` (bank-export needs `POST`); a checklist-
+    completion race where completing one `MyTasksList` task's `reload()`
+    briefly unmounts/remounts every row including a second task's file
+    input (fixed in the TEST, by waiting for the first row to disappear
+    before touching the second); stacking multiple full-page `page.goto()`
+    reloads within one login session can race 0.4's refresh-token rotation
+    and trip its reuse-detection guard (fixed by one-login-per-test,
+    mirroring 2.2's own test-writing precedent); the fixture tenant's
+    `STARTER`-tier per-tenant request-volume quota (0.10) is a REAL
+    resilience control this suite's own volume legitimately exceeds — fixed
+    by seeding both fixture tenants as `edition: 'ENTERPRISE'` in
+    `global-setup.ts`, a separate mechanism from the `multi_country_payroll`
+    feature-flag override Payroll already needed.
+  - Verified: full-repo `pnpm build`/`pnpm lint` green across all eight
+    package tasks; `apps/api`'s full suite green at 301 tests (297 existing
+    - 4 new for `GET /payroll/runs`); `apps/portal`'s full Playwright suite
+      green at 51 tests (17 existing + 34 new across `payroll.spec.ts` (10),
+      `performance.spec.ts` (10), `recruitment.spec.ts` (14)), including
+      every pre-existing spec with zero regressions.

@@ -65,6 +65,26 @@ export class PayrollController {
     return { enqueued: true };
   }
 
+  /**
+   * The one list route this module was missing — a portal runs-list page
+   * has no other way to discover run ids. Same line-less `toRunDto` shape
+   * `POST /payroll/runs` already returns; `findMany` returns `[]` (never
+   * 403) for an out-of-scope `branchId` filter, matching this codebase's
+   * branch-scoping posture on reads.
+   */
+  @Get('runs')
+  @UseInterceptors(FeatureFlagGuard, PermissionsGuard, PermissionSerializerInterceptor)
+  @RequireFeature(FEATURE_FLAGS.MULTI_COUNTRY_PAYROLL)
+  @RequirePermissions(PERMISSIONS.PAYROLL_RUN)
+  async listRuns(@Query('branchId') branchId?: string, @Query('periodYear') periodYear?: string, @Query('periodMonth') periodMonth?: string) {
+    const runs = await this.runs.findMany(
+      this.tenantContext.getTx(),
+      { branchId, periodYear: periodYear ? Number(periodYear) : undefined, periodMonth: periodMonth ? Number(periodMonth) : undefined },
+      this.tenantContext.getBranchIds(),
+    );
+    return runs.map((r) => toRunDto(r));
+  }
+
   @Get('runs/:id')
   @UseInterceptors(FeatureFlagGuard, PermissionsGuard, PermissionSerializerInterceptor)
   @RequireFeature(FEATURE_FLAGS.MULTI_COUNTRY_PAYROLL)

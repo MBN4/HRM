@@ -60,7 +60,15 @@ async function performRefresh(apiBaseUrl: string): Promise<string | null> {
   }
 }
 
-async function request<T>(path: string, opts: ApiRequestOptions, isRetry: boolean): Promise<T> {
+/**
+ * Builds the request, attaches tenant/auth headers, and — for anything but
+ * a `skipAuth`/already-retried call — transparently rotates a 401 through
+ * the SAME single-flight `performRefresh` and retries once. Shared by both
+ * `request()` (JSON) and `apiFetchBlob()` (binary `StreamableFile` routes)
+ * so this header/retry logic exists in exactly one place; each caller owns
+ * only its own response-body parsing.
+ */
+async function doFetch(path: string, opts: ApiRequestOptions, isRetry: boolean): Promise<Response> {
   const { apiBaseUrl, headerTenantId } = resolveTenant();
   const headers: Record<string, string> = {};
   if (headerTenantId) {
@@ -92,7 +100,7 @@ async function request<T>(path: string, opts: ApiRequestOptions, isRetry: boolea
     });
     const newToken = await inFlightRefresh;
     if (newToken) {
-      return request<T>(path, opts, true);
+      return doFetch(path, opts, true);
     }
     clearTokens();
     if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
@@ -100,6 +108,12 @@ async function request<T>(path: string, opts: ApiRequestOptions, isRetry: boolea
     }
     throw new ApiError(401, 'Your session has expired. Please sign in again.', null);
   }
+
+  return res;
+}
+
+async function request<T>(path: string, opts: ApiRequestOptions, isRetry: boolean): Promise<T> {
+  const res = await doFetch(path, opts, isRetry);
 
   if (res.status === 204) {
     return undefined as T;
@@ -119,4 +133,48 @@ async function request<T>(path: string, opts: ApiRequestOptions, isRetry: boolea
 
 export function apiFetch<T = unknown>(path: string, opts: ApiRequestOptions = {}): Promise<T> {
   return request<T>(path, opts, false);
+}
+
+export interface ApiBlobResult {
+  blob: Blob;
+  filename: string | null;
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * The binary counterpart to `apiFetch` — for the three `StreamableFile`
+ * routes (payslip PDF, bank-export CSV) whose response body would corrupt
+ * (or throw) if run through `apiFetch`'s `res.text()` -> `JSON.parse`.
+ * Shares `doFetch`'s tenant/auth-header + single-flight 401-refresh-retry
+ * logic; a non-2xx response is still parsed as JSON when the server
+ * responded with one (these routes can still 403/400/404 with a JSON error
+ * body), falling back to `res.statusText` otherwise.
+ */
+export async function apiFetchBlob(
+  path: string,
+  opts: { method?: 'GET' | 'POST'; query?: ApiRequestOptions['query'] } = {},
+): Promise<ApiBlobResult> {
+  const res = await doFetch(path, { method: opts.method ?? 'GET', query: opts.query }, false);
+
+  if (!res.ok) {
+    const contentType = res.headers.get('content-type') ?? '';
+    let data: unknown = null;
+    let message = res.statusText;
+    if (contentType.includes('application/json')) {
+      const text = await res.text();
+      data = text ? JSON.parse(text) : null;
+      const rawMessage = data && typeof data === 'object' ? (data as { message?: unknown }).message : undefined;
+      message = Array.isArray(rawMessage) ? rawMessage.join(', ') : (rawMessage as string) || res.statusText;
+    }
+    throw new ApiError(res.status, message, data);
+  }
+
+  const blob = await res.blob();
+  const filename = parseContentDispositionFilename(res.headers.get('content-disposition'));
+  return { blob, filename };
 }

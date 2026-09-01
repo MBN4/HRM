@@ -27,11 +27,20 @@ const TENANT_B_SLUG = 'portal-e2e-b';
 export default async function globalSetup(): Promise<void> {
   await prisma.tenant.deleteMany({ where: { slug: { in: [TENANT_A_SLUG, TENANT_B_SLUG] } } });
 
+  // `edition: 'ENTERPRISE'` (not just the `multi_country_payroll` feature-
+  // flag override below) — `TenantRateLimitService.enforce` (0.10) reads
+  // `Tenant.edition` directly for its per-tenant request-volume quota
+  // (`DEFAULT_RATE_LIMITS`: STARTER 200 req/60s, ENTERPRISE 2000/60s), a
+  // SEPARATE mechanism from feature flags. This suite's own volume (many
+  // full page reloads × several concurrent fetches each, plus polling
+  // loops) legitimately exceeds STARTER's quota — a real resilience
+  // control working as designed, not a bug — so the fixture tenants need
+  // the higher tier the same way a real high-traffic tenant would.
   const tenantA = await prisma.tenant.create({
-    data: { name: 'Portal E2E Tenant A', slug: TENANT_A_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1' },
+    data: { name: 'Portal E2E Tenant A', slug: TENANT_A_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1', edition: 'ENTERPRISE' },
   });
   const tenantB = await prisma.tenant.create({
-    data: { name: 'Portal E2E Tenant B', slug: TENANT_B_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1' },
+    data: { name: 'Portal E2E Tenant B', slug: TENANT_B_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1', edition: 'ENTERPRISE' },
   });
 
   await seedCountryPacks(prisma);
@@ -67,7 +76,7 @@ export default async function globalSetup(): Promise<void> {
   // MANAGER does NOT hold salary.view (see packages/shared's
   // SYSTEM_ROLE_PERMISSIONS) and would have the value omitted from its own
   // PATCH response too.
-  await makeUser(tenantA.id, 'admin@portal-e2e-a.test', adminRoleA.id);
+  const adminAUser = await makeUser(tenantA.id, 'admin@portal-e2e-a.test', adminRoleA.id);
 
   const managerAUser = await makeUser(tenantA.id, 'manager@portal-e2e-a.test', managerRoleA.id);
   const managerAEmployee = await prisma.employee.create({
@@ -108,7 +117,7 @@ export default async function globalSetup(): Promise<void> {
   });
 
   const qaEmployeeAUser = await makeUser(tenantA.id, 'qa-employee@portal-e2e-a.test', employeeRoleA.id);
-  await prisma.employee.create({
+  const qaEmployeeAEmployee = await prisma.employee.create({
     data: {
       tenantId: tenantA.id,
       userId: qaEmployeeAUser.id,
@@ -139,6 +148,31 @@ export default async function globalSetup(): Promise<void> {
     },
   });
 
+  // A DEDICATED employee for the offboarding flow — never used by any other
+  // spec. `OffboardingService.complete` disables the employee's linked
+  // `User` account (`status: 'DISABLED'`, all tokens revoked) as one of its
+  // real side effects, so reusing `employeeAEmployee` (logged into by
+  // `payroll.spec.ts`/`performance.spec.ts`'s own RBAC checks, which may
+  // run AFTER this suite's offboarding test under `workers: 1`) would break
+  // those specs. `managerId` is set to `managerAEmployee` so `MANAGER`-rule
+  // approval resolves to `managerAUser`, matching the OffboardingProcess
+  // workflow template above.
+  const offboardingTargetUser = await makeUser(tenantA.id, 'offboarding-target@portal-e2e-a.test', employeeRoleA.id);
+  const offboardingTargetEmployee = await prisma.employee.create({
+    data: {
+      tenantId: tenantA.id,
+      userId: offboardingTargetUser.id,
+      employeeCode: 'PE-OFFB-1',
+      firstName: 'Omar',
+      lastName: 'Offboarding',
+      branchId: branchAUs.id,
+      managerId: managerAEmployee.id,
+      employmentType: 'FULL_TIME',
+      joinDate: new Date('2021-05-01'),
+      statutoryFields: { SSN: '000-00-0005', W4: 'on-file' },
+    },
+  });
+
   const employeeBUser = await makeUser(tenantB.id, 'employee@portal-e2e-b.test', employeeRoleB.id);
   await prisma.employee.create({
     data: {
@@ -157,6 +191,22 @@ export default async function globalSetup(): Promise<void> {
   for (const [tenantId, entityType] of [
     [tenantA.id, 'LeaveRequest'],
     [tenantA.id, 'AttendanceRegularization'],
+    // `AppraisalService.submitForApproval` passes the APPRAISED EMPLOYEE's
+    // own linked `User.id` as `requesterId` (see docs/conventions/
+    // performance.md) — unlike PayrollRun's `ROLE` template below — so a
+    // `MANAGER` rule correctly resolves through the real org chart, exactly
+    // like LeaveRequest/AttendanceRegularization's own templates. employeeA
+    // already has managerA as its manager (seeded above), so submitting an
+    // appraisal for employeeA resolves to managerAUser as the approver.
+    [tenantA.id, 'PerformanceAppraisal'],
+    // `OffboardingService.initiate` passes the DEPARTING EMPLOYEE's own
+    // linked `User.id` as `requesterId` (see docs/conventions/
+    // recruitment-lifecycle.md — the SAME "requester = the subject"
+    // reuse Leave/Attendance/Performance already establish above), so a
+    // `MANAGER` rule correctly resolves through the real org chart —
+    // employeeA already has managerA as its manager, so initiating
+    // offboarding for employeeA resolves to managerAUser as the approver.
+    [tenantA.id, 'OffboardingProcess'],
   ] as const) {
     const template = await prisma.workflowTemplate.create({
       data: { tenantId, name: `${entityType} approval`, entityType, version: 1, isActive: true },
@@ -165,6 +215,77 @@ export default async function globalSetup(): Promise<void> {
       data: { tenantId, templateId: template.id, name: 'Manager approval', order: 1, approverRule: { type: 'MANAGER' } },
     });
   }
+
+  // PayrollRun's own approval template — deliberately a `ROLE` rule
+  // (TENANT_ADMIN), not `MANAGER` like the two templates above:
+  // `PayrollRunService.submitForApproval` passes the CALLER (whoever
+  // clicked "submit", i.e. an HR/admin user) as `requesterId`, not an
+  // Employee with an org-chart manager, so a `MANAGER` rule would resolve
+  // to zero eligible approvers for `admin@portal-e2e-a.test` (a
+  // TENANT_ADMIN-only account with no linked Employee record). A `ROLE`
+  // rule against TENANT_ADMIN lets that same admin approve their own
+  // submitted run directly — see docs/conventions/workflow.md's
+  // `ApproverRule` shapes (`apps/api/src/workflow/approver-resolver.service.ts`).
+  const payrollTemplate = await prisma.workflowTemplate.create({
+    data: { tenantId: tenantA.id, name: 'PayrollRun approval', entityType: 'PayrollRun', version: 1, isActive: true },
+  });
+  await prisma.workflowStep.create({
+    data: {
+      tenantId: tenantA.id,
+      templateId: payrollTemplate.id,
+      name: 'Admin approval',
+      order: 1,
+      approverRule: { type: 'ROLE', roleName: SYSTEM_ROLES.TENANT_ADMIN },
+    },
+  });
+
+  // `JobRequisitionService.submitForApproval`/`OfferService.submitForApproval`
+  // both pass the CALLER (an HR/admin user, e.g. `admin@portal-e2e-a.test`)
+  // as `requesterId` — same reasoning as PayrollRun's own template above,
+  // not `MANAGER` (that admin account has no linked Employee/org-chart
+  // manager). A `ROLE:TENANT_ADMIN` rule lets that same admin approve their
+  // own submitted requisition/offer directly via the inline
+  // `WorkflowStatusPanel` on `/recruitment` — `recruitment.read` (which
+  // gates `GET requisitions/:id`/`GET offers/:id`) is held by TENANT_ADMIN/
+  // HR_MANAGER/MANAGER alike with no additional row-level ownership check
+  // (confirmed by reading `recruitment.controller.ts`), so this is safe.
+  for (const [tenantId, entityType] of [
+    [tenantA.id, 'JobRequisition'],
+    [tenantA.id, 'Offer'],
+  ] as const) {
+    const template = await prisma.workflowTemplate.create({
+      data: { tenantId, name: `${entityType} approval`, entityType, version: 1, isActive: true },
+    });
+    await prisma.workflowStep.create({
+      data: {
+        tenantId,
+        templateId: template.id,
+        name: 'Admin approval',
+        order: 1,
+        approverRule: { type: 'ROLE', roleName: SYSTEM_ROLES.TENANT_ADMIN },
+      },
+    });
+  }
+
+  // The `multi_country_payroll` feature flag is ENTERPRISE-only and the
+  // fixture tenant defaults to STARTER — enable it directly for tenant A,
+  // mirroring apps/api/test/payroll.e2e-spec.ts's own setup.
+  await prisma.tenantFeatureFlagOverride.create({ data: { tenantId: tenantA.id, flagKey: 'multi_country_payroll', enabled: true } });
+
+  // A minimal custom role holding `payroll.run` but NOT `salary.view` — no
+  // seeded system role has exactly this combination (TENANT_ADMIN/
+  // HR_MANAGER hold both, MANAGER/EMPLOYEE hold neither) — needed for a
+  // clean field-omission proof on the payroll screens.
+  const payrollRunPermission = await prisma.permission.findUniqueOrThrow({
+    where: { tenantId_key: { tenantId: tenantA.id, key: 'payroll.run' } },
+  });
+  const payrollNoSalaryRole = await prisma.role.create({
+    data: { tenantId: tenantA.id, name: 'Payroll Runner (no salary view)', isSystem: false },
+  });
+  await prisma.rolePermission.create({
+    data: { tenantId: tenantA.id, roleId: payrollNoSalaryRole.id, permissionId: payrollRunPermission.id },
+  });
+  await makeUser(tenantA.id, 'payroll-no-salary@portal-e2e-a.test', payrollNoSalaryRole.id);
 
   // Analytics dashboard (step 1.5) rollup rows, seeded DIRECTLY into the
   // four precomputed tables rather than via the real BullMQ job — this
@@ -220,6 +341,141 @@ export default async function globalSetup(): Promise<void> {
     ],
   });
 
+  // Performance (step 2.2) fixtures — see docs/conventions/performance.md.
+  // A rating scale is generically reusable across many cycles/specs, so it
+  // is seeded directly here (mirroring this file's own "seed once" posture
+  // for country packs/roles) rather than driven through the UI's own
+  // rating-scale-creation form — `performance.spec.ts` instead asserts the
+  // seeded scale is selectable in the cycle-create form, which is enough to
+  // prove that wiring without re-authoring a scale per test run.
+  const ratingScale = await prisma.ratingScale.create({
+    data: {
+      tenantId: tenantA.id,
+      key: 'portal-e2e-5-point',
+      name: 'Portal E2E 5-point scale',
+      levels: [
+        { value: 1, label: 'Needs improvement' },
+        { value: 3, label: 'Meets expectations' },
+        { value: 5, label: 'Exceeds expectations' },
+      ],
+    },
+  });
+
+  // A calibration cycle + precomputed `AppraisalRatingDistributionSnapshot`
+  // rows, seeded DIRECTLY rather than driven through a full enroll -> peer-
+  // assign -> review -> sign-off flow to COMPLETED — this suite's
+  // calibration test is proving the UI renders precomputed rollup rows
+  // correctly (the same posture `analytics.spec.ts`/this file's own
+  // analytics-rollup fixtures already take for themselves), not re-proving
+  // `CalibrationProcessor`'s own computation (apps/api/test/performance.e2e-
+  // spec.ts already covers that end to end). Kept as its own cycle,
+  // separate from whatever cycle `performance.spec.ts` creates through the
+  // UI, since global-setup runs before that cycle exists.
+  const calibrationCycle = await prisma.appraisalCycle.create({
+    data: {
+      tenantId: tenantA.id,
+      name: 'Portal E2E Calibration Cycle',
+      cycleType: 'ANNUAL',
+      status: 'CLOSED',
+      startDate: new Date('2025-01-01'),
+      endDate: new Date('2025-12-31'),
+      ratingScaleId: ratingScale.id,
+      enabledReviewTypes: ['SELF', 'MANAGER'],
+      eligibleBranchIds: [],
+      eligibleDepartmentIds: [],
+      openedAt: new Date('2025-01-01'),
+      closedAt: new Date('2025-12-31'),
+    },
+  });
+  await prisma.appraisalRatingDistributionSnapshot.createMany({
+    data: [
+      { tenantId: tenantA.id, cycleId: calibrationCycle.id, branchId: branchAUs.id, departmentId: null, ratingValue: 3, employeeCount: 2 },
+      { tenantId: tenantA.id, cycleId: calibrationCycle.id, branchId: branchAUs.id, departmentId: null, ratingValue: 5, employeeCount: 1 },
+    ],
+  });
+
+  // Recruitment (2.3) fixtures — see docs/conventions/recruitment-lifecycle.md.
+  // A `Candidate`+`Application` pair, seeded DIRECTLY via Prisma: the public
+  // careers API (the only UI-reachable way to create a `Candidate`) is out
+  // of scope for the admin console this stage builds. `Application.
+  // jobPostingId` is a required FK, so a minimal already-`APPROVED`
+  // `JobRequisition` + `JobPosting` pair is seeded alongside it purely to
+  // satisfy that constraint — separate from whatever requisition/posting
+  // `recruitment.spec.ts` itself creates and drives through the UI.
+  const seededRequisition = await prisma.jobRequisition.create({
+    data: {
+      tenantId: tenantA.id,
+      title: 'Portal E2E Seeded Requisition',
+      branchId: branchAUs.id,
+      employmentType: 'FULL_TIME',
+      headcount: 1,
+      status: 'APPROVED',
+      createdByUserId: adminAUser.id,
+      approvedAt: new Date(),
+    },
+  });
+  const seededPosting = await prisma.jobPosting.create({
+    data: {
+      tenantId: tenantA.id,
+      requisitionId: seededRequisition.id,
+      title: 'Portal E2E Seeded Posting',
+      description: 'A seeded posting backing the pipeline-board candidate fixture.',
+      publicSlug: 'portal-e2e-seeded-posting',
+      status: 'PUBLISHED',
+      publishedAt: new Date(),
+    },
+  });
+  const seededCandidate = await prisma.candidate.create({
+    data: {
+      tenantId: tenantA.id,
+      firstName: 'Cara',
+      lastName: 'Candidate',
+      email: 'cara.candidate@portal-e2e-a.test',
+      resumeStorageKey: null,
+    },
+  });
+  const seededApplication = await prisma.application.create({
+    data: {
+      tenantId: tenantA.id,
+      candidateId: seededCandidate.id,
+      jobPostingId: seededPosting.id,
+      stage: 'APPLIED',
+    },
+  });
+
+  // Onboarding/Offboarding checklist templates (2.3) — `ChecklistService.
+  // instantiate` picks the tenant's sole ACTIVE template per `processType`
+  // when no `checklistTemplateName` is given, so seeding exactly one of
+  // each here makes it the default with no query-param plumbing needed
+  // from the UI/tests. Both tasks resolve to `admin@portal-e2e-a.test` via
+  // a `ROLE: TENANT_ADMIN` assignee rule — `resolveChecklistAssignee`
+  // picks the tenant's earliest-created ACTIVE holder of that role, and
+  // the admin account is the first user created for tenant A above — so
+  // the same admin login used throughout this suite can complete "my
+  // tasks" for both flows, including the one `requiresDocument` task.
+  await prisma.checklistTemplate.create({
+    data: {
+      tenantId: tenantA.id,
+      processType: 'ONBOARDING',
+      name: 'Portal E2E Onboarding Checklist',
+      tasks: [
+        { key: 'welcome-pack', title: 'Send welcome pack', category: 'HR', assigneeRule: { type: 'ROLE', roleName: SYSTEM_ROLES.TENANT_ADMIN }, requiresDocument: false },
+        { key: 'signed-contract', title: 'Upload signed contract', category: 'HR', assigneeRule: { type: 'ROLE', roleName: SYSTEM_ROLES.TENANT_ADMIN }, requiresDocument: true },
+      ],
+    },
+  });
+  await prisma.checklistTemplate.create({
+    data: {
+      tenantId: tenantA.id,
+      processType: 'OFFBOARDING',
+      name: 'Portal E2E Offboarding Checklist',
+      tasks: [
+        { key: 'return-equipment', title: 'Return company equipment', category: 'IT', assigneeRule: { type: 'ROLE', roleName: SYSTEM_ROLES.TENANT_ADMIN }, requiresDocument: false },
+        { key: 'exit-interview-form', title: 'Upload signed exit interview form', category: 'HR', assigneeRule: { type: 'ROLE', roleName: SYSTEM_ROLES.TENANT_ADMIN }, requiresDocument: true },
+      ],
+    },
+  });
+
   const fixtures = {
     tenantASlug: TENANT_A_SLUG,
     tenantBSlug: TENANT_B_SLUG,
@@ -234,6 +490,17 @@ export default async function globalSetup(): Promise<void> {
     branchAUsId: branchAUs.id,
     branchAQaId: branchAQa.id,
     analyticsDate: analyticsDate.toISOString().slice(0, 10),
+    payrollNoSalaryEmail: 'payroll-no-salary@portal-e2e-a.test',
+    managerAEmployeeId: managerAEmployee.id,
+    qaEmployeeAEmployeeId: qaEmployeeAEmployee.id,
+    ratingScaleKey: ratingScale.key,
+    ratingScaleName: ratingScale.name,
+    calibrationCycleId: calibrationCycle.id,
+    seededCandidateId: seededCandidate.id,
+    seededCandidateName: `${seededCandidate.firstName} ${seededCandidate.lastName}`,
+    seededApplicationId: seededApplication.id,
+    seededPostingId: seededPosting.id,
+    offboardingTargetEmployeeId: offboardingTargetEmployee.id,
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 

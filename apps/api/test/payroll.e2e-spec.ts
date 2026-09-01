@@ -489,6 +489,57 @@ describe('payroll (e2e)', () => {
     });
   });
 
+  describe('GET /payroll/runs — listing', () => {
+    let listRunOldId: string;
+    let listRunMidId: string;
+    let listRunNewId: string;
+
+    beforeAll(async () => {
+      // Isolated from every other run in this suite via a period (2027) no
+      // other test touches, so ordering/filter assertions aren't coupled to
+      // execution order of the earlier describe blocks.
+      const r1 = await post('/payroll/runs', tokenAdminA, { branchId: branchUsId, periodYear: 2027, periodMonth: 1 }).expect(201);
+      listRunOldId = r1.body.id;
+      const r2 = await post('/payroll/runs', tokenAdminA, { branchId: branchQaId, periodYear: 2027, periodMonth: 2 }).expect(201);
+      listRunMidId = r2.body.id;
+      const r3 = await post('/payroll/runs', tokenAdminA, { branchId: branchUsId, periodYear: 2027, periodMonth: 3 }).expect(201);
+      listRunNewId = r3.body.id;
+    });
+
+    it('lists runs ordered by createdAt desc', async () => {
+      const res = await get('/payroll/runs?periodYear=2027', tokenAdminA).expect(200);
+      const ids = res.body.map((r: { id: string }) => r.id);
+      expect(ids.indexOf(listRunNewId)).toBeLessThan(ids.indexOf(listRunMidId));
+      expect(ids.indexOf(listRunMidId)).toBeLessThan(ids.indexOf(listRunOldId));
+    });
+
+    it('branchId/periodYear/periodMonth query filters narrow the results', async () => {
+      const byBranch = await get(`/payroll/runs?periodYear=2027&branchId=${branchUsId}`, tokenAdminA).expect(200);
+      const byBranchIds = byBranch.body.map((r: { id: string }) => r.id).sort();
+      expect(byBranchIds).toEqual([listRunOldId, listRunNewId].sort());
+
+      const byMonth = await get('/payroll/runs?periodYear=2027&periodMonth=2', tokenAdminA).expect(200);
+      expect(byMonth.body.map((r: { id: string }) => r.id)).toEqual([listRunMidId]);
+    });
+
+    it('an out-of-scope branchId filter returns [], never a 403', async () => {
+      const noSalaryViewRole = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantAId, name: 'PAYROLL_NO_SALARY_VIEW' } } });
+      const branchRestricted = await makeUserWithRole(tenantAId, noSalaryViewRole.id, 'branch-restricted-list@payroll-a.test');
+      await prisma.userBranch.create({ data: { tenantId: tenantAId, userId: branchRestricted.id, branchId: branchUsId } });
+      const restrictedToken = jwt.sign({ sub: branchRestricted.id, tenantId: tenantAId });
+
+      const res = await get(`/payroll/runs?branchId=${branchQaId}`, restrictedToken).expect(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('a caller with payroll.run but no salary.view sees list rows with amount fields omitted', async () => {
+      const res = await get('/payroll/runs?periodYear=2027', tokenHrNoSalaryViewA).expect(200);
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body.every((r: object) => !('totalGross' in r) && !('totalNet' in r) && !('totalEmployerCost' in r))).toBe(true);
+      expect(res.body[0].status).toBeDefined();
+    });
+  });
+
   describe('cross-tenant isolation (Row-Level Security)', () => {
     it("tenant B cannot read tenant A's payroll run by id", async () => {
       await get(`/payroll/runs/${usRunId}`, tokenAdminB, TENANT_B_SLUG).expect(404);

@@ -94,6 +94,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/payroll.md`](./docs/conventions/payroll.md)                                 | THE pack-driven boundary statement, CALCULATE vs. DELEGATE, money/multi-currency, idempotency+resumability, run lifecycle + workflow approval, payslip + bank-export seams, and "how to add a new country". (2.1)                                                                        |
 | [`docs/conventions/performance.md`](./docs/conventions/performance.md)                         | Rating scales + cycle review-type/eligibility config as DATA (not enums), reviewer resolution via the real org chart, enrollment, the review-vs-assignment split, workflow-driven sign-off, reminders, and pre-aggregated calibration analytics. (2.2)                                   |
 | [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md)     | ATS pipeline (requisitions/postings/candidates/offers via workflow), the public careers API, the candidate→Employee onboarding bridge + required-field enforcement, the shared checklist mini-engine, and offboarding + access revocation + the Payroll FINAL_SETTLEMENT hand-off. (2.3) |
+| [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md)   | The Payroll/Performance/Recruitment+Onboarding+Offboarding admin console on `apps/portal`: the shared `WorkflowStatusPanel` sign-off component, `apiFetchBlob` binary downloads, the one additive `GET /payroll/runs` endpoint, and known UI gaps. (3.1)                                 |
 
 ## 5. Build log summary
 
@@ -196,6 +197,14 @@ per step, kept here for a fast overview.
   additive to orchestration only, never the tax/statutory engine) and
   revokes their access via Auth's existing token-revocation primitive. See
   [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md).
+- **3.1** — Admin/HR Console (Phase 3's first slice): a pure consumption-
+  layer UI on `apps/portal` surfacing Payroll/Performance/Recruitment+
+  Onboarding+Offboarding, all of which shipped API-only in Phase 2. One
+  additive backend endpoint (`GET /payroll/runs`); a shared
+  `WorkflowStatusPanel` sign-off component reused across five entity
+  types (the pre-existing `/approvals` inbox needed zero changes to pick
+  up all five); `apiFetchBlob` for payslip/bank-export downloads. See
+  [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md).
 
 ## 6. Not yet built
 
@@ -248,10 +257,17 @@ Onboarding/Offboarding (2.3) — the full compensation and employee-lifecycle
 layer, on top of Phase 0's chassis and Phase 1's Core HR/Leave/Attendance/
 ESS/Analytics foundation.
 
-- [ ] **Phase 3** — _scope not yet defined_ (candidates: Recruitment/
-      Performance/Payroll UI on `apps/portal` — all three landed API-only
-      in Phase 2, the same "backend first, UI later" sequencing 1.1-1.3
-      took before 1.4 caught the portal up)
+- [x] **3.1** Admin/HR Console — Payroll/Performance/Recruitment+Onboarding+
+      Offboarding UI on `apps/portal` (one additive `GET /payroll/runs`
+      endpoint, a shared `WorkflowStatusPanel` sign-off component, binary
+      payslip/bank-export downloads); closes the Phase 2 UI gap 2.3's own
+      closing note named as a Phase 3 candidate.
+
+**Phase 3 scope**: LMS, Expenses, Assets, Integrations — 3.1 (above) is the
+first slice; the remaining three are not yet broken into individual steps.
+
+- [ ] **3.2+** LMS, Expenses, Assets, Integrations — _not yet defined in
+      detail_
 - [ ] **Phase 4** — _scope not yet defined_
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see

@@ -106,6 +106,29 @@ export class PayrollRunService {
     await tx.payrollRun.update({ where: { id: run.id }, data: { status: 'PAID', paidAt: new Date() } });
   }
 
+  /**
+   * A pure read — unlike `assertBranchAllowed` (used on WRITEs), an
+   * out-of-scope `branchId` filter here returns `[]`, never a 403, matching
+   * this codebase's existing branch-scoping posture for LIST reads (e.g.
+   * `AnalyticsDashboardService`/`PerformanceService`). `allowedBranchIds`
+   * of `null` means unrestricted.
+   */
+  async findMany(
+    tx: Prisma.TransactionClient,
+    filters: { branchId?: string; periodYear?: number; periodMonth?: number },
+    allowedBranchIds: string[] | null,
+  ) {
+    if (filters.branchId && allowedBranchIds && !allowedBranchIds.includes(filters.branchId)) {
+      return [];
+    }
+    const where: Prisma.PayrollRunWhereInput = {
+      ...(filters.branchId ? { branchId: filters.branchId } : allowedBranchIds ? { branchId: { in: allowedBranchIds } } : {}),
+      ...(filters.periodYear ? { periodYear: filters.periodYear } : {}),
+      ...(filters.periodMonth ? { periodMonth: filters.periodMonth } : {}),
+    };
+    return tx.payrollRun.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 });
+  }
+
   async requireRun(tx: Prisma.TransactionClient, runId: string) {
     const run = await tx.payrollRun.findUnique({ where: { id: runId } });
     if (!run) {

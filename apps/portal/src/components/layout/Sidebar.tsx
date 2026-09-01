@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Bell,
+  Briefcase,
   CalendarClock,
   CalendarDays,
   ClipboardCheck,
@@ -12,8 +13,12 @@ import {
   Megaphone,
   Network,
   Settings,
+  Target,
   User,
+  UserMinus,
+  UserPlus,
   Users,
+  Wallet,
 } from 'lucide-react';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
@@ -48,6 +53,27 @@ export function Sidebar() {
     mssItems.push({ href: '/analytics', label: t('nav.analytics'), icon: BarChart3 });
   }
 
+  // Admin console — one entry per module, each gated on its own
+  // permission(s). Later stages append their own `if (can(...)) push(...)`
+  // lines here (Performance/Recruitment/Onboarding/Offboarding); this
+  // array renders as a third nav section only when non-empty.
+  const adminItems: NavItem[] = [];
+  if (can(PERMISSIONS.PAYROLL_RUN) || can(PERMISSIONS.PAYROLL_APPROVE)) {
+    adminItems.push({ href: '/payroll', label: t('nav.payroll'), icon: Wallet });
+  }
+  if (can(PERMISSIONS.PERFORMANCE_READ) || can(PERMISSIONS.PERFORMANCE_MANAGE)) {
+    adminItems.push({ href: '/performance', label: t('nav.performance'), icon: Target });
+  }
+  if (can(PERMISSIONS.RECRUITMENT_READ) || can(PERMISSIONS.RECRUITMENT_MANAGE)) {
+    adminItems.push({ href: '/recruitment', label: t('nav.recruitment'), icon: Briefcase });
+  }
+  if (can(PERMISSIONS.ONBOARDING_MANAGE)) {
+    adminItems.push({ href: '/recruitment/onboarding', label: t('nav.onboarding'), icon: UserPlus });
+  }
+  if (can(PERMISSIONS.OFFBOARDING_MANAGE)) {
+    adminItems.push({ href: '/recruitment/offboarding', label: t('nav.offboarding'), icon: UserMinus });
+  }
+
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e border-ink-100 bg-white">
       <div className="flex h-16 items-center gap-2 px-5">
@@ -60,6 +86,12 @@ export function Sidebar() {
           <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">{t('nav.team')}</p>
           <NavGroup items={mssItems} pathname={pathname} />
         </div>
+        {adminItems.length > 0 && (
+          <div>
+            <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">{t('nav.admin')}</p>
+            <NavGroup items={adminItems} pathname={pathname} />
+          </div>
+        )}
       </nav>
       <div className="border-t border-ink-100 p-3">
         <NavGroup items={[{ href: '/settings', label: t('nav.settings'), icon: Settings }]} pathname={pathname} />

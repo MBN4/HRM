@@ -25,6 +25,34 @@ const STATUS_TONE: Record<string, Tone> = {
   ON_LEAVE: 'info',
   WEEKEND: 'neutral',
   HOLIDAY: 'neutral',
+  // Workflow-instance/step statuses not already covered above (see
+  // WorkflowStatusPanel) — additive only, never touch the entries above.
+  IN_STEP: 'info',
+  ESCALATED: 'danger',
+  ACTIVE: 'info',
+  SKIPPED: 'neutral',
+  // Payroll/Performance statuses not already covered above — additive only.
+  DRAFT: 'neutral',
+  CALCULATED: 'info',
+  FINALIZED: 'success',
+  PAID: 'success',
+  IN_PROGRESS: 'info',
+  PENDING_SIGNOFF: 'warning',
+  COMPLETED: 'success',
+  SUBMITTED: 'success',
+  // Recruitment/Onboarding/Offboarding statuses not already covered above
+  // (JobRequisitionStatus/JobPostingStatus/ApplicationStage/OfferStatus/
+  // OnboardingProcessStatus) — additive only, never touch the entries above.
+  PENDING_APPROVAL: 'warning',
+  PUBLISHED: 'success',
+  APPLIED: 'neutral',
+  SCREEN: 'info',
+  INTERVIEW: 'info',
+  OFFER: 'warning',
+  HIRED: 'success',
+  ACCEPTED: 'success',
+  DECLINED: 'danger',
+  CANCELLED: 'neutral',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {
