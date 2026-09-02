@@ -94,7 +94,8 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/payroll.md`](./docs/conventions/payroll.md)                                 | THE pack-driven boundary statement, CALCULATE vs. DELEGATE, money/multi-currency, idempotency+resumability, run lifecycle + workflow approval, payslip + bank-export seams, and "how to add a new country". (2.1)                                                                        |
 | [`docs/conventions/performance.md`](./docs/conventions/performance.md)                         | Rating scales + cycle review-type/eligibility config as DATA (not enums), reviewer resolution via the real org chart, enrollment, the review-vs-assignment split, workflow-driven sign-off, reminders, and pre-aggregated calibration analytics. (2.2)                                   |
 | [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md)     | ATS pipeline (requisitions/postings/candidates/offers via workflow), the public careers API, the candidate→Employee onboarding bridge + required-field enforcement, the shared checklist mini-engine, and offboarding + access revocation + the Payroll FINAL_SETTLEMENT hand-off. (2.3) |
-| [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md)   | The Payroll/Performance/Recruitment+Onboarding+Offboarding admin console on `apps/portal`: the shared `WorkflowStatusPanel` sign-off component, `apiFetchBlob` binary downloads, the one additive `GET /payroll/runs` endpoint, and known UI gaps. (3.1)                                 |
+| [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md)   | The Payroll/Performance/Recruitment+Onboarding+Offboarding admin console on `apps/portal`: the shared `WorkflowStatusPanel` sign-off component, `apiFetchBlob` binary downloads, the one additive `GET /payroll/runs` endpoint, and known UI gaps. (2.4)                                 |
+| [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md)           | Expenses & Reimbursements, Asset Management, HR Helpdesk, Announcements & Policies — the expense→payroll reimbursement hand-off, asset↔offboarding wiring, helpdesk SLA escalation, policy e-acknowledgment. (3.1)                                                                       |
 
 ## 5. Build log summary
 
@@ -197,7 +198,10 @@ per step, kept here for a fast overview.
   additive to orchestration only, never the tax/statutory engine) and
   revokes their access via Auth's existing token-revocation primitive. See
   [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md).
-- **3.1** — Admin/HR Console (Phase 3's first slice): a pure consumption-
+- **2.4** — Admin/HR Console (renumbered from an earlier draft "3.1" —
+  this UI-catch-up step actually belongs to Phase 2's own closing note, not
+  Phase 3; "3.1" is reserved for Phase 3's real first slice, the four
+  operations modules below): a pure consumption-
   layer UI on `apps/portal` surfacing Payroll/Performance/Recruitment+
   Onboarding+Offboarding, all of which shipped API-only in Phase 2. One
   additive backend endpoint (`GET /payroll/runs`); a shared
@@ -205,6 +209,22 @@ per step, kept here for a fast overview.
   types (the pre-existing `/approvals` inbox needed zero changes to pick
   up all five); `apiFetchBlob` for payslip/bank-export downloads. See
   [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md).
+- **3.1** — Operations modules (Phase 3's first slice): Expenses &
+  Reimbursements, Asset Management, HR Helpdesk/Ticketing, and
+  Announcements & Policies — backend + portal UI together, four thin
+  consumers of the workflow engine, storage, notifications, audit, and
+  RBAC, none of which needed to change. An expense claim's approval is a
+  real `WorkflowInstance` (`entityType: "EXPENSE_CLAIM"`, amount-thresholded
+  via the sandboxed condition evaluator); an `APPROVED` claim is picked up
+  by `PayrollRunProcessor` itself (an additive orchestration touch, the
+  payroll engine untouched) and merged straight onto net pay, never
+  computed by this module. The offboarding clearance checklist's
+  placeholder "asset return" step (flagged in 2.3) is now wired to the
+  real asset register. A general audit-redaction bug (`Decimal`/`Date`
+  values mangled instead of using their own `toJSON()`) was caught and
+  fixed in `packages/shared`, correcting every prior module's audited
+  routes retroactively too. See
+  [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md).
 
 ## 6. Not yet built
 
@@ -257,17 +277,30 @@ Onboarding/Offboarding (2.3) — the full compensation and employee-lifecycle
 layer, on top of Phase 0's chassis and Phase 1's Core HR/Leave/Attendance/
 ESS/Analytics foundation.
 
-- [x] **3.1** Admin/HR Console — Payroll/Performance/Recruitment+Onboarding+
+- [x] **2.4** Admin/HR Console — Payroll/Performance/Recruitment+Onboarding+
       Offboarding UI on `apps/portal` (one additive `GET /payroll/runs`
       endpoint, a shared `WorkflowStatusPanel` sign-off component, binary
       payslip/bank-export downloads); closes the Phase 2 UI gap 2.3's own
-      closing note named as a Phase 3 candidate.
+      closing note named as a Phase 3 candidate. (Renumbered from an
+      earlier draft "3.1" so Phase 3's own numbering below starts clean.)
 
-**Phase 3 scope**: LMS, Expenses, Assets, Integrations — 3.1 (above) is the
-first slice; the remaining three are not yet broken into individual steps.
+**PHASE 2, including its UI catch-up pass, now fully complete** — Payroll
+(2.1) + Performance (2.2) + Recruitment/Onboarding/Offboarding (2.3) +
+Admin/HR Console (2.4).
 
-- [ ] **3.2+** LMS, Expenses, Assets, Integrations — _not yet defined in
-      detail_
+- [x] **3.1** Operations modules — Expenses & Reimbursements, Asset
+      Management, HR Helpdesk/Ticketing, Announcements & Policies —
+      backend + portal UI together, thin consumers of the workflow engine,
+      storage, notifications, audit, and RBAC. Expense claims hand off to
+      Payroll as a reimbursement input; asset return closes the offboarding
+      clearance checklist's real placeholder step; the ESS announcements
+      seam left in 1.4 is now wired to real data. See
+      [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md).
+
+**Phase 3 scope**: LMS, Expenses/Assets/Helpdesk/Announcements (3.1, above),
+Integrations — the remaining two are not yet broken into individual steps.
+
+- [ ] **3.2+** LMS, Integrations — _not yet defined in detail_
 - [ ] **Phase 4** — _scope not yet defined_
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see

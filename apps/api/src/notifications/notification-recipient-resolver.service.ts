@@ -84,6 +84,24 @@ export class NotificationRecipientResolverService {
       case 'checklist.task_assigned':
         return typeof payload.assigneeUserId === 'string' ? [payload.assigneeUserId] : [];
 
+      // Step 3.1 — see docs/conventions/operations-modules.md. The
+      // current assignee if one is set (a direct payload field, no DB
+      // query needed — the SAME shape `workflow.escalated`'s
+      // `escalatedToUserId` already uses); otherwise every ACTIVE
+      // HR_MANAGER in the tenant, the SAME "no assignee yet, notify the
+      // owning role" fallback `licensing.issued`/`.revoked` already
+      // establish for TENANT_ADMIN.
+      case 'helpdesk.ticket_escalated': {
+        if (typeof payload.assignedToUserId === 'string') {
+          return [payload.assignedToUserId];
+        }
+        const hrManagers = await tx.userRole.findMany({
+          where: { role: { name: SYSTEM_ROLES.HR_MANAGER }, user: { status: 'ACTIVE' } },
+          select: { userId: true },
+        });
+        return hrManagers.map((row) => row.userId);
+      }
+
       case 'licensing.issued':
       case 'licensing.revoked': {
         const admins = await tx.userRole.findMany({

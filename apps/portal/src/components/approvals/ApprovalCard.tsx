@@ -1,7 +1,7 @@
 'use client';
 
 import { useI18n } from '../../i18n/I18nProvider';
-import { formatDate } from '../../lib/format';
+import { formatCurrency, formatDate } from '../../lib/format';
 import type { PendingApproval } from '../../lib/api/pending-approvals';
 import { Card, CardBody } from '../ui/Card';
 import { WorkflowActionForm } from '../workflow/WorkflowActionForm';
@@ -15,6 +15,11 @@ function SnapshotSummary({ approval, locale }: { approval: PendingApproval; loca
         {t(`leave.type.${snapshot.leaveType}`)} · {formatDate(snapshot.startDate as string, locale)} – {formatDate(snapshot.endDate as string, locale)} ·{' '}
         {t('leave.days', { count: snapshot.days })}
       </p>
+    );
+  }
+  if (approval.detail.instance.entityType === 'EXPENSE_CLAIM') {
+    return (
+      <p className="text-sm text-ink-600">{formatCurrency(Number(snapshot.amount), snapshot.currencyCode as string, locale)}</p>
     );
   }
   if (approval.detail.instance.entityType === 'AttendanceRegularization') {

@@ -1,10 +1,12 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Employee, OffboardingProcess, Prisma } from '@hrm/db';
+import type { ChecklistTaskInstance, Employee, OffboardingProcess, Prisma } from '@hrm/db';
 import { WorkflowEngineService } from '../workflow/workflow-engine.service';
 import { EmployeeService } from '../employees/employee.service';
 import { ChecklistService } from '../checklists/checklist.service';
 import { PayrollRunService } from '../payroll/runs/payroll-run.service';
 import { TokenService } from '../auth/token.service';
+import { AssetService } from '../assets/asset.service';
+import { ASSET_RETURN_CHECKLIST_TASK_KEY } from '../assets/assets.constants';
 import { OFFBOARDING_CHECKLIST_PROCESS_TYPE, OFFBOARDING_PROCESS_ENTITY_TYPE } from './offboarding.constants';
 
 export interface InitiateOffboardingInput {
@@ -29,6 +31,7 @@ export class OffboardingService {
     private readonly checklists: ChecklistService,
     private readonly payrollRuns: PayrollRunService,
     private readonly tokens: TokenService,
+    private readonly assets: AssetService,
   ) {}
 
   /**
@@ -139,6 +142,38 @@ export class OffboardingService {
       where: { id },
       data: { status: 'COMPLETED', completedAt: new Date(), settlementPayrollRunId: run.id },
     });
+  }
+
+  /**
+   * The real "asset return" wiring (step 3.1 — see
+   * docs/conventions/operations-modules.md; was a plain placeholder
+   * tick-box in 2.3). `ChecklistService.complete` itself is UNCHANGED and
+   * stays fully generic — this is an additive check in the CONSUMING
+   * module, the same "wiring lives in the module that knows about both
+   * sides, never in the generic engine" posture the checklist mini-engine
+   * already documents for itself. Only a task whose `key` is EXACTLY
+   * `ASSET_RETURN_CHECKLIST_TASK_KEY` is affected; every other checklist
+   * task (access badge, exit interview, ...) completes exactly as before.
+   */
+  async completeTask(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    taskId: string,
+    callerUserId: string,
+    canManage: boolean,
+    documentStorageKey?: string,
+  ): Promise<ChecklistTaskInstance> {
+    const task = await tx.checklistTaskInstance.findUnique({ where: { id: taskId } });
+    if (task?.processType === OFFBOARDING_CHECKLIST_PROCESS_TYPE && task.key === ASSET_RETURN_CHECKLIST_TASK_KEY) {
+      const process = await this.requireProcess(tx, task.processId);
+      const outstanding = await this.assets.hasOutstandingAssignments(tx, tenantId, process.employeeId);
+      if (outstanding) {
+        throw new ConflictException(
+          'This employee still has assets assigned that have not been returned. Return every asset via the Asset Management module before completing this task.',
+        );
+      }
+    }
+    return this.checklists.complete(tx, taskId, callerUserId, canManage, documentStorageKey);
   }
 
   async listTasks(tx: Prisma.TransactionClient, id: string) {

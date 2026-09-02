@@ -32,6 +32,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'performance.cycle_opened',
   'performance.review_due',
   'checklist.task_assigned',
+  'helpdesk.ticket_escalated',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -53,4 +54,5 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'performance.cycle_opened': ['IN_APP'],
   'performance.review_due': ['IN_APP', 'EMAIL'],
   'checklist.task_assigned': ['IN_APP', 'EMAIL'],
+  'helpdesk.ticket_escalated': ['IN_APP', 'EMAIL'],
 };

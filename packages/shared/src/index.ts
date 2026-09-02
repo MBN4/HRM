@@ -31,3 +31,7 @@ export * from './validators/checklist.validator';
 export * from './validators/recruitment.validator';
 export * from './validators/onboarding.validator';
 export * from './validators/offboarding.validator';
+export * from './validators/expense.validator';
+export * from './validators/asset.validator';
+export * from './validators/helpdesk.validator';
+export * from './validators/announcement.validator';

@@ -44,6 +44,19 @@ function redactRecursive(value: unknown): unknown {
     return value.map(redactRecursive);
   }
   if (value !== null && typeof value === 'object') {
+    // A live class instance (Prisma's `Decimal`, `Date`, ...) — not a
+    // plain `{...}` object — walking its OWN enumerable properties via
+    // `Object.entries` reconstructs its internal representation instead
+    // of its actual value (a `Decimal`'s `{s, e, d}` digit encoding, a
+    // `Date`'s empty `{}`), which for `Decimal` specifically isn't even
+    // valid JSON (its internals aren't plain-serializable) and throws at
+    // the `audit_log` write. `toJSON()` is the SAME protocol
+    // `JSON.stringify` itself already uses to get a value's actual
+    // serializable representation — reuse it here instead of walking the
+    // instance structurally, then keep redacting from that point.
+    if (Object.getPrototypeOf(value) !== Object.prototype && typeof (value as { toJSON?: unknown }).toJSON === 'function') {
+      return redactRecursive((value as { toJSON: () => unknown }).toJSON());
+    }
     const entries = Object.entries(value as Record<string, unknown>).map(([key, v]) => [
       key,
       REDACTED_KEY_PATTERN.test(key) ? REDACTED_PLACEHOLDER : redactRecursive(v),

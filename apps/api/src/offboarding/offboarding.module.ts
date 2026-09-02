@@ -4,6 +4,7 @@ import { EmployeesModule } from '../employees/employees.module';
 import { ChecklistsModule } from '../checklists/checklists.module';
 import { PayrollModule } from '../payroll/payroll.module';
 import { AuthModule } from '../auth/auth.module';
+import { AssetsModule } from '../assets/assets.module';
 import { OffboardingController } from './offboarding.controller';
 import { OffboardingService } from './offboarding.service';
 import { OffboardingWorkflowEventsListener } from './offboarding-workflow-events.listener';
@@ -15,12 +16,14 @@ import { OffboardingWorkflowEventsListener } from './offboarding-workflow-events
  * `EmployeeService.update` status transition), `ChecklistsModule` (the
  * shared clearance-checklist engine), `PayrollModule` (the REAL,
  * UNMODIFIED `PayrollRunService` lifecycle for the `FINAL_SETTLEMENT`
- * hand-off), and `AuthModule` (the REAL `TokenService.revokeAllForUser`
- * for access revocation) — every one of these five systems is REUSED, none
- * reimplemented, per this step's explicit brief.
+ * hand-off), `AuthModule` (the REAL `TokenService.revokeAllForUser`
+ * for access revocation), and — additive, step 3.1 — `AssetsModule`, so
+ * the clearance checklist's "asset return" task can be wired to the REAL
+ * asset register instead of staying a placeholder manual tick-box; see
+ * docs/conventions/operations-modules.md.
  */
 @Module({
-  imports: [WorkflowModule, EmployeesModule, ChecklistsModule, PayrollModule, AuthModule],
+  imports: [WorkflowModule, EmployeesModule, ChecklistsModule, PayrollModule, AuthModule, AssetsModule],
   controllers: [OffboardingController],
   providers: [OffboardingService, OffboardingWorkflowEventsListener],
   exports: [OffboardingService],

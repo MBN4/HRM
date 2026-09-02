@@ -2,7 +2,10 @@
 
 [← Back to CLAUDE.md](../../CLAUDE.md) · [Build log](../BUILD_LOG.md)
 
-Defined in step 3.1 (Phase 3's first slice) — `apps/portal`. Phase 2 shipped
+Defined in step 2.4 (renumbered from an earlier draft "3.1" — this UI-catch-up
+step belongs to Phase 2's own closing note, not Phase 3; Phase 3's real first
+slice is [`operations-modules.md`](./operations-modules.md)) — `apps/portal`.
+Phase 2 shipped
 Payroll (2.1), Performance (2.2), and Recruitment/Onboarding/Offboarding
 (2.3) API-only; this step is the "UI catches up" pass 2.3's own closing note
 anticipated, built the same way 1.4 caught the portal up on Leave/

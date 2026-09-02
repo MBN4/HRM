@@ -1,17 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { Megaphone } from 'lucide-react';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useSession } from '../../../lib/session/SessionProvider';
 import { useAsync } from '../../../lib/useAsync';
 import { getLeaveBalances } from '../../../lib/api/leave';
 import { getMyPendingApprovals } from '../../../lib/api/workflow';
 import { listNotifications } from '../../../lib/api/notifications';
+import { listMyAnnouncements } from '../../../lib/api/announcements';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
 import { EmptyState } from '../../../components/ui/EmptyState';
-import { formatDateTime } from '../../../lib/format';
+import { formatDate, formatDateTime } from '../../../lib/format';
 
 export default function DashboardPage() {
   const { t, locale } = useI18n();
@@ -20,6 +20,7 @@ export default function DashboardPage() {
   const { data: balances } = useAsync(() => (employee ? getLeaveBalances({ employeeId: employee.id }) : Promise.resolve([])), [employee?.id]);
   const { data: pendingApprovals } = useAsync(() => getMyPendingApprovals(), []);
   const { data: notifications } = useAsync(() => listNotifications(), []);
+  const { data: announcements } = useAsync(() => listMyAnnouncements(), []);
 
   return (
     <div className="space-y-6">
@@ -111,9 +112,21 @@ export default function DashboardPage() {
           <CardHeader>
             <CardTitle>{t('dashboard.announcements.title')}</CardTitle>
           </CardHeader>
-          <CardBody className="flex flex-col items-center gap-2 py-8 text-center">
-            <Megaphone className="h-6 w-6 text-ink-300" aria-hidden />
-            <p className="text-sm text-ink-400">{t('announcements.comingSoon')}</p>
+          <CardBody>
+            {!announcements || announcements.length === 0 ? (
+              <EmptyState title={t('announcements.noAnnouncements')} />
+            ) : (
+              <ul className="divide-y divide-ink-100">
+                {announcements.slice(0, 5).map((a) => (
+                  <li key={a.id} className="py-2.5 text-sm">
+                    <Link href="/announcements" className="text-ink-800 hover:text-brand-700">
+                      {a.title}
+                    </Link>
+                    <p className="text-xs text-ink-400">{formatDate(a.publishedAt, locale)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardBody>
         </Card>
       </div>

@@ -5,13 +5,16 @@ import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Bell,
+  Boxes,
   Briefcase,
   CalendarClock,
   CalendarDays,
   ClipboardCheck,
   LayoutDashboard,
+  LifeBuoy,
   Megaphone,
   Network,
+  Receipt,
   Settings,
   Target,
   User,
@@ -40,6 +43,9 @@ export function Sidebar() {
     { href: '/profile', label: t('nav.profile'), icon: User },
     { href: '/leave', label: t('nav.leave'), icon: CalendarDays },
     { href: '/attendance', label: t('nav.attendance'), icon: CalendarClock },
+    { href: '/expenses', label: t('nav.expenses'), icon: Receipt },
+    { href: '/assets', label: t('nav.assets'), icon: Boxes },
+    { href: '/helpdesk', label: t('nav.helpdesk'), icon: LifeBuoy },
     { href: '/notifications', label: t('nav.notifications'), icon: Bell },
     { href: '/announcements', label: t('nav.announcements'), icon: Megaphone },
   ];
@@ -72,6 +78,19 @@ export function Sidebar() {
   }
   if (can(PERMISSIONS.OFFBOARDING_MANAGE)) {
     adminItems.push({ href: '/recruitment/offboarding', label: t('nav.offboarding'), icon: UserMinus });
+  }
+  // Operations modules (step 3.1) — see docs/conventions/operations-modules.md.
+  if (can(PERMISSIONS.EXPENSE_MANAGE)) {
+    adminItems.push({ href: '/expenses/admin', label: t('nav.expenses'), icon: Receipt });
+  }
+  if (can(PERMISSIONS.ASSET_MANAGE)) {
+    adminItems.push({ href: '/assets/admin', label: t('nav.assets'), icon: Boxes });
+  }
+  if (can(PERMISSIONS.HELPDESK_MANAGE)) {
+    adminItems.push({ href: '/helpdesk/admin', label: t('nav.helpdesk'), icon: LifeBuoy });
+  }
+  if (can(PERMISSIONS.ANNOUNCEMENT_MANAGE) || can(PERMISSIONS.POLICY_MANAGE)) {
+    adminItems.push({ href: '/announcements/admin', label: t('nav.announcementsAdmin'), icon: Megaphone });
   }
 
   return (

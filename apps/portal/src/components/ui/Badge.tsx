@@ -53,6 +53,20 @@ const STATUS_TONE: Record<string, Tone> = {
   ACCEPTED: 'success',
   DECLINED: 'danger',
   CANCELLED: 'neutral',
+  // Operations modules statuses (step 3.1) — ExpenseClaimStatus/
+  // AssetStatus/AssetAssignmentStatus/TicketStatus/TicketPriority not
+  // already covered above — additive only, never touch the entries above.
+  REIMBURSED: 'success',
+  AVAILABLE: 'success',
+  IN_MAINTENANCE: 'warning',
+  RETIRED: 'neutral',
+  ASSIGNED: 'info',
+  RETURNED: 'neutral',
+  RESOLVED: 'success',
+  LOW: 'neutral',
+  MEDIUM: 'info',
+  HIGH: 'warning',
+  URGENT: 'danger',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

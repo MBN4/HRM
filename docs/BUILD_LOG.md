@@ -1802,7 +1802,7 @@ landed API-only this phase, the same "backend first, UI later" sequencing
 upgrade flagged in notifications-queues.md, and/or the Phase 5.2 partition
 migrations flagged since 0.2.
 
-- **3.1 — Admin/HR Console (Payroll · Performance · Recruitment/Onboarding/
+- **2.4 — Admin/HR Console (Payroll · Performance · Recruitment/Onboarding/
   Offboarding UI), Phase 3's first slice.** The "UI catches up" pass 2.3's
   own closing note named as a Phase 3 candidate: `apps/portal` now surfaces
   all three Phase 2 modules as a functional, demoable admin console — a
@@ -1870,3 +1870,115 @@ migrations flagged since 0.2.
       green at 51 tests (17 existing + 34 new across `payroll.spec.ts` (10),
       `performance.spec.ts` (10), `recruitment.spec.ts` (14)), including
       every pre-existing spec with zero regressions.
+
+- **3.1 — Operations modules (Expenses & Reimbursements · Asset Management ·
+  HR Helpdesk/Ticketing · Announcements & Policies), Phase 3's first
+  slice.** Four thin modules, backend + portal UI together, each a pure
+  consumer of systems that already existed — the workflow engine (0.7),
+  storage (1.1), notifications (0.8), audit (0.9), RBAC (0.4) — none of
+  which needed to change. Full detail, every design decision, and every
+  bug caught along the way is in
+  [`docs/conventions/operations-modules.md`](./conventions/operations-modules.md)
+  — summary:
+  - **Docs housekeeping first**: the prior admin-console UI step, originally
+    logged as "3.1" (a numbering collision with THIS step, the plan's real
+    3.1), was renumbered to **2.4** throughout `CLAUDE.md`/this file/its own
+    convention doc — it belongs to Phase 2's own closing note, not Phase 3.
+  - **Expenses & Reimbursements**: `ExpenseCategory` (tenant policy-limit
+    config)/`ExpenseClaim`/`ExpenseLine` (`packages/db`), approved via the
+    REAL 0.7 workflow (`entityType: "EXPENSE_CLAIM"` — literally the SAME
+    string `workflow.e2e-spec.ts`'s own reference conditional-amount
+    fixture has used since 0.7). Policy limits enforced at `submit`, not
+    line-add time. Multi-currency reuses Payroll's OWN `ExchangeRateService`
+    (a new additive export off `PayrollModule`) for the SAME Decimal
+    approach — a claim's `totalAmountBaseCurrency` is snapshotted once at
+    submission. **The reimbursement hand-off**: `PayrollRunProcessor`
+    (already touched by 2.3 for `FINAL_SETTLEMENT`) gained one additive
+    step, `mergeReimbursements` — sums an employee's `APPROVED`,
+    not-yet-consumed claims and adds the total straight onto `netPay`/
+    `employerCost` after the ENGINE call returns, completely untouched;
+    consumed claims flip to `REIMBURSED`. Receipts via 1.1's
+    `StorageService`/MinIO.
+  - **Asset Management**: `AssetCategory`/`Asset` (a denormalized `status`
+    cache)/`AssetAssignment` (append-only per assign/return cycle, a real
+    history)/`AssetMaintenanceRecord`. **The offboarding clearance
+    checklist's real "asset return" step** — a placeholder 2.3 explicitly
+    flagged as a Phase 3 candidate: `OffboardingService` gained one new
+    method, `completeTask`, which blocks completing a task whose `key` is
+    exactly `ASSET_RETURN_CHECKLIST_TASK_KEY` (`'asset_return'` — the SAME
+    string `recruitment-lifecycle.e2e-spec.ts`'s own 2.3 fixture already
+    used) while any asset remains assigned to that employee — the generic
+    `ChecklistService` itself is completely unchanged; the wiring lives
+    entirely in the consuming module.
+  - **HR Helpdesk / Ticketing**: `TicketCategory` (tenant SLA-minutes
+    config)/`Ticket`/`TicketComment`/`TicketAttachment`. SLA resolved once
+    at ticket creation into `Ticket.slaDueAt`, never re-derived.
+    `TicketSlaService.sweepOverdueTickets()` mirrors
+    `WorkflowEscalationService.sweepOverdueSteps` (0.7) exactly — cross-
+    tenant discovery via the owner `prisma` client, per-tenant mutation
+    inside `withTenantContext`; not wired to a scheduler, same as 0.7's own
+    sweep. One new mapped notification event, `helpdesk.ticket_escalated`
+    (assignee if set, else every `HR_MANAGER` — the SAME fallback
+    `licensing.issued`/`.revoked` already establish).
+  - **Announcements & Policies**: `Announcement` (branch/department
+    targeting, empty array = unrestricted)/`Policy` (versioned, republish
+    is a new row, never an in-place edit)/`PolicyAcknowledgment`. Wires the
+    ESS "announcements seam" 1.4 deliberately left as a placeholder (both
+    the dedicated `/announcements` page AND the dashboard's own "coming
+    soon" widget) to real, tenant-authored data. `apps/mobile`'s own
+    equivalent placeholder is deliberately untouched — out of this step's
+    scope, same boundary 2.3 held itself to.
+  - **A real, general bug caught and fixed**: `@hrm/shared`'s
+    `redactSensitiveFields` (the ONE audit-redaction function every
+    `AuditInterceptor`/`DomainEventAuditListener` write goes through)
+    walked a live `Prisma.Decimal`/`Date` instance's own properties
+    structurally instead of using its `toJSON()` — for `Decimal` this
+    wasn't even valid `Json` input (a 500 on the first audited
+    Decimal-bearing route this codebase ever shipped), and for `Date` it
+    silently mangled every timestamp in every audited payload across the
+    ENTIRE codebase into `{}`, a pre-existing defect nothing had tripped
+    loudly before. Fixed once, in `packages/shared`, retroactively
+    correcting every OTHER module's audited routes too (Payroll's runs/
+    lines included) — not just this step's own new ones.
+  - **RBAC**: eight new permissions (`expense.{read,write,manage}`,
+    `asset.{read,manage}`, `helpdesk.{read,write,manage}`,
+    `announcement.{read,manage}`, `policy.{read,manage}`) — the
+    self-service half (`*.read`/`*.write`) seeded onto every system role
+    including `EMPLOYEE`, the `*.manage` half onto `TENANT_ADMIN`/
+    `HR_MANAGER` only.
+  - **Portal**: `apps/portal/src/lib/api/{expenses,assets,helpdesk,
+announcements}.ts` (the identical one-function-per-route shape every
+    prior `lib/api/*.ts` file already establishes) + matching
+    `components/{expenses,assets,helpdesk,announcements}/*` and
+    `app/(app)/{expenses,assets,helpdesk,announcements}/{,admin}/page.tsx`
+    — eight new pages (an ESS + an admin page per module), built on 2.4's
+    exact conventions: `useAsync`, the `components/ui/*` design system, an
+    expandable `<details>` row (not a separate detail route) for inline
+    line-items/comments/maintenance-history/`WorkflowStatusPanel` —
+    "functional over fancy," the SAME pattern 2.4's Recruitment pages
+    already established for requisition/offer rows. `ApprovalCard`'s
+    `SnapshotSummary` gained one new `EXPENSE_CLAIM` case (amount +
+    currency) — the pre-existing `/approvals` inbox needed no other
+    changes to start surfacing expense-claim approvals, THE RULE's payoff
+    restated once more. `Sidebar`/`Badge`'s `STATUS_TONE` gained additive
+    entries only.
+  - **Two real bugs/races caught while writing this step's own Playwright
+    tests** (both detailed in the conventions doc): the `redactRecursive`
+    bug above, first surfaced as a live 500 while testing expense category
+    creation; and a test doing TWO `login()` calls within ONE `test()`
+    (switching users mid-test) redirecting `/login` back to `/dashboard`
+    mid-fill since the earlier session was still valid — the exact "one
+    login per test" lesson `frontend-admin-console.md` already documents
+    for a related flakiness class, re-confirmed here and fixed the same
+    way: split each multi-actor flow into separate sequential tests within
+    one `describe.serial` block.
+  - Verified: `apps/api/test/operations-modules.e2e-spec.ts` (17 tests) +
+    `apps/portal/tests/operations-modules.spec.ts` (17 Playwright tests).
+    `apps/api`'s full suite green at 318 tests (301 existing + 17 new);
+    `apps/portal`'s full Playwright suite green at 68 tests (51 existing +
+    17 new), including every pre-existing spec with zero regressions.
+    Full-repo `pnpm build`/`pnpm lint` green across all eight package
+    tasks.
+
+**Phase 3 remaining**: 3.2 LMS, 3.3 Integrations — not yet broken into
+individual steps (see CLAUDE.md § 6).

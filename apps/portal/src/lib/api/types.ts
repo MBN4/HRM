@@ -709,3 +709,168 @@ export interface OffboardingProcess {
   createdAt: string;
   updatedAt: string;
 }
+
+// --- Operations modules (step 3.1) — see docs/conventions/operations-modules.md ---
+
+export type ExpenseClaimStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED' | 'REIMBURSED';
+
+export interface ExpenseCategory {
+  id: string;
+  code: string;
+  name: string;
+  policyLimitAmount: string | null;
+  isActive: boolean;
+}
+
+export interface ExpenseLine {
+  id: string;
+  expenseClaimId: string;
+  categoryId: string;
+  description: string;
+  amount: string;
+  expenseDate: string;
+  receiptStorageKey: string | null;
+}
+
+export interface ExpenseClaim {
+  id: string;
+  employeeId: string;
+  branchId: string;
+  currencyCode: string;
+  totalAmount: string;
+  totalAmountBaseCurrency: string | null;
+  status: ExpenseClaimStatus;
+  workflowInstanceId: string | null;
+  submittedAt: string | null;
+  decidedAt: string | null;
+  reimbursementPayrollRunLineId: string | null;
+  reimbursedAt: string | null;
+  createdAt: string;
+  lines?: ExpenseLine[];
+}
+
+export type AssetStatus = 'AVAILABLE' | 'ASSIGNED' | 'IN_MAINTENANCE' | 'RETIRED';
+export type AssetAssignmentStatus = 'ASSIGNED' | 'RETURNED';
+export type AssetMaintenanceStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED';
+
+export interface AssetCategory {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface Asset {
+  id: string;
+  categoryId: string;
+  branchId: string | null;
+  assetTag: string;
+  name: string;
+  serialNumber: string | null;
+  status: AssetStatus;
+  purchaseDate: string | null;
+  purchaseCost: string | null;
+}
+
+export interface AssetAssignment {
+  id: string;
+  assetId: string;
+  employeeId: string;
+  status: AssetAssignmentStatus;
+  assignedAt: string;
+  assignedByUserId: string;
+  condition: string | null;
+  notes: string | null;
+  returnedAt: string | null;
+  returnedByUserId: string | null;
+  returnCondition: string | null;
+  asset?: Asset;
+}
+
+export interface AssetMaintenanceRecord {
+  id: string;
+  assetId: string;
+  description: string;
+  status: AssetMaintenanceStatus;
+  startedAt: string | null;
+  completedAt: string | null;
+  cost: string | null;
+}
+
+export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+
+export interface TicketCategory {
+  id: string;
+  code: string;
+  name: string;
+  defaultSlaMinutes: number | null;
+  isActive: boolean;
+}
+
+export interface Ticket {
+  id: string;
+  categoryId: string;
+  raisedByUserId: string;
+  employeeId: string | null;
+  branchId: string | null;
+  subject: string;
+  description: string;
+  priority: TicketPriority;
+  status: TicketStatus;
+  assignedToUserId: string | null;
+  slaDueAt: string | null;
+  slaBreached: boolean;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+}
+
+export interface TicketComment {
+  id: string;
+  ticketId: string;
+  authorUserId: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface TicketAttachment {
+  id: string;
+  ticketId: string;
+  storageKey: string;
+  fileName: string;
+  uploadedByUserId: string;
+  createdAt: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  publishedByUserId: string;
+  isActive: boolean;
+  publishedAt: string | null;
+  targetBranchIds: string[];
+  targetDepartmentIds: string[];
+  createdAt: string;
+}
+
+export interface Policy {
+  id: string;
+  title: string;
+  body: string;
+  version: number;
+  isActive: boolean;
+  requiresAcknowledgment: boolean;
+  attachmentStorageKey: string | null;
+  publishedByUserId: string;
+  publishedAt: string | null;
+  createdAt: string;
+}
+
+export interface PolicyAcknowledgment {
+  id: string;
+  policyId: string;
+  userId: string;
+  acknowledgedAt: string;
+}

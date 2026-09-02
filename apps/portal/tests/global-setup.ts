@@ -207,6 +207,15 @@ export default async function globalSetup(): Promise<void> {
     // employeeA already has managerA as its manager, so initiating
     // offboarding for employeeA resolves to managerAUser as the approver.
     [tenantA.id, 'OffboardingProcess'],
+    // Operations modules (step 3.1) — `ExpenseClaimService.submit` passes
+    // the CLAIMANT's own linked `User.id` as `requesterId`, the SAME
+    // "requester = the subject" reuse every other module above already
+    // establishes, so a `MANAGER` rule resolves through the real org
+    // chart exactly like LeaveRequest's own template — no HR-conditional
+    // step needed here: that branching is already proven end to end at
+    // the API level (see apps/api/test/operations-modules.e2e-spec.ts);
+    // this suite's own expense spec only needs to prove the UI WIRING.
+    [tenantA.id, 'EXPENSE_CLAIM'],
   ] as const) {
     const template = await prisma.workflowTemplate.create({
       data: { tenantId, name: `${entityType} approval`, entityType, version: 1, isActive: true },

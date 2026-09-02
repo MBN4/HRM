@@ -9,6 +9,7 @@ import { resolvePayrollPackConfig, ResolvedPayrollPack } from '../payroll-pack.u
 import { PayrollEngineService } from '../engine/payroll-engine.service';
 import { PAYROLL_PROVIDER_ADAPTER, PayrollProviderAdapter } from '../delegate/payroll-provider.interface';
 import { MultiCurrencyRollupService } from './multi-currency-rollup.service';
+import { ExchangeRateService } from './exchange-rate.service';
 import type { PayrollRunJobData } from './payroll-run-queue.service';
 
 const IDEMPOTENCY_SCOPE = 'payroll-run';
@@ -37,6 +38,7 @@ export class PayrollRunProcessor extends WorkerHost {
     private readonly idempotency: IdempotencyService,
     private readonly engine: PayrollEngineService,
     private readonly rollup: MultiCurrencyRollupService,
+    private readonly exchangeRates: ExchangeRateService,
     @Inject(PAYROLL_PROVIDER_ADAPTER) private readonly delegateAdapter: PayrollProviderAdapter,
   ) {
     super();
@@ -91,7 +93,7 @@ export class PayrollRunProcessor extends WorkerHost {
     payrollRunId: string,
     branchId: string,
     employeeId: string,
-    run: { payrollMode: string; periodYear: number; periodMonth: number },
+    run: { payrollMode: string; periodYear: number; periodMonth: number; currencyCode: string },
     pack: ResolvedPayrollPack,
   ): Promise<void> {
     const idempotencyKey = `${tenantId}:${payrollRunId}:${employeeId}`;
@@ -114,16 +116,43 @@ export class PayrollRunProcessor extends WorkerHost {
               ? { ...(await this.delegateAdapter.submitEmployee(tx, tenantId, employee, pack, period)), computedVia: 'DELEGATE' as const }
               : { ...(await this.engine.computeForEmployee(tx, employee, pack, period)), computedVia: 'ENGINE' as const };
 
+          // Expense reimbursement hand-off (step 3.1, ORCHESTRATION only —
+          // see docs/conventions/operations-modules.md). Mirrors the
+          // FINAL_SETTLEMENT hand-off's own shape: an additive touch to
+          // this PROCESSOR, never to `PayrollEngineService`/the rules
+          // engine. Any of this employee's APPROVED, not-yet-consumed
+          // `ExpenseClaim`s are added straight onto net pay/employer cost
+          // (non-taxable — reimbursements never flow through
+          // tax/statutory computation) and marked REIMBURSED once this
+          // line is durably written below.
+          const { netPay, employerCost, componentBreakdown, reimbursedClaimIds } = await this.mergeReimbursements(
+            tx,
+            tenantId,
+            employeeId,
+            run.currencyCode,
+            result,
+          );
+
           await this.upsertLine(tx, tenantId, payrollRunId, employeeId, branchId, {
             status: 'COMPUTED',
             computedVia: result.computedVia,
             grossPay: result.grossPay,
-            netPay: result.netPay,
-            employerCost: result.employerCost,
-            componentBreakdown: result.componentBreakdown as unknown as Prisma.InputJsonValue,
+            netPay,
+            employerCost,
+            componentBreakdown: componentBreakdown as unknown as Prisma.InputJsonValue,
             errorMessage: null,
             computedAt: new Date(),
           });
+
+          if (reimbursedClaimIds.length > 0) {
+            const line = await tx.payrollRunLine.findUniqueOrThrow({
+              where: { tenantId_payrollRunId_employeeId: { tenantId, payrollRunId, employeeId } },
+            });
+            await tx.expenseClaim.updateMany({
+              where: { tenantId, id: { in: reimbursedClaimIds } },
+              data: { status: 'REIMBURSED', reimbursementPayrollRunLineId: line.id, reimbursedAt: new Date() },
+            });
+          }
         }),
       );
     } catch (error) {
@@ -137,6 +166,60 @@ export class PayrollRunProcessor extends WorkerHost {
         }),
       );
     }
+  }
+
+  /**
+   * Sums every APPROVED, not-yet-consumed `ExpenseClaim` for this employee
+   * (regardless of `run.runType` — a leaver's outstanding approved claims
+   * are deliberately included in their FINAL_SETTLEMENT run too) and adds
+   * the total straight onto net pay/employer cost, converting into the
+   * RUN's own currency via the SAME `ExchangeRateService` Payroll already
+   * uses for its base-currency rollup. A claim approved AFTER this
+   * employee's line is already `COMPUTED` is picked up on the NEXT run,
+   * never retroactively — the same "resumability skips an already-COMPUTED
+   * employee entirely" posture this file already documents for itself.
+   */
+  private async mergeReimbursements(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    employeeId: string,
+    runCurrency: string,
+    result: { netPay: number; employerCost: number; componentBreakdown: unknown },
+  ): Promise<{ netPay: Prisma.Decimal; employerCost: Prisma.Decimal; componentBreakdown: unknown; reimbursedClaimIds: string[] }> {
+    const claims = await tx.expenseClaim.findMany({
+      where: { tenantId, employeeId, status: 'APPROVED', reimbursementPayrollRunLineId: null },
+    });
+    if (claims.length === 0) {
+      return {
+        netPay: new PrismaNS.Decimal(result.netPay),
+        employerCost: new PrismaNS.Decimal(result.employerCost),
+        componentBreakdown: result.componentBreakdown,
+        reimbursedClaimIds: [],
+      };
+    }
+
+    let reimbursementTotal = new PrismaNS.Decimal(0);
+    for (const claim of claims) {
+      const amountInRunCurrency =
+        claim.currencyCode === runCurrency
+          ? claim.totalAmount
+          : claim.totalAmount.mul(await this.exchangeRates.getRate(tx, claim.currencyCode, runCurrency, new Date())).toDecimalPlaces(2);
+      reimbursementTotal = reimbursementTotal.add(amountInRunCurrency);
+    }
+
+    // `componentBreakdown` is the engine's own ORDERED `{key,label,type,
+    // amount}[]` (see `PayrollComputationResult`) — appended to, never
+    // reshaped into an object, so the payslip renderer's existing
+    // key-lookup-by-line-item contract is unaffected.
+    const breakdown = Array.isArray(result.componentBreakdown) ? [...result.componentBreakdown] : [];
+    breakdown.push({ key: 'reimbursements', label: 'Reimbursements', type: 'EARNING', amount: reimbursementTotal.toNumber() });
+
+    return {
+      netPay: new PrismaNS.Decimal(result.netPay).add(reimbursementTotal),
+      employerCost: new PrismaNS.Decimal(result.employerCost).add(reimbursementTotal),
+      componentBreakdown: breakdown,
+      reimbursedClaimIds: claims.map((claim) => claim.id),
+    };
   }
 
   private async upsertLine(

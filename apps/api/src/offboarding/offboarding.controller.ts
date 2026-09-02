@@ -120,6 +120,6 @@ export class OffboardingController {
       await this.storage.uploadObject({ key: documentStorageKey, body: document.buffer, contentType: document.mimetype });
     }
 
-    return this.checklists.complete(tx, id, this.tenantContext.userId!, canManage, documentStorageKey);
+    return this.offboarding.completeTask(tx, tenantId, id, this.tenantContext.userId!, canManage, documentStorageKey);
   }
 }

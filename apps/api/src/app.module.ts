@@ -20,6 +20,10 @@ import { PerformanceModule } from './performance/performance.module';
 import { RecruitmentModule } from './recruitment/recruitment.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { OffboardingModule } from './offboarding/offboarding.module';
+import { ExpensesModule } from './expenses/expenses.module';
+import { AssetsModule } from './assets/assets.module';
+import { HelpdeskModule } from './helpdesk/helpdesk.module';
+import { AnnouncementsModule } from './announcements/announcements.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -62,6 +66,10 @@ import { WorkflowModule } from './workflow/workflow.module';
     RecruitmentModule,
     OnboardingModule,
     OffboardingModule,
+    ExpensesModule,
+    AssetsModule,
+    HelpdeskModule,
+    AnnouncementsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

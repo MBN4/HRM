@@ -63,6 +63,12 @@ import { PayrollWorkflowEventsListener } from './runs/payroll-workflow-events.li
     PayrollRunService,
     PayrollWorkflowEventsListener,
   ],
-  exports: [PayrollRunService],
+  // ExchangeRateService is additionally exported (step 3.1) so the
+  // Expenses module can reuse the SAME Decimal/currency-rollup approach for
+  // a claim's base-currency reporting snapshot — see
+  // docs/conventions/operations-modules.md. PayrollRunProcessor itself
+  // (already inside this module) is what performs the actual
+  // reimbursement hand-off merge — see that file's own doc comment.
+  exports: [PayrollRunService, ExchangeRateService],
 })
 export class PayrollModule {}
