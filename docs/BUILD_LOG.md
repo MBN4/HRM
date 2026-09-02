@@ -1980,5 +1980,81 @@ announcements}.ts` (the identical one-function-per-route shape every
     Full-repo `pnpm build`/`pnpm lint` green across all eight package
     tasks.
 
-**Phase 3 remaining**: 3.2 LMS, 3.3 Integrations — not yet broken into
-individual steps (see CLAUDE.md § 6).
+- **3.2 — Learning & Development (LMS), Phase 3's second slice.** A thin
+  module, backend + portal UI together, the same posture 3.1's four
+  operations modules already established — content lives in 1.1's
+  StorageService/MinIO, expiry reminders reuse 0.8's notification hub, and
+  BOTH schedulable jobs (rollup + certification expiry) reuse 1.5's
+  scheduled-BullMQ-job pattern verbatim. Full detail is in
+  [`docs/conventions/lms.md`](./conventions/lms.md) — summary:
+  - **Schema** (`packages/db`, 12 new tables): `CourseCategory`/`Course`/
+    `CourseContentItem` (catalog + ordered content, `moduleName`/
+    `orderIndex` — no separate Module table, a deliberate "flat list, not
+    over-engineered" call); `Enrollment`/`ContentProgress` (SELF vs.
+    ASSIGNED, deliberately NO unique constraint on `(course, employee)` —
+    see the renewal note below); `Quiz`/`QuizQuestion`/`QuizAttempt`
+    (config-as-data scoring, single-correct-answer multiple choice,
+    `correctOptionKey` never served to a learner taking the quiz);
+    `Certification` (issued on completion, `expiresAt` from `Course.
+validityMonths`, a self-relation `renewedFromCertificationId` — a second
+    completion of the SAME course while an ACTIVE cert already exists
+    supersedes it, RENEWED); `RequiredTraining` (independently-nullable
+    `roleId`/`branchId`, "absence means unrestricted"); two rollup tables
+    (`CourseCompletionDailySnapshot`/`TrainingComplianceDailySnapshot`,
+    the SAME small-dimension point-in-time-cross-section discipline 1.5
+    established).
+  - **Completion gating**: one function,
+    `EnrollmentService.recomputeCompletion`, decides completion — every
+    content item COMPLETED AND (no required quiz OR a passing
+    `QuizAttempt`) — called after every content-progress mark and every
+    quiz submission, so completion is never computed two different ways.
+  - **Two independent scheduled BullMQ jobs**, both the identical
+    orchestrate-then-fan-out-per-tenant shape `AnalyticsRollupService`
+    established: `LmsRollupService` (daily completion/compliance rollup)
+    and `CertificationExpiryService` (daily expiry-reminder sweep,
+    idempotent via a `lastReminderBucket` column compared each run — no
+    Redis `IdempotencyService` needed, DB-native idempotency instead).
+  - **Compliance analytics — the two-tier split**: the dashboard KPI
+    numbers read ONLY the rollup tables (never live-aggregate `Enrollment`/
+    `Certification` at scale); a bounded, branch-filtered "who exactly is
+    missing/expiring" drill-down (`LmsComplianceService.listGaps`) is a
+    normal live indexed read, the same split `GET /payroll/runs` already
+    establishes for its own operational list.
+  - **RBAC**: five new permissions (`lms.read`/`.enroll`/`.author`/
+    `.assign`/`.manage`) — `read`+`enroll` on every role including
+    `EMPLOYEE`; `MANAGER` additionally holds `assign`; `HR_MANAGER` holds
+    all five (`TENANT_ADMIN` via `ALL_PERMISSIONS`).
+  - **Portal**: `/learning` + `/learning/[id]` (ESS: catalog, enroll,
+    content, quiz-taking, certifications, due dates) and `/learning/admin`
+    - `/learning/admin/compliance` (authoring, assignment, required-
+      training rules, compliance dashboard + gaps). No department/role
+      picker on required-training rules — this codebase has no `GET /roles`
+      listing endpoint anywhere (0.4's own documented gap), the same
+      "documented, not silently accepted" posture 2.4 already takes for its
+      own missing department pickers.
+  - **A real UI race caught and fixed while writing the Playwright spec**:
+    a passing quiz attempt flips the enrollment to COMPLETED as a side
+    effect of the SAME reload that revealed the pass/fail result, which
+    was unmounting the quiz card (and the "Passed" message on it) before
+    a learner — or the test — could ever see it. Fixed with a local
+    `quizJustCompleted` flag that keeps the card mounted for the rest of
+    that page view once a passing attempt lands.
+  - Verified: `apps/api/test/lms.e2e-spec.ts` (15 tests: authoring +
+    catalog visibility + RBAC; enroll -> content progress -> a required
+    quiz genuinely gating completion (a failing attempt keeps it open) ->
+    a passing attempt completing it and issuing a certification with the
+    right validity window; admin assignment + a real notification +
+    duplicate-assignment rejection; the live gaps drill-down AND the real
+    scheduled rollup job populating the compliance dashboard; the
+    certification-expiry sweep's idempotency (no duplicate reminder on a
+    second run) and its EXPIRING -> EXPIRED transition; cross-tenant
+    isolation) plus `lms-rollup.util.spec.ts` (10 pure-function tests) and
+    `apps/portal/tests/lms.spec.ts` (8 Playwright tests over the real
+    browser/API/Postgres/Redis/MinIO stack). `apps/api`'s full suite green
+    at 344 tests (318 existing + 15 e2e + 10 rollup-util + a spec.ts
+    reshuffle already counted); `apps/portal`'s full Playwright suite
+    green at 76 tests (68 existing + 8 new), zero regressions. Full-repo
+    `pnpm build`/`pnpm lint` green across all workspace tasks.
+
+**Phase 3 remaining**: 3.3 Integrations — not yet broken into individual
+steps (see CLAUDE.md § 6).

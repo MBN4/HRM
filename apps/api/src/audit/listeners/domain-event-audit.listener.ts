@@ -21,6 +21,8 @@ const ENTITY_ID_FIELDS = [
   'offerId',
   'taskId',
   'ticketId',
+  'enrollmentId',
+  'certificationId',
 ] as const;
 
 /**
@@ -109,6 +111,11 @@ export class DomainEventAuditListener {
 
   @OnEvent('helpdesk.*')
   handleHelpdesk(payload: DomainEventPayload): void {
+    this.record(payload);
+  }
+
+  @OnEvent('lms.*')
+  handleLms(payload: DomainEventPayload): void {
     this.record(payload);
   }
 

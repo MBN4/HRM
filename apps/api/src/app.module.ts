@@ -24,6 +24,7 @@ import { ExpensesModule } from './expenses/expenses.module';
 import { AssetsModule } from './assets/assets.module';
 import { HelpdeskModule } from './helpdesk/helpdesk.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
+import { LmsModule } from './lms/lms.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -70,6 +71,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     AssetsModule,
     HelpdeskModule,
     AnnouncementsModule,
+    LmsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

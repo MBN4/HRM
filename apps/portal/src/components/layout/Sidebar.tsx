@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CalendarDays,
   ClipboardCheck,
+  GraduationCap,
   LayoutDashboard,
   LifeBuoy,
   Megaphone,
@@ -46,6 +47,7 @@ export function Sidebar() {
     { href: '/expenses', label: t('nav.expenses'), icon: Receipt },
     { href: '/assets', label: t('nav.assets'), icon: Boxes },
     { href: '/helpdesk', label: t('nav.helpdesk'), icon: LifeBuoy },
+    { href: '/learning', label: t('nav.learning'), icon: GraduationCap },
     { href: '/notifications', label: t('nav.notifications'), icon: Bell },
     { href: '/announcements', label: t('nav.announcements'), icon: Megaphone },
   ];
@@ -91,6 +93,10 @@ export function Sidebar() {
   }
   if (can(PERMISSIONS.ANNOUNCEMENT_MANAGE) || can(PERMISSIONS.POLICY_MANAGE)) {
     adminItems.push({ href: '/announcements/admin', label: t('nav.announcementsAdmin'), icon: Megaphone });
+  }
+  // Learning & Development (step 3.2) — see docs/conventions/lms.md.
+  if (can(PERMISSIONS.LMS_AUTHOR) || can(PERMISSIONS.LMS_MANAGE)) {
+    adminItems.push({ href: '/learning/admin', label: t('nav.learningAdmin'), icon: GraduationCap });
   }
 
   return (

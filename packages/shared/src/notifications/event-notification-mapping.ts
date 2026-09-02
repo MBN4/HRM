@@ -33,6 +33,9 @@ export const NOTIFICATION_EVENT_TYPES = [
   'performance.review_due',
   'checklist.task_assigned',
   'helpdesk.ticket_escalated',
+  'lms.course_assigned',
+  'lms.certification_expiring',
+  'lms.certification_expired',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -55,4 +58,7 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'performance.review_due': ['IN_APP', 'EMAIL'],
   'checklist.task_assigned': ['IN_APP', 'EMAIL'],
   'helpdesk.ticket_escalated': ['IN_APP', 'EMAIL'],
+  'lms.course_assigned': ['IN_APP', 'EMAIL'],
+  'lms.certification_expiring': ['IN_APP', 'EMAIL'],
+  'lms.certification_expired': ['IN_APP', 'EMAIL'],
 };

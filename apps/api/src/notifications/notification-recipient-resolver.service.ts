@@ -102,6 +102,18 @@ export class NotificationRecipientResolverService {
         return hrManagers.map((row) => row.userId);
       }
 
+      // Step 3.2 — see docs/conventions/lms.md. All three carry the
+      // target userId directly on the payload (resolved by the emitting
+      // code, which already has the employee's linked User at hand — the
+      // SAME no-DB-query shape `checklist.task_assigned`'s
+      // `assigneeUserId` already uses), so no query is needed here either.
+      case 'lms.course_assigned':
+        return typeof payload.assigneeUserId === 'string' ? [payload.assigneeUserId] : [];
+
+      case 'lms.certification_expiring':
+      case 'lms.certification_expired':
+        return typeof payload.employeeUserId === 'string' ? [payload.employeeUserId] : [];
+
       case 'licensing.issued':
       case 'licensing.revoked': {
         const admins = await tx.userRole.findMany({

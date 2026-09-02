@@ -96,6 +96,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/recruitment-lifecycle.md`](./docs/conventions/recruitment-lifecycle.md)     | ATS pipeline (requisitions/postings/candidates/offers via workflow), the public careers API, the candidate→Employee onboarding bridge + required-field enforcement, the shared checklist mini-engine, and offboarding + access revocation + the Payroll FINAL_SETTLEMENT hand-off. (2.3) |
 | [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md)   | The Payroll/Performance/Recruitment+Onboarding+Offboarding admin console on `apps/portal`: the shared `WorkflowStatusPanel` sign-off component, `apiFetchBlob` binary downloads, the one additive `GET /payroll/runs` endpoint, and known UI gaps. (2.4)                                 |
 | [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md)           | Expenses & Reimbursements, Asset Management, HR Helpdesk, Announcements & Policies — the expense→payroll reimbursement hand-off, asset↔offboarding wiring, helpdesk SLA escalation, policy e-acknowledgment. (3.1)                                                                       |
+| [`docs/conventions/lms.md`](./docs/conventions/lms.md)                                         | Learning & Development — courses/content/quizzes as config-as-data, completion gating, certification expiry+renewal, required-training compliance (rollup + bounded drill-down), two scheduled BullMQ jobs. (3.2)                                                                        |
 
 ## 5. Build log summary
 
@@ -225,6 +226,15 @@ per step, kept here for a fast overview.
   fixed in `packages/shared`, correcting every prior module's audited
   routes retroactively too. See
   [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md).
+- **3.2** — Learning & Development (LMS): courses/content/quizzes authored
+  as tenant DATA (never hardcoded scoring), one function
+  (`recomputeCompletion`) deciding course completion, certifications with
+  expiry + retake-based renewal, required-training compliance via a
+  precomputed rollup for the dashboard plus a bounded live drill-down for
+  "who exactly," and TWO independent scheduled BullMQ jobs (completion/
+  compliance rollup, certification-expiry reminders — the latter
+  idempotent via a DB `lastReminderBucket` column, no Redis idempotency
+  key needed). See [`docs/conventions/lms.md`](./docs/conventions/lms.md).
 
 ## 6. Not yet built
 
@@ -296,11 +306,20 @@ Admin/HR Console (2.4).
       clearance checklist's real placeholder step; the ESS announcements
       seam left in 1.4 is now wired to real data. See
       [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md).
+- [x] **3.2** Learning & Development (LMS) — courses/content/modules,
+      self-enroll + admin/manager assignment, content progress, a
+      config-as-data quiz gating completion, certifications with expiry +
+      retake-based renewal, required-training compliance (a precomputed
+      rollup for the dashboard, a bounded live drill-down for who's
+      missing/expiring), and two independent scheduled BullMQ jobs
+      (completion/compliance rollup, certification-expiry reminders). See
+      [`docs/conventions/lms.md`](./docs/conventions/lms.md).
 
-**Phase 3 scope**: LMS, Expenses/Assets/Helpdesk/Announcements (3.1, above),
-Integrations — the remaining two are not yet broken into individual steps.
+**Phase 3 scope**: LMS (3.2, above), Expenses/Assets/Helpdesk/Announcements
+(3.1, above), Integrations — the last of the three is not yet broken into
+individual steps.
 
-- [ ] **3.2+** LMS, Integrations — _not yet defined in detail_
+- [ ] **3.3+** Integrations — _not yet defined in detail_
 - [ ] **Phase 4** — _scope not yet defined_
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see

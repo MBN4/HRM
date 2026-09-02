@@ -67,6 +67,14 @@ const STATUS_TONE: Record<string, Tone> = {
   MEDIUM: 'info',
   HIGH: 'warning',
   URGENT: 'danger',
+  // LMS statuses (step 3.2) — CourseStatus/EnrollmentStatus/
+  // CertificationStatus/compliance buckets not already covered above —
+  // additive only, never touch the entries above.
+  ENROLLED: 'info',
+  RENEWED: 'neutral',
+  EXPIRING: 'warning',
+  MISSING: 'danger',
+  ARCHIVED: 'neutral',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

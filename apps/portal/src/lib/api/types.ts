@@ -874,3 +874,169 @@ export interface PolicyAcknowledgment {
   userId: string;
   acknowledgedAt: string;
 }
+
+// --- Learning & Development (step 3.2) — see docs/conventions/lms.md. ---
+
+export type CourseStatus = 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+export type ContentItemType = 'VIDEO' | 'DOCUMENT' | 'LINK';
+export type EnrollmentStatus = 'ENROLLED' | 'IN_PROGRESS' | 'COMPLETED';
+export type EnrollmentSource = 'SELF' | 'ASSIGNED';
+export type ContentProgressStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
+export type CertificationStatus = 'ACTIVE' | 'EXPIRED' | 'RENEWED';
+
+export interface CourseCategory {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+}
+
+export interface Course {
+  id: string;
+  categoryId: string | null;
+  title: string;
+  description: string | null;
+  status: CourseStatus;
+  isMandatory: boolean;
+  validityMonths: number | null;
+  createdByUserId: string;
+  publishedAt: string | null;
+  createdAt: string;
+}
+
+export interface CourseContentItem {
+  id: string;
+  courseId: string;
+  moduleName: string | null;
+  orderIndex: number;
+  type: ContentItemType;
+  title: string;
+  storageKey: string | null;
+  externalUrl: string | null;
+  durationMinutes: number | null;
+}
+
+export interface CourseWithContent extends Course {
+  contentItems: CourseContentItem[];
+}
+
+export interface QuizOption {
+  key: string;
+  text: string;
+}
+
+/** Present only when authored via the admin route — `GET /lms/courses/:id/quiz` (taking) never includes it. */
+export interface QuizQuestion {
+  id: string;
+  quizId: string;
+  orderIndex: number;
+  questionText: string;
+  options: QuizOption[];
+  correctOptionKey?: string;
+  points: number;
+}
+
+export interface Quiz {
+  id: string;
+  courseId: string;
+  title: string;
+  passMarkPercent: number;
+  isRequired: boolean;
+  questions?: QuizQuestion[];
+}
+
+export interface QuizAttempt {
+  id: string;
+  quizId: string;
+  enrollmentId: string;
+  employeeId: string;
+  scorePercent: number;
+  passed: boolean;
+  answers: Record<string, string>;
+  attemptedAt: string;
+}
+
+export interface ContentProgress {
+  id: string;
+  enrollmentId: string;
+  contentItemId: string;
+  status: ContentProgressStatus;
+  completedAt: string | null;
+}
+
+export interface Enrollment {
+  id: string;
+  courseId: string;
+  employeeId: string;
+  branchId: string;
+  source: EnrollmentSource;
+  status: EnrollmentStatus;
+  enrolledByUserId: string | null;
+  dueDate: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  progress?: ContentProgress[];
+}
+
+export interface Certification {
+  id: string;
+  courseId: string;
+  employeeId: string;
+  enrollmentId: string;
+  status: CertificationStatus;
+  issuedAt: string;
+  expiresAt: string | null;
+  renewedFromCertificationId: string | null;
+}
+
+export interface RequiredTraining {
+  id: string;
+  courseId: string;
+  roleId: string | null;
+  branchId: string | null;
+  isActive: boolean;
+}
+
+export interface ComplianceGapRow {
+  employeeId: string;
+  employeeName: string;
+  courseId: string;
+  courseTitle: string;
+  bucket: 'EXPIRING' | 'EXPIRED' | 'MISSING';
+  expiresAt: string | null;
+}
+
+export interface TrainingCalendarEntry {
+  type: 'ENROLLMENT_DUE' | 'CERTIFICATION_EXPIRY';
+  date: string;
+  employeeId: string;
+  employeeName: string;
+  courseId: string;
+  courseTitle: string;
+}
+
+export interface CourseCompletionKpi {
+  courseId: string;
+  branchId: string;
+  departmentId: string | null;
+  enrolledCount: number;
+  inProgressCount: number;
+  completedCount: number;
+}
+
+export interface TrainingComplianceKpi {
+  courseId: string;
+  branchId: string;
+  departmentId: string | null;
+  requiredCount: number;
+  compliantCount: number;
+  expiringCount: number;
+  expiredCount: number;
+  missingCount: number;
+}
+
+export interface ComplianceDashboardResult {
+  completion: CourseCompletionKpi[];
+  compliance: TrainingComplianceKpi[];
+}
