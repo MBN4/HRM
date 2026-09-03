@@ -61,6 +61,20 @@ enum TenantEdition {
   ENTERPRISE
 }
 
+// Step 4.1 (vendor console) — how a tenant's data is physically isolated.
+// SHARED_DB (the default, and the only mode this system actually runs
+// today) is every tenant sharing one Postgres database, isolated by RLS —
+// see docs/conventions/tenancy-rls.md. DB_PER_TENANT is a DOCUMENTED SEAM
+// ONLY: storing the intent (so a future provisioning pipeline has
+// somewhere to read it from) without building a second physical
+// provisioning path — per this step's own brief, "a documented seam, not
+// a full build now." Nothing in `withTenantContext`/RLS/the connection
+// pool reads this value today.
+enum TenantProvisionMode {
+  SHARED_DB
+  DB_PER_TENANT
+}
+
 // The tenant registry itself. Deliberately NOT tenant-scoped (it has no
 // tenantId — it IS the tenant) and therefore NOT subject to Row-Level
 // Security: resolving "which tenant is this request for" has to happen
@@ -82,6 +96,9 @@ model Tenant {
   // docs/conventions/payroll.md. Defaults to USD so no existing tenant row
   // is left null.
   baseCurrencyCode   String        @default("USD") @map("base_currency_code") @db.VarChar(3)
+  // Step 4.1 — see TenantProvisionMode above. Vendor-console display/intent
+  // field, defaulted so no existing tenant row is left null.
+  provisionMode      TenantProvisionMode @default(SHARED_DB) @map("provision_mode")
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
@@ -185,6 +202,10 @@ model Tenant {
   ssoConfig                    SsoConfig?
   biometricDeviceRegistrations BiometricDeviceRegistration[]
   slackWorkspaceConfig         SlackWorkspaceConfig?
+
+  // Step 4.1 — vendor console impersonation sessions targeting this tenant.
+  // See PlatformAdmin/ImpersonationSession below.
+  impersonationSessions ImpersonationSession[]
 
   @@map("tenants")
 }
@@ -389,6 +410,8 @@ model User {
   headOfDepartments Department[]       @relation("DepartmentHead")
   workflowRequests  WorkflowInstance[] @relation("WorkflowRequester")
   employeeProfile   Employee?
+  // Step 4.1 — vendor-console support sessions impersonating THIS user.
+  impersonationSessions ImpersonationSession[]
 
   // Per-tenant uniqueness, NOT global: the same email may exist under
   // different tenants as entirely unrelated accounts.
@@ -673,6 +696,157 @@ model TenantFeatureFlagOverride {
   @@unique([tenantId, flagKey])
   @@index([tenantId])
   @@map("tenant_feature_flag_overrides")
+}
+
+// ---------------------------------------------------------------------------
+// Vendor super-admin console (step 4.1). See /CLAUDE.md's docs index ->
+// docs/conventions/vendor-console.md for the full write-up: the platform
+// identity/role model, mandatory MFA, the audited cross-tenant access
+// rules, tenant lifecycle, pack authoring/versioning, usage metrics, and
+// the impersonation design.
+//
+// `PlatformAdmin`/`PlatformAuditLog` are, like `Tenant`/`CountryPack`,
+// DELIBERATELY NOT tenant-scoped (no `tenantId` column) and therefore NOT
+// subject to Row-Level Security — a platform admin is not a member of any
+// tenant, the same exemption reasoning documented above `Tenant`. `hrm_app`
+// is granted NOTHING on either table (stricter than CountryPack's
+// read-only grant): unlike Country Pack config, no tenant-scoped request
+// path ever needs to read platform identity or the platform audit trail —
+// every access to these two tables goes through the owner `prisma` client
+// on the audited `@PlatformRoute()` path only, the same class of access
+// `LicensingAdminService` already established for `Tenant`/`License`/
+// `Subscription` writes. `ImpersonationSession` is the one model in this
+// section that IS tenant-scoped (it targets a real tenant User) — ordinary
+// RLS applies to it, identical `tenant_isolation` policy pattern to every
+// other tenant-owned table, even though it too is only ever WRITTEN via
+// the owner client (a platform request opens no tenant-scoped transaction
+// to write through — see docs/conventions/tenant-resolution.md → Platform
+// context).
+// ---------------------------------------------------------------------------
+
+enum PlatformRoleName {
+  PLATFORM_OWNER
+  PLATFORM_SUPPORT
+}
+
+enum PlatformAdminStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+// A vendor operations-staff identity — completely separate from `User`
+// (tenant-scoped): structurally, a tenant user can never become a platform
+// admin by any data path, and a platform admin never appears in any
+// tenant's own People screens. `role` is a closed, code-level catalog
+// (`@hrm/shared`'s `PLATFORM_ROLE_PERMISSIONS`), NOT DB-editable RBAC like
+// tenant `Role`/`Permission` — the vendor's own ops model is a fixed,
+// reviewed set of two roles, not tenant-customizable data.
+model PlatformAdmin {
+  id             String              @id @default(uuid()) @db.Uuid
+  email          String              @unique
+  name           String
+  hashedPassword String              @map("hashed_password")
+  role           PlatformRoleName
+  status         PlatformAdminStatus @default(ACTIVE)
+  // TOTP secret (RFC 6238), AES-256-GCM encrypted via the existing
+  // EncryptionService — reversible, since every login must verify a fresh
+  // 30-second code against it. MFA is MANDATORY, enforced in
+  // PlatformAuthService, not by a DB constraint: a freshly created admin
+  // has mfaEnabled=false and cannot complete login (only the enrollment
+  // step) until enrollment finishes.
+  mfaSecretEncrypted     String?  @map("mfa_secret_encrypted")
+  mfaEnabled             Boolean  @default(false) @map("mfa_enabled")
+  // One-time recovery codes, argon2id-hashed via the existing
+  // HashingService (one-way — only ever verified, never decrypted, the
+  // opposite tradeoff from mfaSecretEncrypted above, same
+  // hash-vs-encrypt split documented for API keys vs. webhook secrets in
+  // docs/conventions/integrations.md). Each is removed from this array the
+  // moment it's used.
+  mfaRecoveryCodesHashed Json?     @map("mfa_recovery_codes_hashed")
+  lastLoginAt            DateTime? @map("last_login_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  @@map("platform_admins")
+}
+
+// A time-boxed support session where a platform admin acts AS a tenant
+// user. Tenant-scoped (ordinary RLS) because it targets a real tenant
+// User; `platformAdminId` is a plain UUID column with NO FK relation
+// (PlatformAdmin isn't tenant-scoped, so it can't participate in a
+// composite (tenantId, id) relation the way tenant-scoped tables do) —
+// the same "just an id, a log fact not a structural relationship"
+// convention `WorkflowInstanceStep.delegatedToUserId`/
+// `WorkflowAction.actorUserId` already establish. `expiresAt` is checked
+// on EVERY request authenticated with this session's impersonation token
+// (see PlatformImpersonationService/TenantScopeInterceptor) — there is no
+// separate sweep job; an expired-but-not-yet-`endedAt`-stamped session
+// simply stops authenticating, and the sweep (ImpersonationService) only
+// backfills `endedAt`/`endedReason` for bookkeeping/audit-listing
+// clarity.
+model ImpersonationSession {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  targetUserId    String    @map("target_user_id") @db.Uuid
+  platformAdminId String    @map("platform_admin_id") @db.Uuid
+  reason          String
+  startedAt       DateTime  @default(now()) @map("started_at")
+  expiresAt       DateTime  @map("expires_at")
+  endedAt         DateTime? @map("ended_at")
+  // "EXPIRED" | "MANUAL" | "REVOKED" — free-form, not an enum: purely a
+  // bookkeeping label for the admin console's session history list.
+  endedReason     String?   @map("ended_reason")
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  targetUser User   @relation(fields: [tenantId, targetUserId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, targetUserId])
+  @@index([platformAdminId, startedAt])
+  @@map("impersonation_sessions")
+}
+
+// The cross-tenant / no-single-tenant-target platform audit trail —
+// EVERY platform action is audited (login, MFA enrollment, tenant
+// lifecycle changes, license issue/revoke, country-pack authoring/
+// versioning/activation, usage/audit reads, impersonation start/end, and
+// every action performed WHILE impersonating). Tenant-targeted mutations
+// (tenant create/suspend/resume/delete, license issue/revoke, flag
+// overrides) are ALSO recorded into that tenant's own `audit_log` via the
+// existing `AuditRecordService.recordForTenant` (`actorPlatform: true`,
+// same convention 0.6's LicensingAdminService already established) —
+// this table exists for the actions that have no single tenant to attach
+// to (country-pack authoring, cross-tenant listings/reads, platform-admin
+// account management) and as the vendor's OWN consolidated view that
+// doesn't require iterating every tenant's audit_log to reconstruct "what
+// did platform admin X do." PARTITION-READY shape (composite `(id,
+// occurredAt)` PK), same reasoning as `AuditLog` — this table is
+// append-only and unbounded — though the actual `PARTITION BY RANGE`
+// migration remains Phase 5.2 for both. `platformAdminId` is nullable for
+// the one system-initiated case (the impersonation-expiry sweep has no
+// human actor), the same nullable-system-actor convention
+// `WorkflowAction.actorUserId` already uses for ESCALATE/AUTO_APPROVE.
+model PlatformAuditLog {
+  id              String   @default(uuid()) @db.Uuid
+  occurredAt      DateTime @default(now()) @map("occurred_at")
+  platformAdminId String?  @map("platform_admin_id") @db.Uuid
+  action          String
+  entityType      String   @map("entity_type")
+  entityId        String?  @map("entity_id")
+  targetTenantId  String?  @map("target_tenant_id") @db.Uuid
+  // Redacted via the existing @hrm/shared redactSensitiveFields before
+  // ever reaching these columns — same discipline AuditRecordService
+  // already holds itself to.
+  before          Json?
+  after           Json?
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@id([id, occurredAt])
+  @@index([occurredAt])
+  @@index([platformAdminId, occurredAt])
+  @@index([targetTenantId, occurredAt])
+  @@map("platform_audit_log")
 }
 
 // ---------------------------------------------------------------------------

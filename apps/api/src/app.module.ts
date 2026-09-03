@@ -27,6 +27,7 @@ import { HelpdeskModule } from './helpdesk/helpdesk.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { LmsModule } from './lms/lms.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { PlatformModule } from './platform/platform.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -79,6 +80,11 @@ import { WorkflowModule } from './workflow/workflow.module';
     // the versioned /v1 public API + API keys, adapter seams, biometric
     // device ingestion. See docs/conventions/integrations.md.
     IntegrationsModule,
+    // Step 4.1 (Phase 4's first slice) — the vendor super-admin console's
+    // backend: platform admin identity/MFA, tenant lifecycle, license/
+    // country-pack admin, usage metrics, cross-tenant audit, impersonation.
+    // See docs/conventions/vendor-console.md.
+    PlatformModule,
   ],
   controllers: [AppController],
   providers: [AppService],

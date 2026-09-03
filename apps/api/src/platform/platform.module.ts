@@ -1,0 +1,69 @@
+import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
+import { PasswordService } from '../auth/password.service';
+import { PlatformAdminController } from './admins/platform-admin.controller';
+import { PlatformAdminService } from './admins/platform-admin.service';
+import { PlatformAuditController } from './audit/platform-audit.controller';
+import { PlatformAuditQueryService } from './audit/platform-audit-query.service';
+import { PlatformAuditRecordService } from './audit/platform-audit-record.service';
+import { PlatformAuthContextModule } from './auth/platform-auth-context.module';
+import { PlatformAuthController } from './auth/platform-auth.controller';
+import { PlatformAuthService } from './auth/platform-auth.service';
+import { PlatformMfaService } from './auth/platform-mfa.service';
+import { PlatformCountryPackController } from './country-packs/platform-country-pack.controller';
+import { PlatformCountryPackService } from './country-packs/platform-country-pack.service';
+import { PlatformImpersonationController } from './impersonation/platform-impersonation.controller';
+import { PlatformImpersonationService } from './impersonation/platform-impersonation.service';
+import { PlatformTenantController } from './tenants/platform-tenant.controller';
+import { PlatformTenantService } from './tenants/platform-tenant.service';
+import { PlatformUsageController } from './usage/platform-usage.controller';
+import { PlatformUsageService } from './usage/platform-usage.service';
+
+/**
+ * The vendor super-admin console's backend (step 4.1) — see
+ * docs/conventions/vendor-console.md. Everything here runs on the
+ * `@PlatformRoute()` seam (0.3) — cross-tenant by construction, the
+ * single most dangerous surface in this system, locked down accordingly:
+ * mandatory MFA (`platform/auth`), least-privilege platform roles
+ * (`PlatformPermissionsGuard` + `@RequirePlatformPermissions()` on every
+ * route below), and every action audited (`PlatformAuditRecordService` +,
+ * for tenant-targeted actions, the EXISTING `AuditRecordService`).
+ *
+ * Imports `PlatformAuthContextModule` (already imported by `TenancyModule`
+ * for the interceptor's own authentication branch) rather than
+ * re-registering `PlatformTokenService` — the SAME instance signs tokens
+ * here and verifies them there. Imports `AuthModule` for the EXISTING
+ * `TokenService` (impersonation access tokens are ordinary TENANT tokens
+ * with two extra claims, signed with the SAME `JWT_SECRET` tenant login
+ * already uses — see `TokenService.signImpersonationAccessToken`).
+ * `PasswordService` is registered locally (a second, stateless
+ * registration) rather than exported from `AuthModule`, the same small,
+ * accepted duplication `tenancy.module.ts`/`auth.module.ts` already take
+ * for their own near-identical `JwtModule` registrations.
+ */
+@Module({
+  imports: [PlatformAuthContextModule, AuthModule],
+  controllers: [
+    PlatformAuthController,
+    PlatformAdminController,
+    PlatformTenantController,
+    PlatformCountryPackController,
+    PlatformUsageController,
+    PlatformImpersonationController,
+    PlatformAuditController,
+  ],
+  providers: [
+    PasswordService,
+    PlatformMfaService,
+    PlatformAuthService,
+    PlatformAuditRecordService,
+    PlatformAdminService,
+    PlatformTenantService,
+    PlatformCountryPackService,
+    PlatformUsageService,
+    PlatformImpersonationService,
+    PlatformAuditQueryService,
+  ],
+  exports: [PlatformAuditRecordService],
+})
+export class PlatformModule {}

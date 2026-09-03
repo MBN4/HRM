@@ -71,6 +71,33 @@ export class TokenService {
     return this.jwt.sign({ sub: userId, tenantId });
   }
 
+  /**
+   * Step 4.1 — mints a tenant access token for a platform admin
+   * IMPERSONATING `userId`, verified by the SAME `TenantScopeInterceptor`
+   * path (and the SAME `JWT_SECRET`) as an ordinary login-issued token —
+   * see that file's `authenticate()` for how `impersonatedBy`/
+   * `impersonationSessionId` are checked against a live `ImpersonationSession`
+   * row on every request. Deliberately NO refresh token is issued
+   * alongside this one: the token's own `exp` is set to the session's
+   * (capped, see PlatformImpersonationService) remaining lifetime, and
+   * when it lapses the platform admin must explicitly start a new,
+   * separately-audited session rather than silently extending one — a
+   * time-boxed session that can be silently refreshed forever isn't
+   * actually time-boxed.
+   */
+  signImpersonationAccessToken(
+    tenantId: string,
+    userId: string,
+    platformAdminId: string,
+    impersonationSessionId: string,
+    expiresInSeconds: number,
+  ): string {
+    return this.jwt.sign(
+      { sub: userId, tenantId, impersonatedBy: platformAdminId, impersonationSessionId },
+      { expiresIn: expiresInSeconds },
+    );
+  }
+
   async issueRefreshToken(tenantId: string, userId: string, familyId: string = randomUUID()): Promise<string> {
     const tokenId = randomUUID();
     const ttl = refreshTtlSeconds(this.config);

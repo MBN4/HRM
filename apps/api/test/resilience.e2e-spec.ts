@@ -35,6 +35,7 @@ import { AppModule } from '../src/app.module';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
 import { SystemLoadService } from '../src/resilience/load-shedding/system-load.service';
 import { ShutdownService } from '../src/resilience/shutdown/shutdown.service';
+import { cleanupTestPlatformAdmins, createTestPlatformAdmin } from './helpers/platform-test-auth';
 
 const BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN ?? 'yourhrms.local';
 const TENANT_A_SLUG = 'resilience-test-tenant-a';
@@ -44,6 +45,7 @@ const jwt = new JwtService({ secret: process.env.JWT_SECRET });
 
 async function resetFixtures() {
   await prisma.tenant.deleteMany({ where: { slug: { in: [TENANT_A_SLUG, TENANT_B_SLUG] } } });
+  await cleanupTestPlatformAdmins();
 }
 
 function hostFor(slug: string) {
@@ -58,6 +60,7 @@ describe('resilience chassis (e2e)', () => {
   let tenantBId: string;
   let tokenA: string;
   let tokenB: string;
+  let platformToken: string;
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -65,6 +68,7 @@ describe('resilience chassis (e2e)', () => {
     await app.init();
 
     await resetFixtures();
+    platformToken = (await createTestPlatformAdmin()).token;
 
     const tenantA = await prisma.tenant.create({
       data: { name: 'Resilience Test Tenant A', slug: TENANT_A_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1' },
@@ -109,6 +113,7 @@ describe('resilience chassis (e2e)', () => {
     it('tenant A exceeding its (overridden, tiny) quota gets 429 with Retry-After, while tenant B is unaffected', async () => {
       await request(app.getHttpServer())
         .patch(`/platform/rate-limits/${tenantAId}`)
+        .set('Authorization', `Bearer ${platformToken}`)
         .send({ limit: 3, windowSeconds: 30 })
         .expect(200);
 
@@ -133,7 +138,10 @@ describe('resilience chassis (e2e)', () => {
         .set('Authorization', `Bearer ${tokenB}`)
         .expect(200);
 
-      await request(app.getHttpServer()).delete(`/platform/rate-limits/${tenantAId}`).expect(200);
+      await request(app.getHttpServer())
+        .delete(`/platform/rate-limits/${tenantAId}`)
+        .set('Authorization', `Bearer ${platformToken}`)
+        .expect(200);
     });
   });
 

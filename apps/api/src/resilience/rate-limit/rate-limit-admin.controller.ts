@@ -1,6 +1,9 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Patch } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, UseInterceptors } from '@nestjs/common';
 import { z } from 'zod';
+import { PLATFORM_PERMISSIONS } from '@hrm/shared';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
+import { RequirePlatformPermissions } from '../../platform/decorators/require-platform-permissions.decorator';
+import { PlatformPermissionsGuard } from '../../platform/guards/platform-permissions.guard';
 import { PlatformRoute } from '../../tenancy/platform-route.decorator';
 import { TenantRateLimitService } from './tenant-rate-limit.service';
 
@@ -22,18 +25,21 @@ type SetRateLimitOverrideInput = z.infer<typeof setRateLimitOverrideSchema>;
 /**
  * The vendor/platform lever for per-tenant rate-limit overrides — same
  * `@PlatformRoute()` seam and shape as 0.6's `LicensingAdminController`
- * (issue/revoke licenses, flag overrides), including its "no permission
- * gate, only the `PLATFORM_MODE_ENABLED` flag" posture: platform routes
- * carry no authenticated user today (see /CLAUDE.md § Conventions →
- * Platform context), so there's no permission to check yet. Redis-only —
- * no DB table, no RLS — see `TenantRateLimitService` for why.
+ * (issue/revoke licenses, flag overrides). Step 4.1 added the
+ * `@RequirePlatformPermissions()` gate below — before it, `@PlatformRoute()`
+ * alone carried no authenticated identity at all; see
+ * `LicensingAdminController`'s own updated doc comment for the full
+ * writeup of what changed and why. Redis-only — no DB table, no RLS — see
+ * `TenantRateLimitService` for why.
  */
 @Controller('platform/rate-limits')
+@PlatformRoute()
+@UseInterceptors(PlatformPermissionsGuard)
+@RequirePlatformPermissions(PLATFORM_PERMISSIONS.RATE_LIMIT_MANAGE)
 export class RateLimitAdminController {
   constructor(private readonly tenantRateLimit: TenantRateLimitService) {}
 
   @Patch(':tenantId')
-  @PlatformRoute()
   async setOverride(
     @Param('tenantId') tenantId: string,
     @Body(new ZodValidationPipe(setRateLimitOverrideSchema)) body: SetRateLimitOverrideInput,
@@ -44,7 +50,6 @@ export class RateLimitAdminController {
   }
 
   @Delete(':tenantId')
-  @PlatformRoute()
   async clearOverride(@Param('tenantId') tenantId: string): Promise<{ tenantId: string; cleared: true }> {
     const validTenantId = requireValidTenantId(tenantId);
     await this.tenantRateLimit.setOverride(validTenantId, null);
@@ -52,7 +57,6 @@ export class RateLimitAdminController {
   }
 
   @Get(':tenantId')
-  @PlatformRoute()
   async getOverride(@Param('tenantId') tenantId: string) {
     const validTenantId = requireValidTenantId(tenantId);
     return { tenantId: validTenantId, override: await this.tenantRateLimit.getOverride(validTenantId) };

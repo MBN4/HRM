@@ -77,6 +77,12 @@ export class AuditInterceptor implements NestInterceptor {
               path: req.originalUrl ?? req.url,
               ip: req.ip ?? null,
               userAgent: req.headers['user-agent'] ?? null,
+              // Step 4.1 — LOUDLY tags every action taken during a
+              // support impersonation session with the REAL platform
+              // admin's id, never just the impersonated tenant user's —
+              // see docs/conventions/vendor-console.md → Impersonation.
+              // Null for every ordinary (non-impersonated) request.
+              impersonatedByPlatformAdminId: this.tenantContext.impersonatedByPlatformAdminId,
             },
           });
 

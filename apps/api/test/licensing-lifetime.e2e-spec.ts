@@ -30,6 +30,7 @@ import { appPrisma, prisma, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '
 import { FEATURE_FLAGS } from '@hrm/shared';
 import { AppModule } from '../src/app.module';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
+import { cleanupTestPlatformAdmins, createTestPlatformAdmin } from './helpers/platform-test-auth';
 
 const BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN ?? 'yourhrms.local';
 const TENANT_A_SLUG = 'lic-life-tenant-a';
@@ -44,6 +45,7 @@ const licenseJwt = new JwtService();
 
 async function resetFixtures() {
   await prisma.tenant.deleteMany({ where: { slug: { in: [TENANT_A_SLUG, TENANT_B_SLUG] } } });
+  await cleanupTestPlatformAdmins();
 }
 
 function hostFor(slug: string) {
@@ -58,6 +60,7 @@ describe('licensing — lifetime/on-prem mode (e2e)', () => {
   let tenantBId: string;
   let tokenA: string;
   let tokenB: string;
+  let platformToken: string;
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -65,6 +68,7 @@ describe('licensing — lifetime/on-prem mode (e2e)', () => {
     await app.init();
 
     await resetFixtures();
+    platformToken = (await createTestPlatformAdmin()).token;
 
     const tenantA = await prisma.tenant.create({
       data: { name: 'Licensing Lifetime Tenant A', slug: TENANT_A_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1' },
@@ -120,7 +124,10 @@ describe('licensing — lifetime/on-prem mode (e2e)', () => {
   }
 
   function issue(body: unknown) {
-    return request(app.getHttpServer()).post('/platform/licensing/issue').send(body);
+    return request(app.getHttpServer())
+      .post('/platform/licensing/issue')
+      .set('Authorization', `Bearer ${platformToken}`)
+      .send(body);
   }
 
   function activate(tenantSlug: string, token: string, licenseFile: string) {

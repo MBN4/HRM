@@ -20,7 +20,29 @@ export const CurrentTenant = createParamDecorator(
           'a route not covered by TenantScopeInterceptor.',
       );
     }
-    const { tenantId, branchId, userId, roles, permissions, branchIds, platform } = store;
-    return { tenantId, branchId, userId, roles, permissions, branchIds, platform };
+    const {
+      tenantId,
+      branchId,
+      userId,
+      roles,
+      permissions,
+      branchIds,
+      platform,
+      platformAdminId,
+      platformRole,
+      impersonatedByPlatformAdminId,
+    } = store;
+    return {
+      tenantId,
+      branchId,
+      userId,
+      roles,
+      permissions,
+      branchIds,
+      platform,
+      platformAdminId,
+      platformRole,
+      impersonatedByPlatformAdminId,
+    };
   },
 );

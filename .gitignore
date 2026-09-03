@@ -31,6 +31,9 @@ coverage/
 apps/portal/test-results/
 apps/portal/playwright-report/
 apps/portal/tests/.fixtures.json
+apps/admin/test-results/
+apps/admin/playwright-report/
+apps/admin/tests/.fixtures.json
 
 # OS / editor
 .DS_Store

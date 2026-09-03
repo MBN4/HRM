@@ -66,6 +66,21 @@ export class TenantRateLimitService {
     return raw ? (JSON.parse(raw) as RateLimitConfig) : null;
   }
 
+  /**
+   * Step 4.1 — a LIVE snapshot of the tenant's current fixed-window
+   * request count, for the vendor console's usage dashboard's "API-call
+   * volume" tile. Deliberately NOT a historical rollup (none exists for
+   * request volume today — this is a documented gap, see
+   * docs/conventions/vendor-console.md → Usage metrics): reads the SAME
+   * Redis counter `enforce()` already increments, at zero extra cost —
+   * never a live aggregate over a Postgres table.
+   */
+  async getCurrentWindowUsage(tenantId: string): Promise<{ count: number; limit: number; windowSeconds: number }> {
+    const config = await this.resolveEffectiveLimit(tenantId);
+    const raw = await this.redis.get(`ratelimit:tenant-quota:${tenantId}`);
+    return { count: raw ? Number(raw) : 0, limit: config.limit, windowSeconds: config.windowSeconds };
+  }
+
   private async resolveEffectiveLimit(tenantId: string): Promise<RateLimitConfig> {
     const cached = await this.redis.get(EFFECTIVE_CACHE_PREFIX + tenantId);
     if (cached) {

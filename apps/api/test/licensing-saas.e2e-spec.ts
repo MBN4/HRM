@@ -28,6 +28,7 @@ import { appPrisma, prisma, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '
 import { FEATURE_FLAGS } from '@hrm/shared';
 import { AppModule } from '../src/app.module';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
+import { cleanupTestPlatformAdmins, createTestPlatformAdmin } from './helpers/platform-test-auth';
 
 const BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN ?? 'yourhrms.local';
 const TENANT_A_SLUG = 'lic-saas-tenant-a';
@@ -37,6 +38,7 @@ const jwt = new JwtService({ secret: process.env.JWT_SECRET });
 
 async function resetFixtures() {
   await prisma.tenant.deleteMany({ where: { slug: { in: [TENANT_A_SLUG, TENANT_B_SLUG] } } });
+  await cleanupTestPlatformAdmins();
 }
 
 function hostFor(slug: string) {
@@ -51,6 +53,7 @@ describe('licensing — SaaS mode (e2e)', () => {
   let tenantBId: string;
   let tokenA: string;
   let tokenB: string;
+  let platformToken: string;
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -58,6 +61,7 @@ describe('licensing — SaaS mode (e2e)', () => {
     await app.init();
 
     await resetFixtures();
+    platformToken = (await createTestPlatformAdmin()).token;
 
     const tenantA = await prisma.tenant.create({
       data: { name: 'Licensing SaaS Tenant A', slug: TENANT_A_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1' },
@@ -182,6 +186,7 @@ describe('licensing — SaaS mode (e2e)', () => {
     it('a granted override adds a flag outside the edition default', async () => {
       await request(app.getHttpServer())
         .patch(`/platform/licensing/flags/${tenantAId}`)
+        .set('Authorization', `Bearer ${platformToken}`)
         .send({ flagKey: FEATURE_FLAGS.SSO, enabled: true })
         .expect(200);
 
@@ -192,6 +197,7 @@ describe('licensing — SaaS mode (e2e)', () => {
     it('a revoking override removes a flag the edition would otherwise grant', async () => {
       await request(app.getHttpServer())
         .patch(`/platform/licensing/flags/${tenantAId}`)
+        .set('Authorization', `Bearer ${platformToken}`)
         .send({ flagKey: FEATURE_FLAGS.ADVANCED_REPORTING, enabled: false })
         .expect(200);
 
@@ -203,8 +209,28 @@ describe('licensing — SaaS mode (e2e)', () => {
     it('rejects an unknown tenant id', async () => {
       await request(app.getHttpServer())
         .patch('/platform/licensing/flags/00000000-0000-0000-0000-000000000000')
+        .set('Authorization', `Bearer ${platformToken}`)
         .send({ flagKey: FEATURE_FLAGS.SSO, enabled: true })
         .expect(404);
+    });
+
+    // Step 4.1 — the critical authorization-boundary proof: before this
+    // step, @PlatformRoute() alone carried no authenticated identity at
+    // all, so ANY caller could reach this route once PLATFORM_MODE_ENABLED
+    // was on. See docs/conventions/vendor-console.md.
+    it('rejects a request with no platform admin token at all', async () => {
+      await request(app.getHttpServer())
+        .patch(`/platform/licensing/flags/${tenantAId}`)
+        .send({ flagKey: FEATURE_FLAGS.SSO, enabled: true })
+        .expect(401);
+    });
+
+    it("rejects a valid TENANT user's own access token — the two token families are structurally incompatible", async () => {
+      await request(app.getHttpServer())
+        .patch(`/platform/licensing/flags/${tenantAId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({ flagKey: FEATURE_FLAGS.SSO, enabled: true })
+        .expect(401);
     });
   });
 

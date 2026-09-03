@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ApiKeyAuthModule } from '../auth/api-key/api-key-auth.module';
 import { PermissionFieldDemoController } from '../common/permissions/demo/permission-field-demo.controller';
 import { PermissionSerializerInterceptor } from '../common/permissions/permission-serializer.interceptor';
+import { PlatformAuthContextModule } from '../platform/auth/platform-auth-context.module';
 import { PlatformController } from '../platform/platform.controller';
 import { TenancyController } from './tenancy.controller';
 import { TenantContextService } from './tenant-context.service';
@@ -46,6 +47,9 @@ import { TenantScopeInterceptor } from './tenant-scope.interceptor';
     // own doc comment for why this is a DIFFERENT module from the
     // tenant-facing ApiKeysModule).
     ApiKeyAuthModule,
+    // Step 4.1 — the platform-admin authentication branch below needs
+    // PlatformAuthContextService. Same leaf-module split, same reasoning.
+    PlatformAuthContextModule,
   ],
   controllers: [TenancyController, PlatformController, PermissionFieldDemoController],
   providers: [

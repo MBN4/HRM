@@ -1,6 +1,7 @@
 export * from './constants/app';
 export * from './constants/permissions';
 export * from './constants/feature-flags';
+export * from './constants/platform-permissions';
 export * from './types/tenant';
 export * from './dto/tenant.dto';
 export * from './validators/tenant.validator';
@@ -42,3 +43,4 @@ export * from './integrations/api-key.validator';
 export * from './integrations/sso.validator';
 export * from './integrations/biometric.validator';
 export * from './integrations/slack.validator';
+export * from './validators/platform.validator';

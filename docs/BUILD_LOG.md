@@ -2135,3 +2135,165 @@ validityMonths`, a self-relation `renewedFromCertificationId` — a second
 (3.3), on top of every prior phase's foundation. Phase 4 is not yet broken
 into individual steps — see CLAUDE.md § 6 for its named scope (vendor
 console, billing, white-label).
+
+- **4.1 — Vendor super-admin console, Phase 4's first slice.** The
+  platform YOU (the vendor) operate to run the whole business —
+  cross-tenant by nature, the single most dangerous surface in the
+  system, locked down accordingly. Full detail in
+  [`docs/conventions/vendor-console.md`](./conventions/vendor-console.md)
+  — summary:
+  - **Closed a real gap**: through 0.6/0.10, `@PlatformRoute()` carried NO
+    authenticated identity — only the `PLATFORM_MODE_ENABLED` flag. Any
+    caller who could reach the API could issue/revoke a license or
+    override a tenant's rate limit once that flag was on. Every platform
+    route now requires a fully authenticated, MFA-verified `PlatformAdmin`
+    by default, via `TenantScopeInterceptor`'s new platform branch +
+    `PlatformAuthContextService` — the ONLY exemption is
+    `@AllowAnonymousPlatform()` on the handful of routes that themselves
+    establish a session (login/enroll/verify/refresh).
+  - **Platform identity** — `PlatformAdmin` (`schema.prisma`), NOT
+    tenant-scoped/NOT RLS-subject like `Tenant`/`CountryPack`, structurally
+    separate from tenant `User` (no FK, no shared table). Two code-level
+    least-privilege roles (`PlatformRoleName`: `PLATFORM_OWNER` |
+    `PLATFORM_SUPPORT`) checked against `@hrm/shared`'s
+    `PLATFORM_ROLE_PERMISSIONS` (a pure code constant, the same posture
+    `EDITION_FEATURES` documents for itself) via a NEW
+    `PlatformPermissionsGuard` + `@RequirePlatformPermissions()` — the
+    platform-context sibling of 0.4's `PermissionsGuard`. `TENANT_DELETE`
+    and `ADMIN_MANAGE` are deliberately separate, PLATFORM_OWNER-only
+    permissions, held back from `PLATFORM_SUPPORT` even though it can read
+    everything and start impersonation sessions.
+  - **Mandatory MFA** — `PlatformAuthService`'s full state machine:
+    password verify → (`mfaSetupRequired` → `POST .../mfa/enroll` →
+    `POST .../mfa/enroll/confirm`, persisting `mfaSecretEncrypted`
+    (AES-256-GCM via the EXISTING `EncryptionService`) + hashed one-time
+    recovery codes (`HashingService`) only on success) OR
+    (`mfaRequired` → `POST .../mfa/verify`, TOTP or a single-use recovery
+    code) → a real session either way. TOTP is RFC 4226/6238 implemented
+    with ONLY Node's built-in `crypto`
+    (`apps/api/src/platform/auth/totp.util.ts`) — no new dependency.
+    Re-checked (`mfaEnabled`) on every subsequent request, not just at
+    login. Independently rate-limited at both factors.
+  - **Platform tokens** — `PlatformTokenService`, a SEPARATE `PLATFORM_JWT_SECRET`
+    and `JwtService` instance from tenant auth's `TokenService` — a
+    tenant token can never verify as a platform token or vice versa, a
+    structural guarantee, not a convention. Refresh rotation + reuse
+    detection mirrors 0.4's `TokenService` exactly, keyed by
+    `platformAdminId` alone (deliberately a separate small implementation,
+    not a generalized shared base). `PlatformAuthContextModule` is a leaf
+    module (mirrors 3.3's `ApiKeyAuthModule`) imported by `TenancyModule`.
+  - **Tenant lifecycle** (`platform/tenants/`) — create (seeds real RBAC
+    via 0.4's `seedSystemRolesAndPermissions`, optionally an initial
+    `TENANT_ADMIN` user) / suspend / resume / update (edition, hosting
+    region, a new `Tenant.provisionMode` SEAM column — `SHARED_DB` |
+    `DB_PER_TENANT`, documented-only per this step's own brief) / a
+    genuinely irreversible delete (confirm-by-exact-slug, cascades
+    everything). **`TENANT_STATUS` is now actually enforced** — flagged
+    as deliberately unchecked since 0.3/0.6 —
+    `TenantScopeInterceptor` now rejects (403) EVERY request for a
+    `SUSPENDED`/`CANCELLED` tenant, including the LOGIN route itself,
+    before rate limiting or the DB transaction opens, on both the JWT and
+    API-key paths.
+  - **Country Pack authoring/versioning** (`platform/country-packs/`) —
+    CRUD/lifecycle around the EXISTING 0.5
+    `countryPackConfigSchema`/`CountryPackResolutionService`, unmodified.
+    Create auto-activates v1; every later version is a DRAFT (cloned from
+    the active config by default) until explicitly activated; editing an
+    ACTIVE version in place is rejected (400) — draft-then-activate is the
+    only path. "Well-formed before activation" is checked TWICE: the
+    route's `ZodValidationPipe` on every write, AND the service re-`safeParse`s
+    the stored config again at activation time (proven by writing a
+    malformed row directly, bypassing the API, and confirming activation
+    still refuses it).
+  - **Usage metrics** (`platform/usage/`) — seats
+    (`Employee.count` vs. the active License/Subscription seat cap, an
+    indexed COUNT), storage (`EmployeeDocument.aggregate`, the only place
+    a file size is tracked today — an honest, documented gap elsewhere),
+    API volume (the LIVE Redis counter `TenantRateLimitService` already
+    increments — a new `getCurrentWindowUsage` method, additive — a
+    snapshot, not a historical rollup, another honest gap), and a
+    platform-wide overview (`Tenant.groupBy` on indexed columns). Never a
+    live heavy-table scan, per this step's own brief.
+  - **Impersonation** (`platform/impersonation/`) — designed to the
+    brief's own four requirements: (a) permission-gated
+    (`IMPERSONATION_START`, refuses a suspended tenant or non-ACTIVE
+    target user), (b) time-boxed (a server-side `MAX_IMPERSONATION_MINUTES = 60`
+    hard cap regardless of what's requested; the minted token
+    (`TokenService.signImpersonationAccessToken`, an ADDITIVE method on
+    the EXISTING 0.4 `TokenService`) carries `impersonatedBy`/
+    `impersonationSessionId` claims, and — critically — the LIVE
+    `ImpersonationSession` DB row is what `TenantScopeInterceptor.authenticate()`
+    actually re-checks on every single request, not just the token's own
+    `exp`; no refresh token is issued alongside it, so a lapsed session
+    requires a new, separately-audited one rather than a silent
+    extension), (c) LOUDLY audited (session start/end recorded into BOTH
+    the new `PlatformAuditRecordService` AND — via the EXISTING
+    `AuditRecordService.recordForTenant`, `actorPlatform: true` — the
+    TARGET TENANT'S OWN `audit_log`; every action taken WHILE
+    impersonating is tagged too, via a new `impersonatedByPlatformAdminId`
+    field on `RequestTenantStore` that `AuditInterceptor` now includes in
+    every captured mutation's metadata), (d) never silent (a tenant's own
+    `TENANT_ADMIN` sees it themselves via their ordinary `GET /audit` —
+    not merely told it's logged somewhere they can't see). Ending your
+    OWN session vs. REVOKING another admin's are different, differently-
+    gated operations (`IMPERSONATION_START` self-only vs.
+    `ADMIN_MANAGE`-gated `/revoke`).
+  - **Cross-tenant audit read** (`platform/audit/`) — the platform's own
+    `PlatformAuditLog` (NOT tenant-scoped/NOT RLS-subject, same exemption
+    class as `PlatformAdmin`; partition-ready composite PK like
+    `AuditLog`) for actions with no single tenant to attach to (pack
+    authoring, cross-tenant listings, platform-admin management), plus a
+    read of any SPECIFIC tenant's own `audit_log` cross-tenant via the
+    owner `prisma` client. Every read through EITHER path is itself
+    logged into `PlatformAuditLog` — reading the trail is an audited
+    action too.
+  - **`apps/admin`** built out from its prior near-empty placeholder — its
+    OWN distinct visual identity (indigo/slate Tailwind tokens vs.
+    `apps/portal`'s teal/sand, deliberately, so the two apps are never
+    visually confusable), reusing `apps/portal`'s `components/ui/*`
+    shapes and `I18nProvider`/`useAsync` patterns near-verbatim.
+    `lib/auth/PlatformAuthContext.tsx` is a genuinely larger state machine
+    than the portal's own `AuthContext` (password → MFA, several distinct
+    steps, never a session from one call). The "who am I / MFA-verified"
+    affordance is always visible (`Topbar`). RBAC hides actions, it
+    doesn't just block them (no "New tenant"/"Suspend"/"Delete" buttons,
+    no "Platform admins" nav item, for `PLATFORM_SUPPORT`). Impersonation
+    UI shows the resulting token with a loud red warning banner + a
+    dedicated cross-tenant session-history page. Country-pack config
+    editing is a raw JSON textarea (functional over fancy for an internal
+    authoring surface) validated both client-side (`JSON.parse`) and
+    server-side (the existing schema).
+  - **Two real bugs caught by the Playwright suite itself, both fixed**:
+    (1) the login page's "redirect to /dashboard the instant a session
+    exists" effect fired the MOMENT MFA enrollment succeeded, racing past
+    the recovery-codes screen before an admin (or the test) could ever
+    read/acknowledge it — fixed by excluding the `'recovery-codes'` step
+    from that effect, letting its own "Continue" button navigate
+    explicitly once acknowledged. (2) The tenant detail page's
+    unconditional `if (loading) return <PageSpinner/>` unmounted the
+    whole page (and any inline confirmation state, e.g. "Saved.") on
+    every post-edit `reload()`, not just the initial load — fixed to
+    `if (loading && !tenant)`, since `useAsync`'s `reload()` preserves the
+    previous `data` while refetching.
+  - Verified end-to-end over real HTTP by five new
+    `apps/api/test/platform-*.e2e-spec.ts` files (41 tests: the full MFA
+    state machine, THE CRITICAL authorization boundary — a valid TENANT
+    token, and no token at all, both rejected on every platform route —
+    least-privilege denial, tenant lifecycle including the
+    suspend-blocks-login proof, usage metrics correctness, country-pack
+    authoring/versioning/activation including the bypass-the-API malformed-
+    row proof, and impersonation's full guarantee set) plus FOUR EXISTING
+    e2e files (`licensing-saas`, `licensing-lifetime`, `resilience`,
+    `audit`) updated to authenticate as a platform admin — they previously
+    called `/platform/*` with no token at all, exactly the gap this step
+    closes; `licensing-saas.e2e-spec.ts` gained two new boundary
+    assertions. `apps/api`'s full suite: **423 tests green** (382
+    existing/boundary + 41 new). A new `apps/admin/playwright.config.ts` +
+    `tests/` suite (10 tests across `auth.spec.ts`/`tenants.spec.ts`/
+    `rbac-and-country-packs.spec.ts`) drives the REAL enrollment/login/
+    tenant-lifecycle/impersonation/country-pack-authoring UI in a real
+    browser against the real stack — zero mocks, the same posture
+    `apps/portal`'s own suite already takes. Full-repo `pnpm build` (6
+    tasks) and `pnpm lint` (8 tasks) both green (packages/db gained
+    `@node-rs/argon2` for its new `seedPlatformAdmin` dev-bootstrap
+    seed).

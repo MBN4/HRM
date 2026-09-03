@@ -12,7 +12,7 @@ import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import type { Request, Response } from 'express';
 import { firstValueFrom, Observable, of } from 'rxjs';
-import { Prisma, withTenantContext } from '@hrm/db';
+import { appPrisma, Prisma, withTenantContext } from '@hrm/db';
 import { DEFAULT_REQUEST_PRIORITY, RequestPriority } from '@hrm/shared';
 import { ApiKeyAuthService } from '../auth/api-key/api-key-auth.service';
 import { ApiKeyRateLimitService } from '../auth/api-key/api-key-rate-limit.service';
@@ -21,6 +21,8 @@ import { loadUserContext } from '../auth/load-user-context.util';
 import { LoadSheddingService } from '../resilience/load-shedding/load-shedding.service';
 import { PRIORITY_KEY } from '../resilience/load-shedding/priority.decorator';
 import { TenantRateLimitService } from '../resilience/rate-limit/tenant-rate-limit.service';
+import { IS_ALLOW_ANONYMOUS_PLATFORM_KEY } from '../platform/auth/allow-anonymous-platform.decorator';
+import { PlatformAuthContextService } from '../platform/auth/platform-auth-context.service';
 import { IS_PUBLIC_KEY } from './public.decorator';
 import { IS_PLATFORM_KEY } from './platform-route.decorator';
 import { TenantResolutionService } from './tenant-resolution.service';
@@ -34,13 +36,27 @@ const EMPTY_CONTEXT: Omit<RequestTenantStore, 'platform' | 'tx'> = {
   roles: null,
   permissions: null,
   branchIds: null,
+  platformAdminId: null,
+  platformRole: null,
+  impersonatedByPlatformAdminId: null,
 };
+
+/** Requests are blocked entirely (not just billing-gated) for a tenant in either of these states — see docs/conventions/vendor-console.md → Tenant lifecycle. */
+const BLOCKED_TENANT_STATUSES = new Set(['SUSPENDED', 'CANCELLED']);
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
 interface AccessTokenPayload {
   sub: string;
   tenantId: string;
+  /**
+   * Step 4.1 — present ONLY on an impersonation access token (minted by
+   * `PlatformImpersonationService` via `TokenService.signImpersonationAccessToken`):
+   * the REAL platform admin's id. `sub` is still the impersonated tenant
+   * user's id, so every other authentication step below is unchanged.
+   */
+  impersonatedBy?: string;
+  impersonationSessionId?: string;
 }
 
 function extractBearerToken(req: Request): string | null {
@@ -138,6 +154,7 @@ export class TenantScopeInterceptor implements NestInterceptor {
     private readonly loadShedding: LoadSheddingService,
     private readonly apiKeyAuth: ApiKeyAuthService,
     private readonly apiKeyRateLimit: ApiKeyRateLimitService,
+    private readonly platformAuth: PlatformAuthContextService,
   ) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
@@ -180,8 +197,41 @@ export class TenantScopeInterceptor implements NestInterceptor {
       if (this.config.get<string>('PLATFORM_MODE_ENABLED') !== 'true') {
         throw new ForbiddenException('Platform mode is not enabled.');
       }
-      return this.tenantContext.run({ ...EMPTY_CONTEXT, platform: true, tx: null }, () =>
-        firstValueFrom(next.handle(), { defaultValue: undefined }),
+
+      // Step 4.1 — the vendor super-admin console. Every @PlatformRoute()
+      // request now requires a fully authenticated, MFA-verified
+      // PlatformAdmin UNLESS the route is explicitly @AllowAnonymousPlatform()
+      // (login / MFA enroll+verify / refresh — the handful of routes that
+      // themselves establish a platform session). This is the fix for what
+      // was, through 0.6/0.10, a genuine gap: PLATFORM_MODE_ENABLED alone
+      // let ANY caller reach a platform route with no identity check at
+      // all. See docs/conventions/vendor-console.md.
+      const isAllowAnonymousPlatform = this.reflector.getAllAndOverride<boolean>(IS_ALLOW_ANONYMOUS_PLATFORM_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]);
+      if (isAllowAnonymousPlatform) {
+        return this.tenantContext.run({ ...EMPTY_CONTEXT, platform: true, tx: null }, () =>
+          firstValueFrom(next.handle(), { defaultValue: undefined }),
+        );
+      }
+
+      const platformReq = context.switchToHttp().getRequest<Request>();
+      const token = extractBearerToken(platformReq);
+      const authenticated = token ? await this.platformAuth.authenticate(token) : null;
+      if (!authenticated) {
+        throw new UnauthorizedException('A valid, MFA-verified platform admin session is required.');
+      }
+
+      return this.tenantContext.run(
+        {
+          ...EMPTY_CONTEXT,
+          platform: true,
+          tx: null,
+          platformAdminId: authenticated.platformAdminId,
+          platformRole: authenticated.role,
+        },
+        () => firstValueFrom(next.handle(), { defaultValue: undefined }),
       );
     }
 
@@ -202,6 +252,14 @@ export class TenantScopeInterceptor implements NestInterceptor {
     const resolved = await this.resolver.resolve(req);
     if (!resolved) {
       throw new UnauthorizedException('Unable to resolve a tenant for this request.');
+    }
+    // Step 4.1 — TENANT_STATUS is now enforced (flagged as deliberately
+    // NOT checked back in 0.3/0.6): a SUSPENDED/CANCELLED tenant's users
+    // are blocked entirely, before rate limiting or the DB transaction
+    // even opens. Suspend/resume is the vendor-console lever for this —
+    // see docs/conventions/vendor-console.md → Tenant lifecycle.
+    if (BLOCKED_TENANT_STATUSES.has(resolved.tenant.status)) {
+      throw new ForbiddenException('This tenant account is suspended.');
     }
 
     await this.tenantRateLimit.enforce(resolved.tenantId);
@@ -249,6 +307,13 @@ export class TenantScopeInterceptor implements NestInterceptor {
       throw new UnauthorizedException('Invalid, expired, or revoked API key.');
     }
 
+    // Step 4.1 — TENANT_STATUS applies to the API-key path too, same as
+    // the JWT/subdomain path above.
+    const tenant = await appPrisma.tenant.findUnique({ where: { id: validated.tenantId }, select: { status: true } });
+    if (!tenant || BLOCKED_TENANT_STATUSES.has(tenant.status)) {
+      throw new ForbiddenException('This tenant account is suspended.');
+    }
+
     await this.tenantRateLimit.enforce(validated.tenantId);
     await this.apiKeyRateLimit.enforce(validated.apiKeyId, validated.rateLimitPerMinute);
 
@@ -260,6 +325,9 @@ export class TenantScopeInterceptor implements NestInterceptor {
         roles: [],
         permissions: validated.scopes,
         branchIds: null,
+        platformAdminId: null,
+        platformRole: null,
+        impersonatedByPlatformAdminId: null,
       };
       return this.tenantContext.run({ ...apiKeyContext, platform: false, tx }, () =>
         firstValueFrom(next.handle(), { defaultValue: undefined }),
@@ -303,6 +371,37 @@ export class TenantScopeInterceptor implements NestInterceptor {
       throw unauthorized();
     }
 
+    // Step 4.1 — an impersonation access token carries `impersonatedBy` +
+    // `impersonationSessionId` on top of the ordinary `{sub, tenantId}`
+    // shape. The session itself is the SOURCE OF TRUTH for whether this
+    // token is still good: it must exist, target THIS user, not have been
+    // manually ended, and not have expired — checked fresh on every
+    // request (not just trusted from the token's own `exp`, which is set
+    // to match but is a second, independent check, this codebase's usual
+    // "no single layer trusted alone" posture). A suspended/deleted
+    // PlatformAdmin is already excluded structurally: the token was only
+    // ever minted for an admin who passed PlatformImpersonationService's
+    // own permission check at session-start time, and ending a session
+    // (or it expiring) is the only thing that revokes it — there is no
+    // separate platform-admin-status re-check here, matching how an
+    // ordinary tenant token doesn't re-check the platform layer either.
+    let impersonatedByPlatformAdminId: string | null = null;
+    if (payload.impersonatedBy && payload.impersonationSessionId) {
+      const session = await tx.impersonationSession.findUnique({
+        where: { tenantId_id: { tenantId, id: payload.impersonationSessionId } },
+      });
+      const valid =
+        session &&
+        session.targetUserId === user.id &&
+        session.platformAdminId === payload.impersonatedBy &&
+        !session.endedAt &&
+        session.expiresAt.getTime() > Date.now();
+      if (!valid) {
+        throw unauthorized();
+      }
+      impersonatedByPlatformAdminId = payload.impersonatedBy;
+    }
+
     const { roles, permissions, branchIds } = await loadUserContext(tx, user.id);
 
     return {
@@ -312,6 +411,9 @@ export class TenantScopeInterceptor implements NestInterceptor {
       permissions,
       branchIds,
       branchId: branchIds?.[0] ?? null,
+      platformAdminId: null,
+      platformRole: null,
+      impersonatedByPlatformAdminId,
     };
   }
 }

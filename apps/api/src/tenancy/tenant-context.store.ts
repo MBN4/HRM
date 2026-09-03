@@ -26,6 +26,24 @@ export interface RequestTenantStore {
   branchIds: string[] | null;
   /** True only for requests through an explicit @PlatformRoute() — see platform-route.decorator.ts. */
   platform: boolean;
+  /**
+   * Step 4.1 — the authenticated platform admin's own id/role, populated
+   * by `TenantScopeInterceptor` for any `@PlatformRoute()` request that
+   * isn't `@AllowAnonymousPlatform()`. Both null for a normal tenant
+   * request, AND for an `@AllowAnonymousPlatform()` one (login/MFA/
+   * refresh — there's no authenticated admin yet).
+   */
+  platformAdminId: string | null;
+  platformRole: string | null;
+  /**
+   * Step 4.1 — set ONLY for a normal tenant request authenticated via an
+   * impersonation access token: the REAL platform admin's id, kept
+   * alongside `userId` (the impersonated tenant user) so every audited
+   * mutation during the session is tagged with who was really acting —
+   * see docs/conventions/vendor-console.md → Impersonation. Null for
+   * every other request, platform or tenant.
+   */
+  impersonatedByPlatformAdminId: string | null;
   tx: Prisma.TransactionClient | null;
 }
 

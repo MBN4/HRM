@@ -35,6 +35,7 @@ import type IORedis from 'ioredis';
 import { appPrisma, prisma, seedCountryPacks, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '@hrm/db';
 import { AppModule } from '../src/app.module';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
+import { cleanupTestPlatformAdmins, createTestPlatformAdmin } from './helpers/platform-test-auth';
 
 const BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN ?? 'yourhrms.local';
 const TENANT_A_SLUG = 'audit-test-tenant-a';
@@ -44,6 +45,7 @@ const jwt = new JwtService({ secret: process.env.JWT_SECRET });
 
 async function resetFixtures() {
   await prisma.tenant.deleteMany({ where: { slug: { in: [TENANT_A_SLUG, TENANT_B_SLUG] } } });
+  await cleanupTestPlatformAdmins();
 }
 
 function hostFor(slug: string) {
@@ -74,6 +76,7 @@ describe('audit log (e2e)', () => {
   let tokenAdminA: string;
   let tokenEmployeeA: string;
   let tokenAdminB: string;
+  let platformToken: string;
 
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -82,6 +85,7 @@ describe('audit log (e2e)', () => {
 
     await resetFixtures();
     await seedCountryPacks(prisma);
+    platformToken = (await createTestPlatformAdmin()).token;
 
     const tenantA = await prisma.tenant.create({
       data: { name: 'Audit Test Tenant A', slug: TENANT_A_SLUG, defaultCountryCode: 'US', hostingRegion: 'us-east-1' },
@@ -176,6 +180,7 @@ describe('audit log (e2e)', () => {
     it('licensing.revoked (emitted by the platform admin route) lands in the trail', async () => {
       await request(app.getHttpServer())
         .post('/platform/licensing/revoke')
+        .set('Authorization', `Bearer ${platformToken}`)
         .send({ tenantId: tenantAId, reason: 'audit e2e proof' })
         .expect(201);
 

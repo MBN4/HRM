@@ -25,10 +25,32 @@ export class TenantContextService {
     return getTenantContextStore();
   }
 
-  /** `{ tenantId, branchId, userId, roles, permissions, branchIds, platform }` — what `@CurrentTenant()` hands to controllers. */
+  /** `{ tenantId, branchId, userId, roles, permissions, branchIds, platform, platformAdminId, platformRole, impersonatedByPlatformAdminId }` — what `@CurrentTenant()` hands to controllers. */
   getContext(): CurrentTenantContext {
-    const { tenantId, branchId, userId, roles, permissions, branchIds, platform } = this.requireStore();
-    return { tenantId, branchId, userId, roles, permissions, branchIds, platform };
+    const {
+      tenantId,
+      branchId,
+      userId,
+      roles,
+      permissions,
+      branchIds,
+      platform,
+      platformAdminId,
+      platformRole,
+      impersonatedByPlatformAdminId,
+    } = this.requireStore();
+    return {
+      tenantId,
+      branchId,
+      userId,
+      roles,
+      permissions,
+      branchIds,
+      platform,
+      platformAdminId,
+      platformRole,
+      impersonatedByPlatformAdminId,
+    };
   }
 
   get tenantId(): string | null {
@@ -41,6 +63,20 @@ export class TenantContextService {
 
   get isPlatform(): boolean {
     return this.getStore()?.platform ?? false;
+  }
+
+  /** The authenticated platform admin's own id — see tenant-context.store.ts. Null outside an authenticated @PlatformRoute() request. */
+  get platformAdminId(): string | null {
+    return this.getStore()?.platformAdminId ?? null;
+  }
+
+  get platformRole(): string | null {
+    return this.getStore()?.platformRole ?? null;
+  }
+
+  /** Set only for a tenant request authenticated via an impersonation token — see tenant-context.store.ts. */
+  get impersonatedByPlatformAdminId(): string | null {
+    return this.getStore()?.impersonatedByPlatformAdminId ?? null;
   }
 
   getPermissions(): string[] {
