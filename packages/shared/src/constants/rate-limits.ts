@@ -24,3 +24,12 @@ export const DEFAULT_RATE_LIMITS: Record<TenantEditionKey, RateLimitConfig> = {
   PROFESSIONAL: { limit: 500, windowSeconds: 60 },
   ENTERPRISE: { limit: 2000, windowSeconds: 60 },
 };
+
+/**
+ * Per-API-KEY default (step 3.3), distinct from the per-TENANT limit above —
+ * an API key is rate-limited on its own, tighter budget regardless of the
+ * owning tenant's edition (`ApiKeyRateLimitService`, keyed
+ * `api-key:<apiKeyId>`, same fixed-window `RateLimiterService` primitive).
+ * `ApiKey.rateLimitPerMinute` overrides this per key when set.
+ */
+export const DEFAULT_API_KEY_RATE_LIMIT: RateLimitConfig = { limit: 300, windowSeconds: 60 };

@@ -5,5 +5,10 @@
  * on `@hrm/db`, the same posture every other shared constant in this
  * package already takes.
  */
-export const NOTIFICATION_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'PUSH'] as const;
+// SLACK added in step 3.3 (Integrations) — a real adapter reusing this exact
+// provider seam, resolving `to` as the tenant's configured Slack incoming-
+// webhook URL rather than a per-recipient address, the same way PUSH
+// resolves `to` from User.pushToken. Opt-in only (absent from
+// DEFAULT_NOTIFICATION_CHANNELS) — see docs/conventions/integrations.md.
+export const NOTIFICATION_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'PUSH', 'SLACK'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];

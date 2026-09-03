@@ -178,6 +178,14 @@ model Tenant {
   lmsCourseCompletionSnapshots   CourseCompletionDailySnapshot[]
   lmsTrainingComplianceSnapshots TrainingComplianceDailySnapshot[]
 
+  // Step 3.3 — Integrations (see docs/conventions/integrations.md).
+  webhookSubscriptions         WebhookSubscription[]
+  webhookDeliveries            WebhookDelivery[]
+  apiKeys                      ApiKey[]
+  ssoConfig                    SsoConfig?
+  biometricDeviceRegistrations BiometricDeviceRegistration[]
+  slackWorkspaceConfig         SlackWorkspaceConfig?
+
   @@map("tenants")
 }
 
@@ -900,6 +908,14 @@ enum NotificationChannel {
   EMAIL
   SMS
   PUSH
+  // Added in step 3.3 (Integrations) — the Slack adapter is a real
+  // NotificationProvider bound to SLACK_PROVIDER, resolving `to` as the
+  // tenant's configured incoming-webhook URL (SlackWorkspaceConfig) rather
+  // than a per-recipient address, the same way PUSH resolves `to` from
+  // User.pushToken. Opt-in only: absent from DEFAULT_NOTIFICATION_CHANNELS,
+  // a tenant enables it per event type via NotificationPreference. See
+  // docs/conventions/integrations.md.
+  SLACK
 }
 
 enum NotificationDeliveryStatus {
@@ -2104,6 +2120,15 @@ model PayrollRun {
   settlementEmployeeId String?          @map("settlement_employee_id") @db.Uuid
   payrollMode          String           @map("payroll_mode") @db.VarChar(16)
   workflowInstanceId   String?          @map("workflow_instance_id") @db.Uuid
+  // Additive seam column, step 3.3 — formalizes the bank-export adapter
+  // (docs/conventions/payroll.md's single-CSV-format gap) into a genuinely
+  // PLUGGABLE choice: null (the default, every pre-3.3 run) resolves the
+  // same GenericCsvBankExportAdapter as before via BankExportAdapterRegistry
+  // — zero behavior change for existing runs/tests. A non-null value picks
+  // a different registered adapter by its own `format` key. Never read by
+  // PayrollEngineService/the tax-and-statutory engine — bank export is
+  // orchestration/formatting only. See docs/conventions/integrations.md.
+  bankExportFormat     String?          @map("bank_export_format") @db.VarChar(32)
   currencyCode         String           @map("currency_code") @db.VarChar(3)
   exchangeRateToBase   Decimal?         @map("exchange_rate_to_base") @db.Decimal(18, 8)
   totalGross           Decimal          @default(0) @map("total_gross") @db.Decimal(14, 2)
@@ -3787,4 +3812,223 @@ model TrainingComplianceDailySnapshot {
   @@unique([tenantId, snapshotDate, branchId, departmentId, courseId])
   @@index([tenantId, snapshotDate, branchId])
   @@map("lms_training_compliance_daily_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Step 3.3 — Integrations: "extend without forking" without touching a
+// single existing module's logic. Four thin, additive slices — see
+// docs/conventions/integrations.md for the full write-up:
+//
+//   1. Outbound webhooks — tenants subscribe an endpoint to a subset of the
+//      domain events already emitted across every module (auth/licensing/
+//      workflow/payroll/performance/recruitment/checklist/helpdesk/lms — see
+//      packages/shared/src/webhooks/event-types.ts). Delivered via the 0.8
+//      BullMQ pattern, signed HMAC-SHA256, breaker-wrapped, dead-lettered.
+//   2. A versioned (/v1) public API, authenticated by a scoped, hashed
+//      ApiKey — a second, parallel authentication path alongside the
+//      existing JWT one, still tenant-resolved + RLS-enforced.
+//   3. Adapter seams (accounting export, Slack, biometric devices, bank
+//      export) — the SAME Symbol-token + interface + `{provide, useClass}`
+//      shape as AUTH_PROVIDER/EMAIL_PROVIDER/BIOMETRIC_DEVICE_ADAPTER/
+//      BANK_EXPORT_ADAPTER.
+//   4. SsoConfig — per-tenant IdP configuration for the SSO seam (0.4),
+//      gated behind FEATURE_FLAGS.SSO (ENTERPRISE-only, already seeded).
+//
+// Every table here is ordinary tenant-scoped RLS, same `tenant_isolation`
+// policy pattern as every other table in this schema. Secrets
+// (WebhookSubscription.signingSecretEncrypted, SsoConfig's client secret
+// inside `config`, SlackWorkspaceConfig.webhookUrlEncrypted) are AES-256-GCM
+// via the existing EncryptionService (reversible — needed to actually sign/
+// call out later); ApiKey/BiometricDeviceRegistration secrets are one-way
+// argon2id hashes via the new HashingService (PasswordService's exact
+// algorithm, generalized out of apps/api/src/auth so this module doesn't
+// reach into AuthModule internals) — never decryptable, only comparable.
+// ---------------------------------------------------------------------------
+
+enum WebhookSubscriptionStatus {
+  ACTIVE
+  PAUSED
+}
+
+model WebhookSubscription {
+  id                     String                    @id @default(uuid()) @db.Uuid
+  tenantId               String                    @map("tenant_id") @db.Uuid
+  url                    String
+  description            String?
+  // Free-form strings validated against packages/shared's WEBHOOK_EVENT_TYPES
+  // at the DTO layer, not a Postgres array-of-enum — same "closed catalog
+  // lives in a data table/shared constant, not the schema" posture
+  // CustomFieldDefinition.entityType/WorkflowInstance.entityType already take,
+  // so adding a new webhook-eligible event never needs a migration here.
+  eventTypes             String[]                  @map("event_types")
+  status                 WebhookSubscriptionStatus @default(ACTIVE)
+  signingSecretEncrypted String                    @map("signing_secret_encrypted")
+  createdByUserId        String                    @map("created_by_user_id") @db.Uuid
+  createdAt              DateTime                  @default(now()) @map("created_at")
+  updatedAt              DateTime                  @updatedAt @map("updated_at")
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@map("webhook_subscriptions")
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  DEAD_LETTER
+}
+
+// One row per delivery ATTEMPT SET for one (subscription, event) pair — the
+// delivery log the brief asks for (attempts/status/response), same
+// "PENDING/.../DEAD_LETTER + attempts/lastError" shape NotificationDelivery
+// (0.8) already established, reused deliberately rather than re-invented.
+model WebhookDelivery {
+  id                    String                @id @default(uuid()) @db.Uuid
+  tenantId              String                @map("tenant_id") @db.Uuid
+  webhookSubscriptionId String                @map("webhook_subscription_id") @db.Uuid
+  eventType             String                @map("event_type")
+  // The rendered outbound envelope ({id, eventType, occurredAt, tenantId,
+  // data}) — kept so a dead-lettered delivery is inspectable/re-payable
+  // without re-deriving it from the (possibly long-gone) source event.
+  payload               Json
+  status                WebhookDeliveryStatus @default(PENDING)
+  attempts              Int                   @default(0)
+  lastResponseStatus    Int?                  @map("last_response_status")
+  lastResponseBody      String?               @map("last_response_body")
+  lastError             String?               @map("last_error")
+  deliveredAt           DateTime?             @map("delivered_at")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription WebhookSubscription @relation(fields: [tenantId, webhookSubscriptionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, webhookSubscriptionId, createdAt])
+  @@index([tenantId, status])
+  @@map("webhook_deliveries")
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+}
+
+// A tenant-scoped programmatic credential for the versioned /v1 public API —
+// a SECOND, parallel authentication path alongside the JWT one (see
+// TenantScopeInterceptor's new `authenticateApiKey` branch). Only
+// `hashedKey` (argon2id, via HashingService) is ever stored — the raw key is
+// shown exactly once, at creation, and is unrecoverable after. `keyPrefix`
+// (the key's own first several characters, stored in the clear) lets the UI
+///logs identify a key without ever re-exposing the secret, the same
+// "identify without revealing" role a masked credit-card number plays.
+model ApiKey {
+  id                 String       @id @default(uuid()) @db.Uuid
+  tenantId           String       @map("tenant_id") @db.Uuid
+  name               String
+  keyPrefix          String       @map("key_prefix") @db.VarChar(16)
+  hashedKey          String       @map("hashed_key")
+  // Scoped to a subset of the SAME PermissionKey catalog RBAC already uses
+  // (packages/shared PERMISSIONS) — reusing the RBAC permission model
+  // exactly as instructed, not a second, parallel scope vocabulary. Checked
+  // the identical way a JWT-authenticated request's permissions are: via
+  // PermissionsGuard reading TenantContextService.getPermissions().
+  scopes             String[]
+  status             ApiKeyStatus @default(ACTIVE)
+  // Per-key override of the DEFAULT_API_KEY_RATE_LIMIT default (packages/shared)
+  // — null means "use the default for this tenant's edition".
+  rateLimitPerMinute Int?         @map("rate_limit_per_minute")
+  createdByUserId    String       @map("created_by_user_id") @db.Uuid
+  lastUsedAt         DateTime?    @map("last_used_at")
+  expiresAt          DateTime?    @map("expires_at")
+  revokedAt          DateTime?    @map("revoked_at")
+  createdAt          DateTime     @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, keyPrefix])
+  @@index([tenantId, status])
+  @@map("api_keys")
+}
+
+enum SsoProtocol {
+  OIDC
+  SAML
+}
+
+// Per-tenant IdP configuration for the SSO seam finished in this step —
+// ONE row per tenant (@@unique([tenantId])), `protocol` picks which
+// SsoAuthProvider implementation (apps/api/src/auth/sso/) interprets
+// `config`. `config` is a JSON blob validated by a protocol-discriminated
+// zod schema at the DTO layer (packages/shared's ssoConfigSchema) — the
+// SAME "JSON column has no schema-level guarantee of its own, re-validated
+// on read/write" posture every other JSON-configured feature in this
+// codebase already takes (CountryPackConfig, WorkflowStep.approverRule,
+// ...). The OIDC client secret INSIDE `config` is stored pre-encrypted by
+// the service layer (EncryptionService) before this row is ever written —
+// never a plaintext secret at rest, never logged.
+model SsoConfig {
+  id        String      @id @default(uuid()) @db.Uuid
+  tenantId  String      @unique @map("tenant_id") @db.Uuid
+  protocol  SsoProtocol
+  enabled   Boolean     @default(false)
+  config    Json
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("sso_configs")
+}
+
+enum BiometricDeviceStatus {
+  ACTIVE
+  DISABLED
+}
+
+// Formalizes the 1.3 biometric seam (BiometricDeviceAdapter,
+// ManualBiometricDeviceAdapter) with a real per-tenant device registry +
+// ingestion credential, so a physical device can push punches over
+// `POST /integrations/biometric/devices/:deviceId/punches` (authenticated
+// by `hashedSecret`, not a user JWT — a device is not a logged-in user, the
+// same class of non-JWT caller a webhook receiver or an API-key client is)
+// without any change to BiometricDeviceAdapter/ManualBiometricDeviceAdapter
+// themselves.
+model BiometricDeviceRegistration {
+  id           String                @id @default(uuid()) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  deviceId     String                @map("device_id")
+  name         String
+  hashedSecret String                @map("hashed_secret")
+  status       BiometricDeviceStatus @default(ACTIVE)
+  lastSeenAt   DateTime?             @map("last_seen_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, deviceId])
+  @@map("biometric_device_registrations")
+}
+
+// The Slack adapter's per-tenant config — one incoming-webhook URL per
+// tenant, encrypted at rest (a webhook URL is a bearer credential: anyone
+// holding it can post into the tenant's Slack channel). Consumed by
+// SlackNotificationProvider (SLACK_PROVIDER), resolved the same way
+// User.pushToken is resolved for the PUSH channel — see NotificationChannel
+// above.
+model SlackWorkspaceConfig {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @unique @map("tenant_id") @db.Uuid
+  webhookUrlEncrypted String   @map("webhook_url_encrypted")
+  enabled             Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("slack_workspace_configs")
 }

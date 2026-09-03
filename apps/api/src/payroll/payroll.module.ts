@@ -9,7 +9,9 @@ import { PayrollEngineService } from './engine/payroll-engine.service';
 import { PAYROLL_PROVIDER_ADAPTER } from './delegate/payroll-provider.interface';
 import { StubPayrollProviderAdapter } from './delegate/stub-payroll-provider.adapter';
 import { BANK_EXPORT_ADAPTER } from './bank-export/bank-export-adapter.interface';
+import { BANK_EXPORT_ADAPTER_REGISTRY, BankExportAdapterRegistry } from './bank-export/bank-export-adapter.registry';
 import { GenericCsvBankExportAdapter } from './bank-export/generic-csv-bank-export.adapter';
+import { NachaStubBankExportAdapter } from './bank-export/nacha-stub-bank-export.adapter';
 import { PayrollBankExportService } from './bank-export/payroll-bank-export.service';
 import { PayslipPdfService } from './payslip/payslip-pdf.service';
 import { PayslipService } from './payslip/payslip.service';
@@ -19,6 +21,7 @@ import { PayrollRunQueueService } from './runs/payroll-run-queue.service';
 import { PayrollRunProcessor } from './runs/payroll-run.processor';
 import { PayrollRunService } from './runs/payroll-run.service';
 import { PayrollWorkflowEventsListener } from './runs/payroll-workflow-events.listener';
+import { GENERIC_CSV_BANK_EXPORT_FORMAT, NACHA_STUB_BANK_EXPORT_FORMAT } from './payroll.constants';
 
 /**
  * The Payroll module (step 2.1, Phase 2's first step) — THE HIGHEST-RISK
@@ -53,6 +56,21 @@ import { PayrollWorkflowEventsListener } from './runs/payroll-workflow-events.li
     PayrollEngineService,
     { provide: PAYROLL_PROVIDER_ADAPTER, useClass: StubPayrollProviderAdapter },
     { provide: BANK_EXPORT_ADAPTER, useClass: GenericCsvBankExportAdapter },
+    // Step 3.3 — formalizes bank export as a genuinely PLUGGABLE registry,
+    // additive on top of the BANK_EXPORT_ADAPTER binding above (unchanged,
+    // still the default). See BankExportAdapterRegistry's own doc comment.
+    GenericCsvBankExportAdapter,
+    NachaStubBankExportAdapter,
+    {
+      provide: BANK_EXPORT_ADAPTER_REGISTRY,
+      useFactory: (generic: GenericCsvBankExportAdapter, nachaStub: NachaStubBankExportAdapter) => {
+        const registry = new BankExportAdapterRegistry();
+        registry.register(GENERIC_CSV_BANK_EXPORT_FORMAT, generic);
+        registry.register(NACHA_STUB_BANK_EXPORT_FORMAT, nachaStub);
+        return registry;
+      },
+      inject: [GenericCsvBankExportAdapter, NachaStubBankExportAdapter],
+    },
     PayrollBankExportService,
     PayslipPdfService,
     PayslipService,

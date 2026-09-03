@@ -51,6 +51,13 @@ import { AttendanceSummaryService } from './summary/attendance-summary.service';
     AttendanceRegularizationWorkflowEventsListener,
     { provide: BIOMETRIC_DEVICE_ADAPTER, useClass: ManualBiometricDeviceAdapter },
   ],
-  exports: [AttendanceClockService],
+  // BIOMETRIC_DEVICE_ADAPTER additionally exported (step 3.3) so
+  // Integrations' BiometricModule can formalize a real per-tenant device
+  // registry + ingestion endpoint around this EXACT existing seam without
+  // this module (or ManualBiometricDeviceAdapter itself) changing at all —
+  // the same "consumer imports the reused module" direction
+  // operations-modules.md's Expense→Payroll `ExchangeRateService` export
+  // already establishes.
+  exports: [AttendanceClockService, BIOMETRIC_DEVICE_ADAPTER],
 })
 export class AttendanceModule {}

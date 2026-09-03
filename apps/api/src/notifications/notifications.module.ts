@@ -10,10 +10,11 @@ import { NotificationDispatchListener } from './listeners/notification-dispatch.
 import { NotificationProcessor } from './notification.processor';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
-import { EMAIL_PROVIDER, PUSH_PROVIDER, SMS_PROVIDER } from './providers/notification-provider.tokens';
+import { EMAIL_PROVIDER, PUSH_PROVIDER, SLACK_PROVIDER, SMS_PROVIDER } from './providers/notification-provider.tokens';
 import { LogEmailProvider } from './providers/log-email.provider';
 import { LogPushProvider } from './providers/log-push.provider';
 import { LogSmsProvider } from './providers/log-sms.provider';
+import { SlackNotificationProvider } from './providers/slack.provider';
 
 /**
  * THE notification hub (step 0.8) — see /CLAUDE.md § Conventions →
@@ -49,6 +50,9 @@ import { LogSmsProvider } from './providers/log-sms.provider';
     { provide: EMAIL_PROVIDER, useClass: LogEmailProvider },
     { provide: SMS_PROVIDER, useClass: LogSmsProvider },
     { provide: PUSH_PROVIDER, useClass: LogPushProvider },
+    // Step 3.3 (Integrations) — the one channel bound to a REAL adapter
+    // rather than a dev-only Log*Provider; see SlackNotificationProvider.
+    { provide: SLACK_PROVIDER, useClass: SlackNotificationProvider },
   ],
   exports: [NotificationsService],
 })

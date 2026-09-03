@@ -2056,5 +2056,82 @@ validityMonths`, a self-relation `renewedFromCertificationId` — a second
     green at 76 tests (68 existing + 8 new), zero regressions. Full-repo
     `pnpm build`/`pnpm lint` green across all workspace tasks.
 
-**Phase 3 remaining**: 3.3 Integrations — not yet broken into individual
-steps (see CLAUDE.md § 6).
+- **3.3 — Integrations, Phase 3's final slice and PHASE 3 COMPLETE.** The
+  "extend without forking" escape hatch: outbound webhooks, a versioned
+  API-key-authenticated public API, four adapter seams, and SSO finished.
+  Full detail is in [`docs/conventions/integrations.md`](./conventions/integrations.md)
+  — summary:
+  - **Outbound webhooks** — `WEBHOOK_EVENT_TYPES` (`packages/shared`) is
+    pure data mirroring the events already emitted; `WebhookDispatchListener`
+    subscribes to the SAME wildcard namespaces `NotificationDispatchListener`
+    already does. `WebhookSubscription` → `WebhookDelivery` (0.8's
+    `Notification`/`NotificationDelivery` shape, reused). HMAC-SHA256
+    signing (`t=...,v1=...`, Stripe/GitHub's own convention) with a secret
+    generated once and AES-256-GCM-encrypted at rest. Delivery is
+    breaker-wrapped ONE PER SUBSCRIPTION (`CircuitBreakerService`) and
+    retried/dead-lettered via the SAME shape `NotificationDeliveryService`
+    established. `webhook.manage`-gated (TENANT_ADMIN only), a NEW
+    `FEATURE_FLAGS.WEBHOOKS` (PROFESSIONAL+), `@AuditLog`'d.
+  - **Versioned public API (`/v1`) + API keys** — `TenantScopeInterceptor`
+    gained ONE new branch: an `X-Api-Key` header authenticates AND resolves
+    the tenant in one step (skipping host-based resolution entirely),
+    still opening the SAME `withTenantContext` transaction RLS is enforced
+    through. `ApiKey.scopes` reuse RBAC's own `PERMISSIONS` catalog
+    directly — `PermissionsGuard` needed zero changes. Keys are
+    argon2id-hashed (`HashingService`, generalized out of
+    `PasswordService`'s algorithm) — one-way, shown once at creation.
+    Per-key rate limiting (`ApiKeyRateLimitService`) runs alongside the
+    existing per-tenant limiter. `V1Module` is a deliberate, curated slice
+    (employees, leave) reusing the EXISTING services directly — not a
+    mirror of the whole internal API. `@nestjs/swagger` serves OpenAPI for
+    `/v1` only at `GET /v1/docs`.
+  - **Adapter seams** — Accounting (QuickBooks/Xero-shaped,
+    `NoopAccountingAdapter` stub), Slack (a REAL `NotificationProvider`
+    reusing the 0.8 provider seam exactly — one additive `SLACK`
+    `NotificationChannel` enum value, opt-in via the existing
+    `NotificationPreference` mechanism), biometric devices (formalizes the
+    UNCHANGED 1.3 `BiometricDeviceAdapter` with a real per-tenant device
+    registry + secret-authenticated ingestion endpoint), bank export
+    (formalizes payroll.md's single-CSV-format gap into a genuinely
+    pluggable `BankExportAdapterRegistry`, additive on top of the existing
+    binding — every pre-3.3 run behaves identically).
+  - **SSO finished** — a SEPARATE flow/DI-token pair
+    (`SsoAuthProvider`/`OIDC_AUTH_PROVIDER`/`SAML_AUTH_PROVIDER`), not a
+    second `AUTH_PROVIDER` binding; `AUTH_PROVIDER`/`LocalAuthProvider`
+    (0.4) are completely unchanged. `OidcAuthProvider` is the ONE real,
+    cryptographically-verified provider (Authorization Code flow, RS256
+    id_token verification against the IdP's JWKS using only Node's
+    built-in `crypto` + `jsonwebtoken`). `SamlAuthProvider` builds a real
+    AuthnRequest redirect but its response verification is a documented,
+    loud `NotImplementedException` — a real XML-DSig verifier is
+    deliberately not hand-rolled. Find-or-provision a real `User` on first
+    login; issues the SAME tokens `AuthService.login` does.
+    `FEATURE_FLAGS.SSO` (ENTERPRISE-only, unchanged since 0.6) gates every
+    mutation AND `/login`/`.../callback` themselves.
+  - **A real bug caught during this step**: the first attempt at the
+    circuit-breaker/dead-letter e2e test wrote
+    `expect(deliveryService.deliver(...)).rejects.toThrow()` for a
+    single-attempt (`maxAttempts: 1`) delivery — but `deliver` treats a
+    final attempt as a NORMAL RESOLUTION (it records `DEAD_LETTER` and
+    returns, it doesn't re-throw), so `.rejects` on a promise that actually
+    resolves hung the whole test run rather than failing fast. Fixed by
+    asserting the resulting row's status directly instead of the promise's
+    rejection — the same lesson `payroll.md`'s own idempotency section
+    already recorded once for a structurally similar mistake ("a FAILED
+    attempt caught INSIDE the wrapped function is treated as a completed
+    success").
+  - Verified: four new `apps/api/test/*.e2e-spec.ts` files (34 tests) +
+    `bank-export-adapter.registry.spec.ts` (2 unit tests) — see
+    `docs/conventions/integrations.md`'s own closing paragraph for the
+    full breakdown. `apps/api`'s full suite green at 380 tests (344
+    existing + 36 new), including one pre-existing assertion
+    (`licensing-saas.e2e-spec.ts`) updated to expect the new `webhooks`
+    flag in `PROFESSIONAL`'s list. `apps/portal`'s 76-test Playwright suite
+    and `apps/mobile`'s 19-test Jest suite both verified green, untouched
+    by this step (no `apps/portal` UI in this step's scope). Full-repo
+    `pnpm build`/`pnpm lint` green across all eight workspace tasks.
+
+**PHASE 3 COMPLETE** — LMS (3.2) + Operations modules (3.1) + Integrations
+(3.3), on top of every prior phase's foundation. Phase 4 is not yet broken
+into individual steps — see CLAUDE.md § 6 for its named scope (vendor
+console, billing, white-label).

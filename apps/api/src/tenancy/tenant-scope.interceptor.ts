@@ -14,6 +14,8 @@ import type { Request, Response } from 'express';
 import { firstValueFrom, Observable, of } from 'rxjs';
 import { Prisma, withTenantContext } from '@hrm/db';
 import { DEFAULT_REQUEST_PRIORITY, RequestPriority } from '@hrm/shared';
+import { ApiKeyAuthService } from '../auth/api-key/api-key-auth.service';
+import { ApiKeyRateLimitService } from '../auth/api-key/api-key-rate-limit.service';
 import { IS_ALLOW_ANONYMOUS_KEY } from '../auth/decorators/allow-anonymous.decorator';
 import { loadUserContext } from '../auth/load-user-context.util';
 import { LoadSheddingService } from '../resilience/load-shedding/load-shedding.service';
@@ -51,6 +53,14 @@ function extractBearerToken(req: Request): string | null {
     return null;
   }
   return token;
+}
+
+/** Step 3.3 — the versioned public API's credential header, distinct from `Authorization: Bearer`. */
+const API_KEY_HEADER_NAME = 'x-api-key';
+
+function extractApiKey(req: Request): string | null {
+  const header = req.headers[API_KEY_HEADER_NAME];
+  return typeof header === 'string' && header.length > 0 ? header : null;
 }
 
 /**
@@ -126,6 +136,8 @@ export class TenantScopeInterceptor implements NestInterceptor {
     private readonly jwt: JwtService,
     private readonly tenantRateLimit: TenantRateLimitService,
     private readonly loadShedding: LoadSheddingService,
+    private readonly apiKeyAuth: ApiKeyAuthService,
+    private readonly apiKeyRateLimit: ApiKeyRateLimitService,
   ) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
@@ -174,6 +186,19 @@ export class TenantScopeInterceptor implements NestInterceptor {
     }
 
     const req = context.switchToHttp().getRequest<Request>();
+
+    // Step 3.3 — the versioned public API's SECOND, parallel authentication
+    // path: an `X-Api-Key` header authenticates AND resolves the tenant in
+    // one step (the key itself embeds which tenant it belongs to), so
+    // host/subdomain-based TenantResolutionService below is skipped
+    // entirely for this path — a generic API client has no tenant
+    // subdomain to call. Still opens the SAME `withTenantContext`
+    // transaction as every other request, so RLS is enforced identically.
+    const apiKey = extractApiKey(req);
+    if (apiKey) {
+      return this.handleApiKeyRequest(apiKey, next);
+    }
+
     const resolved = await this.resolver.resolve(req);
     if (!resolved) {
       throw new UnauthorizedException('Unable to resolve a tenant for this request.');
@@ -207,6 +232,39 @@ export class TenantScopeInterceptor implements NestInterceptor {
     } finally {
       clearTimeout(timer!);
     }
+  }
+
+  /**
+   * Step 3.3 — validates `X-Api-Key`, enforces BOTH the per-tenant AND the
+   * per-key rate limit (same "no single layer trusted alone" posture as
+   * everywhere else), then runs the rest of the request inside the SAME
+   * `withTenantContext` transaction the JWT path uses. `roles: []` (an API
+   * key has no role membership of its own) and `permissions: scopes` —
+   * `PermissionsGuard` needs no changes at all to enforce a key's scopes:
+   * it already just reads `TenantContextService.getPermissions()`.
+   */
+  private async handleApiKeyRequest(rawKey: string, next: CallHandler): Promise<unknown> {
+    const validated = await this.apiKeyAuth.validate(rawKey);
+    if (!validated) {
+      throw new UnauthorizedException('Invalid, expired, or revoked API key.');
+    }
+
+    await this.tenantRateLimit.enforce(validated.tenantId);
+    await this.apiKeyRateLimit.enforce(validated.apiKeyId, validated.rateLimitPerMinute);
+
+    return withTenantContext(validated.tenantId, async (tx) => {
+      const apiKeyContext: Omit<RequestTenantStore, 'platform' | 'tx'> = {
+        tenantId: validated.tenantId,
+        branchId: null,
+        userId: null,
+        roles: [],
+        permissions: validated.scopes,
+        branchIds: null,
+      };
+      return this.tenantContext.run({ ...apiKeyContext, platform: false, tx }, () =>
+        firstValueFrom(next.handle(), { defaultValue: undefined }),
+      );
+    });
   }
 
   /**

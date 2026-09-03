@@ -60,6 +60,18 @@ export const PERMISSIONS = {
   LMS_AUTHOR: 'lms.author',
   LMS_ASSIGN: 'lms.assign',
   LMS_MANAGE: 'lms.manage',
+  // Step 3.3 (Integrations) — ownership/security territory, the same
+  // reasoning ROLE_MANAGE/LICENSE_MANAGE/AUDIT_READ already document:
+  // managing outbound webhook subscriptions, minting/revoking programmatic
+  // API credentials, configuring SSO, and configuring third-party
+  // integration credentials (Slack, biometric devices, accounting export)
+  // are security-sensitive, tenant-ownership-level actions — TENANT_ADMIN
+  // only (via ALL_PERMISSIONS), deliberately NOT copied into HR_MANAGER's
+  // list below.
+  WEBHOOK_MANAGE: 'webhook.manage',
+  API_KEY_MANAGE: 'api_key.manage',
+  SSO_MANAGE: 'sso.manage',
+  INTEGRATION_MANAGE: 'integration.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

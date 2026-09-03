@@ -97,6 +97,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/frontend-admin-console.md`](./docs/conventions/frontend-admin-console.md)   | The Payroll/Performance/Recruitment+Onboarding+Offboarding admin console on `apps/portal`: the shared `WorkflowStatusPanel` sign-off component, `apiFetchBlob` binary downloads, the one additive `GET /payroll/runs` endpoint, and known UI gaps. (2.4)                                 |
 | [`docs/conventions/operations-modules.md`](./docs/conventions/operations-modules.md)           | Expenses & Reimbursements, Asset Management, HR Helpdesk, Announcements & Policies — the expense→payroll reimbursement hand-off, asset↔offboarding wiring, helpdesk SLA escalation, policy e-acknowledgment. (3.1)                                                                       |
 | [`docs/conventions/lms.md`](./docs/conventions/lms.md)                                         | Learning & Development — courses/content/quizzes as config-as-data, completion gating, certification expiry+renewal, required-training compliance (rollup + bounded drill-down), two scheduled BullMQ jobs. (3.2)                                                                        |
+| [`docs/conventions/integrations.md`](./docs/conventions/integrations.md)                       | Outbound webhooks (signed, breaker-wrapped, queued), the versioned `/v1` public API + API keys + per-key rate limits + OpenAPI, the adapter-seam catalog (accounting/Slack/biometric/bank-export), and SSO (OIDC real, SAML seam) + ENTERPRISE gating. (3.3)                             |
 
 ## 5. Build log summary
 
@@ -235,6 +236,19 @@ per step, kept here for a fast overview.
   compliance rollup, certification-expiry reminders — the latter
   idempotent via a DB `lastReminderBucket` column, no Redis idempotency
   key needed). See [`docs/conventions/lms.md`](./docs/conventions/lms.md).
+- **3.3** — Integrations (Phase 3's final slice, backend-only): outbound
+  webhooks (HMAC-signed, BullMQ-delivered, one circuit breaker per
+  subscription, dead-lettered) over the domain events already emitted
+  system-wide; a versioned `/v1` public API authenticated by a SECOND,
+  parallel path — a scoped, argon2id-hashed `ApiKey` header, checked in
+  `TenantScopeInterceptor` alongside the existing JWT path, still fully
+  RLS-enforced; four adapter seams (accounting stub, a REAL Slack
+  `NotificationProvider`, the 1.3 biometric seam formalized with a device
+  registry, the 2.1 bank-export seam formalized into a pluggable
+  registry); and SSO finished as a SEPARATE flow from `AUTH_PROVIDER`
+  (real OIDC, a documented SAML gap), ENTERPRISE-gated. **PHASE 3
+  COMPLETE as of this step.** See
+  [`docs/conventions/integrations.md`](./docs/conventions/integrations.md).
 
 ## 6. Not yet built
 
@@ -315,16 +329,36 @@ Admin/HR Console (2.4).
       (completion/compliance rollup, certification-expiry reminders). See
       [`docs/conventions/lms.md`](./docs/conventions/lms.md).
 
-**Phase 3 scope**: LMS (3.2, above), Expenses/Assets/Helpdesk/Announcements
-(3.1, above), Integrations — the last of the three is not yet broken into
-individual steps.
+- [x] **3.3** Integrations — outbound webhooks (signed/breaker-wrapped/
+      queued over the domain events already emitted), the versioned `/v1`
+      public API + scoped API keys (a second, parallel auth path,
+      RLS-enforced) + per-key rate limits + OpenAPI, four adapter seams
+      (accounting, a real Slack `NotificationProvider`, the formalized 1.3
+      biometric seam, the formalized 2.1 pluggable bank-export registry),
+      and SSO finished (real OIDC, a documented SAML gap, ENTERPRISE-gated).
+      See [`docs/conventions/integrations.md`](./docs/conventions/integrations.md).
 
-- [ ] **3.3+** Integrations — _not yet defined in detail_
-- [ ] **Phase 4** — _scope not yet defined_
+**PHASE 3 COMPLETE.** Operations modules (3.1) + LMS (3.2) + Integrations
+(3.3) — the full "extend without forking" layer: every tenant/vendor
+integration point (webhooks, a public API, pluggable adapters, SSO) is now
+additive configuration or a new DI binding, never a fork of this codebase.
+
+- [ ] **Phase 4** — _scope not yet defined in detail._ Named candidates
+      surfaced by prior steps' own closing notes: the vendor super-admin
+      console (`apps/admin` currently has only a placeholder — platform-wide
+      tenant management, the licensing-admin UI for the `LicensingAdminController`
+      routes 0.6 built API-only), real SaaS billing (0.6's `Subscription`
+      model is a stub for this — a real Stripe integration was explicitly
+      flagged as "Phase 4.2" back in licensing-feature-flags.md), and
+      white-labeling (per-tenant branding/theming on top of the multi-tenant
+      core, in the spirit of CLAUDE.md § 2's "customizable without forking").
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see
       [`docs/conventions/audit-custom-fields.md`](./docs/conventions/audit-custom-fields.md)
       — and, per 0.2's original note, `attendance_records`, now built
       partition-ready in 1.3 — see
-      [`docs/conventions/attendance.md`](./docs/conventions/attendance.md))
+      [`docs/conventions/attendance.md`](./docs/conventions/attendance.md);
+      5.1 is already known to cover full PgBouncer/read replicas, flagged in
+      resilience.md; 5.3 is horizontal scaling, which the resilience
+      chassis's stateless-by-design posture already prepares for)
 - [ ] **Phase 6** — _scope not yet defined_

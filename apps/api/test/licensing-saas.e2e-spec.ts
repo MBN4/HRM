@@ -126,7 +126,9 @@ describe('licensing — SaaS mode (e2e)', () => {
       expect(res.body.blocked).toBe(false);
       expect(res.body.edition).toBe('PROFESSIONAL');
       expect(res.body.flags.sort()).toEqual(
-        [FEATURE_FLAGS.ADVANCED_REPORTING, FEATURE_FLAGS.CUSTOM_ROLES, FEATURE_FLAGS.API_ACCESS].sort(),
+        // FEATURE_FLAGS.WEBHOOKS joined this list in step 3.3 — see
+        // docs/conventions/integrations.md.
+        [FEATURE_FLAGS.ADVANCED_REPORTING, FEATURE_FLAGS.CUSTOM_ROLES, FEATURE_FLAGS.API_ACCESS, FEATURE_FLAGS.WEBHOOKS].sort(),
       );
       // ENTERPRISE-only flags must NOT be present for a PROFESSIONAL subscription.
       expect(res.body.flags).not.toContain(FEATURE_FLAGS.SSO);

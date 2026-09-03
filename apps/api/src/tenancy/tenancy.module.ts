@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
+import { ApiKeyAuthModule } from '../auth/api-key/api-key-auth.module';
 import { PermissionFieldDemoController } from '../common/permissions/demo/permission-field-demo.controller';
 import { PermissionSerializerInterceptor } from '../common/permissions/permission-serializer.interceptor';
 import { PlatformController } from '../platform/platform.controller';
@@ -40,6 +41,11 @@ import { TenantScopeInterceptor } from './tenant-scope.interceptor';
         signOptions: { expiresIn: (config.get<string>('JWT_EXPIRES_IN') ?? '15m') as any },
       }),
     }),
+    // Step 3.3 — the API-key authentication branch below needs
+    // ApiKeyAuthService/ApiKeyRateLimitService. A small leaf module (see its
+    // own doc comment for why this is a DIFFERENT module from the
+    // tenant-facing ApiKeysModule).
+    ApiKeyAuthModule,
   ],
   controllers: [TenancyController, PlatformController, PermissionFieldDemoController],
   providers: [

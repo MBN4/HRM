@@ -9,6 +9,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { I18nModule } from './common/i18n/i18n.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
+import { HashingModule } from './common/hashing/hashing.module';
 import { CountryPacksModule } from './country-packs/country-packs.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { EmployeesModule } from './employees/employees.module';
@@ -25,6 +26,7 @@ import { AssetsModule } from './assets/assets.module';
 import { HelpdeskModule } from './helpdesk/helpdesk.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { LmsModule } from './lms/lms.module';
+import { IntegrationsModule } from './integrations/integrations.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -57,6 +59,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     CustomFieldsModule,
     I18nModule,
     EncryptionModule,
+    HashingModule,
     StorageModule,
     EmployeesModule,
     LeaveModule,
@@ -72,6 +75,10 @@ import { WorkflowModule } from './workflow/workflow.module';
     HelpdeskModule,
     AnnouncementsModule,
     LmsModule,
+    // Step 3.3 (Integrations) — the last Phase 3 slice: outbound webhooks,
+    // the versioned /v1 public API + API keys, adapter seams, biometric
+    // device ingestion. See docs/conventions/integrations.md.
+    IntegrationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

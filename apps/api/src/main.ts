@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ShutdownService } from './resilience/shutdown/shutdown.service';
+import { setupSwagger } from './swagger';
 
 /**
  * How long to keep serving in-flight requests, with readiness already
@@ -17,6 +18,11 @@ const SHUTDOWN_GRACE_PERIOD_MS = Number(process.env.SHUTDOWN_GRACE_PERIOD_MS ?? 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors();
+
+  // Step 3.3 — OpenAPI/Swagger for the versioned public API ONLY, not this
+  // codebase's entire internal surface — see setupSwagger's own doc
+  // comment.
+  setupSwagger(app);
 
   const logger = new Logger('Bootstrap');
   const shutdownService = app.get(ShutdownService);

@@ -20,6 +20,13 @@ export const FEATURE_FLAGS = {
   MULTI_COUNTRY_PAYROLL: 'multi_country_payroll',
   CUSTOM_WORKFLOWS: 'custom_workflows',
   AUDIT_LOG_EXPORT: 'audit_log_export',
+  // Step 3.3 — outbound webhook subscriptions gate behind their own flag
+  // (PROFESSIONAL+, same tier as API_ACCESS, which already gates the
+  // versioned /v1 public API this step builds — reused rather than
+  // inventing a second "may integrate programmatically" flag). SSO
+  // (already existed since 0.6, ENTERPRISE-only) is what step 3.3's SSO
+  // work gates behind — no new flag needed there.
+  WEBHOOKS: 'webhooks',
 } as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[keyof typeof FEATURE_FLAGS];
@@ -38,11 +45,17 @@ export type TenantEditionKey = (typeof TENANT_EDITIONS)[number];
  */
 export const EDITION_FEATURES: Record<TenantEditionKey, readonly FeatureFlagKey[]> = {
   STARTER: [],
-  PROFESSIONAL: [FEATURE_FLAGS.ADVANCED_REPORTING, FEATURE_FLAGS.CUSTOM_ROLES, FEATURE_FLAGS.API_ACCESS],
+  PROFESSIONAL: [
+    FEATURE_FLAGS.ADVANCED_REPORTING,
+    FEATURE_FLAGS.CUSTOM_ROLES,
+    FEATURE_FLAGS.API_ACCESS,
+    FEATURE_FLAGS.WEBHOOKS,
+  ],
   ENTERPRISE: [
     FEATURE_FLAGS.ADVANCED_REPORTING,
     FEATURE_FLAGS.CUSTOM_ROLES,
     FEATURE_FLAGS.API_ACCESS,
+    FEATURE_FLAGS.WEBHOOKS,
     FEATURE_FLAGS.SSO,
     FEATURE_FLAGS.MULTI_COUNTRY_PAYROLL,
     FEATURE_FLAGS.CUSTOM_WORKFLOWS,

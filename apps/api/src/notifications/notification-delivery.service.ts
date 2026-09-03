@@ -2,10 +2,11 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { NotificationChannel, NotificationProvider } from '@hrm/shared';
+import { EncryptionService } from '../common/encryption/encryption.service';
 import { CircuitBreakerService } from '../resilience/circuit-breaker/circuit-breaker.service';
 import { NotificationLocaleResolverService } from './notification-locale-resolver.service';
 import { NotificationTemplateRenderer, RenderedNotification } from './notification-template-renderer.service';
-import { EMAIL_PROVIDER, PUSH_PROVIDER, SMS_PROVIDER } from './providers/notification-provider.tokens';
+import { EMAIL_PROVIDER, PUSH_PROVIDER, SLACK_PROVIDER, SMS_PROVIDER } from './providers/notification-provider.tokens';
 
 /**
  * The notification hub's CONSUMER side — the actual per-channel delivery
@@ -52,9 +53,11 @@ export class NotificationDeliveryService {
     private readonly localeResolver: NotificationLocaleResolverService,
     private readonly renderer: NotificationTemplateRenderer,
     private readonly circuitBreaker: CircuitBreakerService,
+    private readonly encryption: EncryptionService,
     @Inject(EMAIL_PROVIDER) private readonly emailProvider: NotificationProvider,
     @Inject(SMS_PROVIDER) private readonly smsProvider: NotificationProvider,
     @Inject(PUSH_PROVIDER) private readonly pushProvider: NotificationProvider,
+    @Inject(SLACK_PROVIDER) private readonly slackProvider: NotificationProvider,
   ) {}
 
   async deliver(tenantId: string, notificationDeliveryId: string, attemptsMade: number, maxAttempts: number): Promise<void> {
@@ -125,7 +128,21 @@ export class NotificationDeliveryService {
         // `POST /auth/push-token`) and falls back to the user id — the
         // same documented placeholder as before — when no device is
         // registered, so an un-registered recipient never breaks delivery.
-        const to = channel === 'EMAIL' ? recipient.email : channel === 'PUSH' && recipient.pushToken ? recipient.pushToken : recipient.id;
+        // SLACK is the one channel whose `to` is TENANT-scoped rather than
+        // per-recipient (step 3.3) — every recipient of a Slack-routed
+        // notification posts into the SAME configured incoming-webhook URL.
+        // A missing/disabled config is a loud failure (this codebase's
+        // consistent "no missing_ok" posture), not a silent no-op — it
+        // flows into the same retry/dead-letter path as any other send
+        // failure.
+        const to =
+          channel === 'EMAIL'
+            ? recipient.email
+            : channel === 'PUSH' && recipient.pushToken
+              ? recipient.pushToken
+              : channel === 'SLACK'
+                ? await this.resolveSlackWebhookUrl(tx, tenantId)
+                : recipient.id;
         const provider = this.providerFor(channel);
         await this.circuitBreaker.execute(`notification-provider:${channel}`, () =>
           provider.send({
@@ -150,8 +167,18 @@ export class NotificationDeliveryService {
         return this.smsProvider;
       case 'PUSH':
         return this.pushProvider;
+      case 'SLACK':
+        return this.slackProvider;
       default:
         throw new Error(`No provider is bound for channel "${channel}".`);
     }
+  }
+
+  private async resolveSlackWebhookUrl(tx: Prisma.TransactionClient, tenantId: string): Promise<string> {
+    const config = await tx.slackWorkspaceConfig.findUnique({ where: { tenantId } });
+    if (!config || !config.enabled) {
+      throw new Error('No enabled Slack workspace is configured for this tenant.');
+    }
+    return this.encryption.decrypt(config.webhookUrlEncrypted);
   }
 }
