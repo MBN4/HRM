@@ -101,11 +101,19 @@ export class TenantResolutionService {
     if (!host) {
       return null;
     }
+    // Step 4.3 (white-label) — a branded domain only resolves real traffic
+    // once ownership is VERIFIED (see docs/conventions/white-label.md).
+    // A freshly requested (PENDING_VERIFICATION) or FAILED row must never
+    // match here — otherwise any tenant admin could hijack another
+    // domain's traffic just by requesting it first.
     const mapping = await appPrisma.tenantDomain.findUnique({
       where: { domain: host },
       include: { tenant: true },
     });
-    return mapping?.tenant ?? null;
+    if (!mapping || mapping.verificationStatus !== 'VERIFIED') {
+      return null;
+    }
+    return mapping.tenant;
   }
 
   private resolveByHeader(req: Request): Promise<Tenant | null> {

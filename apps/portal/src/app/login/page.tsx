@@ -4,15 +4,18 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
+import { useBranding } from '../../lib/branding/BrandingProvider';
 import { getStoredTenantSlug, isUsingSubdomainResolution } from '../../lib/tenant';
 import { ApiError } from '../../lib/api/client';
 import { Button } from '../../components/ui/Button';
 import { Input, Label } from '../../components/ui/Field';
 import { Alert } from '../../components/ui/Alert';
+import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
 
 export default function LoginPage() {
   const { t } = useI18n();
   const { login, user, loading: sessionLoading } = useAuth();
+  const { branding, logoUrl } = useBranding();
   const router = useRouter();
 
   const [email, setEmail] = useState('');
@@ -51,12 +54,25 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-900 via-brand-800 to-ink-900 px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 flex items-center justify-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg font-bold text-brand-700">H</div>
-          <span className="text-xl font-semibold text-white">{t('app.name')}</span>
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a tenant-branded logo is an arbitrary uploaded image, not a build-time static asset next/image can optimize.
+            <img src={logoUrl} alt={branding.productName} className="h-10 w-10 rounded-xl object-contain" data-testid="branding-logo" />
+          ) : (
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg font-bold text-brand-700"
+              style={branding.primaryColor ? { color: branding.primaryColor } : undefined}
+              data-testid="branding-badge"
+            >
+              {branding.productName.charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span className="text-xl font-semibold text-white" data-testid="branding-product-name">
+            {branding.productName}
+          </span>
         </div>
         <div className="rounded-xl2 bg-white p-8 shadow-soft">
-          <h1 className="text-lg font-semibold text-ink-900">{t('auth.login.title')}</h1>
-          <p className="mt-1 text-sm text-ink-500">{t('auth.login.subtitle')}</p>
+          <h1 className="text-lg font-semibold text-ink-900">{branding.loginHeadline || t('auth.login.title')}</h1>
+          <p className="mt-1 text-sm text-ink-500">{branding.loginSubtext || t('auth.login.subtitle')}</p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             {showWorkspaceField && (
@@ -103,6 +119,7 @@ export default function LoginPage() {
             </Button>
           </form>
         </div>
+        <PoweredByFooter className="mt-4 text-center text-white/70" />
       </div>
     </div>
   );

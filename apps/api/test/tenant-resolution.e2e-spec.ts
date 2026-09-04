@@ -92,7 +92,14 @@ describe('tenant resolution (e2e)', () => {
     branchAId = branchA.id;
     branchBId = branchB.id;
 
-    await prisma.tenantDomain.create({ data: { tenantId: tenantAId, domain: CUSTOM_DOMAIN } });
+    // Step 4.3 (white-label) — a domain only resolves real traffic once
+    // VERIFIED (see TenantResolutionService.resolveByCustomDomain); this
+    // fixture proves the ORDINARY custom-domain resolution path, so it's
+    // created already-verified, same as a real domain that has completed
+    // DomainVerificationService's check.
+    await prisma.tenantDomain.create({
+      data: { tenantId: tenantAId, domain: CUSTOM_DOMAIN, verificationToken: 'unused-fixture-token', verificationStatus: 'VERIFIED' },
+    });
 
     const userA = await prisma.user.create({
       data: { tenantId: tenantAId, email: 'resolver@a.test', hashedPassword: 'unused', status: 'ACTIVE' },

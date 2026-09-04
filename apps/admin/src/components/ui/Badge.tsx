@@ -33,6 +33,13 @@ const STATUS_TONE: Record<string, Tone> = {
   PAID: 'success',
   VOID: 'neutral',
   UNCOLLECTIBLE: 'danger',
+  // White-label / branding (step 4.3) — DomainVerificationStatus/
+  // DomainCertStatus not already covered above — additive only.
+  PENDING_VERIFICATION: 'warning',
+  VERIFIED: 'success',
+  FAILED: 'danger',
+  NONE: 'neutral',
+  ISSUED: 'success',
 };
 
 export function StatusBadge({ status }: { status: string }) {

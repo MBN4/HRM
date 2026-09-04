@@ -78,6 +78,13 @@ export const PERMISSIONS = {
   // already document for themselves — TENANT_ADMIN only (via
   // ALL_PERMISSIONS), deliberately NOT copied into HR_MANAGER's list.
   BILLING_MANAGE: 'billing.manage',
+  // Step 4.3 (white-label) — managing the tenant's own branding (logo,
+  // colors, product name, favicon, login-page copy, email sender identity,
+  // custom domain requests, and — if entitled — the full-rebrand toggle).
+  // Ownership territory, the SAME reasoning BILLING_MANAGE/LICENSE_MANAGE
+  // already document for themselves — TENANT_ADMIN only (via
+  // ALL_PERMISSIONS), deliberately NOT copied into HR_MANAGER's list.
+  BRANDING_MANAGE: 'branding.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

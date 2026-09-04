@@ -16,6 +16,7 @@ import {
   LifeBuoy,
   Megaphone,
   Network,
+  Paintbrush,
   Receipt,
   Settings,
   Target,
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
+import { useBranding } from '../../lib/branding/BrandingProvider';
 import { PERMISSIONS } from '@hrm/shared';
 
 interface NavItem {
@@ -38,6 +40,7 @@ interface NavItem {
 export function Sidebar() {
   const { t } = useI18n();
   const { can } = useAuth();
+  const { branding, logoUrl } = useBranding();
   const pathname = usePathname();
 
   const essItems: NavItem[] = [
@@ -103,12 +106,25 @@ export function Sidebar() {
   if (can(PERMISSIONS.BILLING_MANAGE)) {
     adminItems.push({ href: '/billing', label: t('nav.billing'), icon: CreditCard });
   }
+  // White-label / branding (step 4.3) — see docs/conventions/white-label.md.
+  if (can(PERMISSIONS.BRANDING_MANAGE)) {
+    adminItems.push({ href: '/branding', label: t('nav.branding'), icon: Paintbrush });
+  }
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col border-e border-ink-100 bg-white">
       <div className="flex h-16 items-center gap-2 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">H</div>
-        <span className="text-base font-semibold text-ink-900">{t('app.name')}</span>
+        {logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a tenant-branded logo is an arbitrary uploaded image, not a build-time static asset next/image can optimize.
+          <img src={logoUrl} alt={branding.productName} className="h-8 w-8 rounded-lg object-contain" data-testid="branding-logo" />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+            {branding.productName.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <span className="text-base font-semibold text-ink-900" data-testid="branding-product-name">
+          {branding.productName}
+        </span>
       </div>
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4 scrollbar-thin">
         <NavGroup items={essItems} pathname={pathname} />

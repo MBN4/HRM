@@ -2428,3 +2428,133 @@ console, billing, white-label).
     by this step — no new Playwright coverage was written for the two
     new `/billing` pages in this pass (the task's own test list was
     backend-e2e-focused), a natural, documented follow-up.
+- **4.3 — White-label / branding, Phase 4's final slice — done.** Lighter
+  than 4.1/4.2 by design, per its own brief — mostly a tenant-configurable
+  theming layer CONSUMING systems that already exist (tenant resolution,
+  feature flags, notifications, audit, RLS), not a new subsystem. See
+  [`docs/conventions/white-label.md`](./conventions/white-label.md) for
+  the full write-up; summarized here.
+  - **Per-tenant branding model** (`TenantBranding`, ordinary tenant-scoped
+    RLS) — logo/favicon (via 1.1's `StorageService`, unmodified), colors,
+    product name, login-page copy, email sender identity, and the gated
+    full-rebrand bit. Absence means default (`DEFAULT_PRODUCT_NAME =
+'HRM'`), the same posture `NotificationPreference` already takes for
+    itself. Resolved through ONE service (`BrandingResolutionService`) —
+    a genuine hot-path read (every page load, every outbound email, the
+    pre-login screen) — cached in Redis (`REDIS_CLIENT`, 60s TTL,
+    explicitly invalidated on every write), the same token
+    `IdempotencyService`/`RateLimiterService` already use for
+    cross-instance state, not a new caching subsystem.
+  - **Theme tokens across portal, mobile, and email.** `GET /branding`
+    (`@AllowAnonymous()`) + streamed logo/favicon downloads make the
+    PRE-LOGIN screen brandable, since tenant resolution runs before auth.
+    **A real bug this step's OWN Playwright suite caught and fixed**:
+    `apps/portal`'s (and `apps/mobile`'s) `BrandingProvider` must
+    RE-FETCH whenever the auth context's `user` changes, not just once on
+    mount — this suite runs the HEADER tenant-resolution strategy (no
+    stored slug at all until login), so the very first pre-login fetch
+    legitimately 401s into plain defaults, and a fresh login showed the
+    tenant's DEFAULT name instead of its branded one until this fix
+    (`AuthContext.login()` stores the slug BEFORE updating `user`, so
+    re-running the fetch on that transition is what closes the gap).
+    Outbound email: `NotificationTemplateRenderer.render` now merges
+    `{{productName}}` into every template's interpolation vars (reusing
+    the EXISTING `interpolateTemplate`) — the two password-reset
+    templates were updated from a hardcoded "HRM" to prove it for real;
+    `NotificationDeliveryService` also resolves a branded
+    `fromName`/`fromAddress` for the EMAIL channel.
+  - **Branded custom domains extend the EXISTING 0.3 resolution
+    strategy**, not a new one — `TenantDomain` gained
+    `verificationStatus`/`certStatus` columns (still RLS-EXEMPT,
+    necessarily) and `TenantResolutionService.resolveByCustomDomain` now
+    requires `VERIFIED` before a domain resolves real traffic (proven:
+    a freshly-requested domain 401s until approved). The write path goes
+    through the OWNER `prisma` client, not `tx` — the same "RLS can't
+    help on an RLS-exempt table" pattern `PlatformTenantService`/
+    `StripeWebhookService` already use for `Tenant.status`, extended here
+    to a genuinely new shape: an ordinary TENANT-authenticated route
+    partially writing through the owner client. DNS TXT ownership
+    verification (`DomainVerificationService`, Node's built-in
+    `dns/promises`, no extra dependency) is the real production path; a
+    loudly-audited manual `approve` override exists alongside it for the
+    same reason 4.1's impersonation/4.2's `MockStripeClient` document a
+    mock/manual fallback where a real external dependency (live DNS
+    resolution to a fixture domain, here) can't be fully exercised in
+    this sandboxed environment. TLS provisioning is a real, designed
+    `CERT_PROVIDER` seam — `MockCertProvider` (default, issues
+    immediately) vs. a documented-but-`NotImplementedException` real
+    `AcmeCertProvider` (real ACME issuance genuinely can't be exercised
+    here — no publicly resolvable domain or reachable challenge
+    responder exists in this environment, unlike Stripe).
+  - **Full rebrand is a SOLD, ENTERPRISE-only capability**
+    (`FEATURE_FLAGS.FULL_REBRAND` in `EDITION_FEATURES`), gated behind the
+    EXISTING `@RequireFeature`/`FeatureFlagGuard` (0.6) with zero bespoke
+    entitlement logic — works identically for SaaS (`Subscription`) and
+    lifetime (`License.enabledFlags`) tenants for free. Cosmetic branding
+    (logo/colors/product name/domain) is available to EVERY tenant
+    regardless of this flag — it only gates the "Powered by" vendor-
+    identity footer (portal + mobile). The stored `fullRebrandEnabled`
+    bit is intent only; `showPoweredBy` re-derives from the LIVE
+    entitlement on every read (uncached, deliberately) — proven directly
+    by downgrading an entitled tenant's subscription and confirming the
+    footer reappears immediately, with zero change to the stored bit.
+  - **Vendor oversight** (`apps/admin`'s new `/branding` + a per-tenant
+    branding card) — `BRANDING_READ` (both platform roles) /
+    `BRANDING_MANAGE` (PLATFORM_OWNER only), the SAME split
+    `BILLING_READ`/`BILLING_MANAGE` already established in 4.2. Every
+    mutation (verify/approve/provision-tls/reset) is dual-audited exactly
+    like 4.1/4.2's own platform-triggered tenant actions — the target
+    tenant's own `audit_log` AND the platform's `PlatformAuditLog`, never
+    silent, proven by reading the tenant's own audit trail after a
+    vendor-console action in the Playwright suite.
+  - **Surfaces**: `apps/portal`'s new `/branding` (RBAC-gated
+    `branding.manage`, TENANT_ADMIN only — ownership territory, same
+    reasoning `billing.manage`/`license.manage` already document) — logo/
+    favicon upload, colors, product name, login copy, email identity, a
+    custom-domain request-with-DNS-instructions flow, and the
+    entitlement-aware rebrand toggle. `apps/mobile` consumes the same
+    resolved branding (product name/colors/login copy/"Powered by") via
+    its own mirrored `BrandingProvider`, deliberately NOT fetching the
+    logo/favicon image itself (a documented gap, not an oversight).
+  - Verified end-to-end over real HTTP by
+    `apps/api/test/white-label.e2e-spec.ts` (21 tests: public defaults,
+    RBAC deny-by-default on every mutation, an immediate-reflect update,
+    cross-tenant isolation, a byte-for-byte logo upload→download round
+    trip, a branded product name actually appearing in a real outbound
+    password-reset email's subject, full-rebrand deny/allow/LIVE-
+    re-check-on-downgrade, a custom domain unresolvable-until-verified
+    then genuinely resolving the right tenant, a second tenant blocked
+    from claiming an already-requested domain, PLATFORM_SUPPORT denied
+    every MANAGE action, TLS refused-before-verified then succeeding,
+    the target tenant's own audit log showing a platform action, and a
+    full platform-triggered reset). `apps/api`'s full suite: **468 tests
+    green** (447 existing + 21 new), zero regressions. `apps/portal`'s
+    Playwright suite grew to **82 tests** (76 existing + 6 new — an
+    admin's real-UI branding update reflected with NO reload via the
+    shared provider's `refresh()`, a reload re-resolving from the server,
+    cross-tenant isolation, branding correctly coexisting with `dir=
+"rtl"` for a QA-branch employee, RBAC deny, and the "Powered by" footer
+    visible by default); one pre-existing, unrelated
+    `operations-modules.spec.ts` test flaked once under full-suite load
+    and passed cleanly in isolation — the same class of test-parallelism
+    flakiness this log already documents elsewhere, nothing to do with
+    branding. `apps/admin`'s Playwright suite grew to **14 tests** (10
+    existing + 4 new — the overview listing a pending domain,
+    PLATFORM_SUPPORT seeing-but-not-acting, an owner approving +
+    provisioning TLS with a real audit-trail proof, and a full reset).
+    `apps/mobile` re-verified unchanged at **19/19** (`tsc`/`eslint`/
+    `expo export` also re-confirmed clean — no simulator available in
+    this environment for visual verification, the same documented limit
+    1.4 already established). Full-repo `pnpm build`/`pnpm lint` green
+    across all 8 workspace tasks.
+
+**PHASE 4 COMPLETE.** Vendor super-admin console (4.1) + SaaS billing via
+Stripe (4.2) + white-label/branding (4.3) — the platform is now a
+commercially operable SaaS AND on-prem product: a vendor can provision/
+suspend/bill tenants and author country packs from `apps/admin`; a SaaS
+tenant subscribes, upgrades, and pays through real Stripe-driven
+entitlement; and any tenant — SaaS or lifetime — can present the product
+under its own name, colors, domain, and (if entitled) fully white-labeled
+identity. Phase 5 (scale hardening — PgBouncer/read replicas, the
+`audit_log`/`attendance_records` partitioning already flagged since 0.2/
+0.9/1.3, horizontal scaling) and Phase 6 (scope not yet defined) remain.

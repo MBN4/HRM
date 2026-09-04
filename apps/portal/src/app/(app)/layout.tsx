@@ -7,6 +7,7 @@ import { SessionProvider, useSession } from '../../lib/session/SessionProvider';
 import { I18nProvider } from '../../i18n/I18nProvider';
 import { Sidebar } from '../../components/layout/Sidebar';
 import { Topbar } from '../../components/layout/Topbar';
+import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
 import { PageSpinner } from '../../components/ui/Spinner';
 
 /**
@@ -34,6 +35,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex min-w-0 flex-1 flex-col">
               <Topbar />
               <main className="flex-1 overflow-y-auto p-6">{children}</main>
+              <PoweredByFooter className="border-t border-ink-100 px-6 py-3 text-ink-400" />
             </div>
           </div>
         </ResolvedI18n>

@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, ShieldAlert, UserCog } from 'lucide-react';
+import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, Paintbrush, ShieldAlert, UserCog } from 'lucide-react';
 import { usePlatformAuth } from '../../lib/auth/PlatformAuthContext';
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, ownerOnly: false },
   { href: '/tenants', label: 'Tenants', icon: Building2, ownerOnly: false },
   { href: '/billing', label: 'Billing', icon: CreditCard, ownerOnly: false },
+  { href: '/branding', label: 'Branding', icon: Paintbrush, ownerOnly: false },
   { href: '/country-packs', label: 'Country packs', icon: Globe2, ownerOnly: false },
   { href: '/impersonation', label: 'Impersonation', icon: ShieldAlert, ownerOnly: false },
   { href: '/audit', label: 'Audit trail', icon: FileClock, ownerOnly: false },

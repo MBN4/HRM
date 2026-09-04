@@ -8,6 +8,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BillingModule } from './billing/billing.module';
+import { BrandingModule } from './branding/branding.module';
 import { I18nModule } from './common/i18n/i18n.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { HashingModule } from './common/hashing/hashing.module';
@@ -93,6 +94,12 @@ import { WorkflowModule } from './workflow/workflow.module';
     // imports this module for BillingService — see billing.module.ts).
     // See docs/conventions/billing.md.
     BillingModule,
+    // Step 4.3 (Phase 4's final slice) — per-tenant white-label branding
+    // (logo, palette, product name, favicon, login copy, email sender
+    // identity, branded custom domains + a TLS-provisioning seam) and the
+    // gated full-rebrand capability for lifetime/on-prem tenants. See
+    // docs/conventions/white-label.md.
+    BrandingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -20,6 +20,9 @@ export class LogEmailProvider implements NotificationProvider {
   private readonly logger = new Logger('EmailProvider(dev)');
 
   async send(params: NotificationProviderSendParams): Promise<void> {
-    this.logger.log(`[DEV EMAIL] to=${params.to} locale=${params.locale} subject="${params.subject ?? ''}" body="${params.body}"`);
+    const from = params.fromName ? `${params.fromName}${params.fromAddress ? ` <${params.fromAddress}>` : ''}` : undefined;
+    this.logger.log(
+      `[DEV EMAIL] from="${from ?? '(default)'}" to=${params.to} locale=${params.locale} subject="${params.subject ?? ''}" body="${params.body}"`,
+    );
   }
 }

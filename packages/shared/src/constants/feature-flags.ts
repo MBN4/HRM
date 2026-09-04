@@ -27,6 +27,14 @@ export const FEATURE_FLAGS = {
   // (already existed since 0.6, ENTERPRISE-only) is what step 3.3's SSO
   // work gates behind — no new flag needed there.
   WEBHOOKS: 'webhooks',
+  // Step 4.3 (white-label) — the DEEPER lifetime/on-prem rebrand capability
+  // (hide the "Powered by" vendor footer everywhere it appears — see
+  // docs/conventions/white-label.md). Cosmetic branding itself (logo,
+  // colors, product name shown in the chrome, favicon, login-page copy,
+  // email sender identity, custom domain) is available to EVERY tenant
+  // regardless of this flag — this only gates removing the vendor's own
+  // identity, a sold capability, not a default.
+  FULL_REBRAND: 'full_rebrand',
 } as const;
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[keyof typeof FEATURE_FLAGS];
@@ -60,5 +68,6 @@ export const EDITION_FEATURES: Record<TenantEditionKey, readonly FeatureFlagKey[
     FEATURE_FLAGS.MULTI_COUNTRY_PAYROLL,
     FEATURE_FLAGS.CUSTOM_WORKFLOWS,
     FEATURE_FLAGS.AUDIT_LOG_EXPORT,
+    FEATURE_FLAGS.FULL_REBRAND,
   ],
 };

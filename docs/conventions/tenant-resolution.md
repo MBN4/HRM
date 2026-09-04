@@ -16,7 +16,10 @@ for the full file list and verification notes. Builds directly on
      strategy rather than guessing.
   2. **custom_domain** — exact `Host` header match against
      `TenantDomain.domain` (see [tenancy-rls.md](./tenancy-rls.md) →
-     `TenantDomain`).
+     `TenantDomain`), AND (since step 4.3 — see
+     [white-label.md](./white-label.md)) `verificationStatus ===
+'VERIFIED'` — a freshly-requested, not-yet-ownership-proven domain
+     never matches here.
   3. **header** — `TENANT_HEADER_NAME` (default `x-tenant-id`) carrying
      either the tenant's UUID `id` or its `slug`, for mobile/API clients
      with no per-tenant hostname.

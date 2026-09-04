@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { useI18n } from '../i18n/I18nContext';
 import { useAuth } from '../lib/auth/AuthContext';
+import { useBranding } from '../theme/BrandingContext';
 import { apiChangePassword } from '../lib/api/auth';
 import { ApiError } from '../lib/api/client';
 import { Screen } from '../components/ui/Screen';
@@ -14,6 +15,7 @@ import { colors, spacing, typography } from '../theme/tokens';
 export function SettingsScreen() {
   const { t, locale, setLocale } = useI18n();
   const { logout, logoutAll } = useAuth();
+  const { branding, ready: brandingReady } = useBranding();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -70,6 +72,8 @@ export function SettingsScreen() {
           <Button title={t('settings.signOutAll')} variant="danger" onPress={() => void logoutAll()} />
         </CardBody>
       </Card>
+
+      {brandingReady && branding.showPoweredBy && <Text style={styles.poweredBy}>{t('branding.poweredBy')}</Text>}
     </Screen>
   );
 }
@@ -78,4 +82,5 @@ const styles = StyleSheet.create({
   title: { ...typography.title, color: colors.ink[900] },
   languageRow: { flexDirection: 'row', gap: spacing.sm },
   form: { gap: spacing.md },
+  poweredBy: { ...typography.small, color: colors.ink[400], textAlign: 'center', marginTop: spacing.md },
 });

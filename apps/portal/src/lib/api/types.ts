@@ -1104,3 +1104,39 @@ export interface PlatformSubscriptionSummary {
   currentPeriodEnd: string | null;
   cancelAtPeriodEnd: boolean;
 }
+
+// Step 4.3 — white-label / branding. See docs/conventions/white-label.md.
+export interface PublicBranding {
+  productName: string;
+  hasLogo: boolean;
+  hasFavicon: boolean;
+  primaryColor: string | null;
+  secondaryColor: string | null;
+  accentColor: string | null;
+  loginHeadline: string | null;
+  loginSubtext: string | null;
+  /** LIVE entitlement-derived — false only when full-rebrand is BOTH enabled AND currently entitled. Never trust a stale copy of this. */
+  showPoweredBy: boolean;
+}
+
+export interface BrandingDomain {
+  id: string;
+  domain: string;
+  verificationStatus: 'PENDING_VERIFICATION' | 'VERIFIED' | 'FAILED';
+  certStatus: 'NONE' | 'PENDING' | 'ISSUED' | 'FAILED';
+  certProvisionedAt: string | null;
+  certExpiresAt: string | null;
+  createdAt: string;
+  /** Only present on the response to a fresh `POST /branding/domain` — instructs the admin what DNS TXT record to publish. */
+  dnsRecordName?: string;
+  dnsRecordValue?: string;
+}
+
+export interface BrandingSettings extends PublicBranding {
+  emailFromName: string | null;
+  emailFromAddress: string | null;
+  fullRebrandEnabled: boolean;
+  /** Whether FEATURE_FLAGS.FULL_REBRAND is currently entitled — the toggle in the UI should be disabled with an upsell notice when false. */
+  fullRebrandEntitled: boolean;
+  domain: BrandingDomain | null;
+}

@@ -18,6 +18,10 @@ export interface NotificationProviderSendParams {
   body: string;
   /** BCP-47 language tag the body was rendered in, for providers that want it (e.g. an ESP's own locale metadata). */
   locale: string;
+  /** Step 4.3 (white-label) — the resolved tenant's branded sender identity for EMAIL, resolved via BrandingResolutionService. Undefined for every other channel. */
+  fromName?: string;
+  /** Step 4.3 — the resolved tenant's branded sender address for EMAIL, when it has set one. Undefined otherwise (a real ESP integration falls back to its own configured default address — see white-label.md's documented gap on sender-domain verification). */
+  fromAddress?: string;
 }
 
 export interface NotificationProvider {

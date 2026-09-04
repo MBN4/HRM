@@ -35,6 +35,9 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'nav.settings': 'Settings',
     'nav.signOut': 'Sign out',
 
+    // White-label / branding (step 4.3) — see docs/conventions/white-label.md.
+    'branding.poweredBy': 'Powered by HRM',
+
     'action.save': 'Save',
     'action.cancel': 'Cancel',
 
@@ -232,6 +235,8 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'nav.announcements': 'الإعلانات',
     'nav.settings': 'الإعدادات',
     'nav.signOut': 'تسجيل الخروج',
+
+    'branding.poweredBy': 'مدعوم بواسطة HRM',
 
     'action.save': 'حفظ',
     'action.cancel': 'إلغاء',

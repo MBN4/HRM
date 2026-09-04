@@ -36,6 +36,10 @@ export const PLATFORM_PERMISSIONS = {
   BILLING_READ: 'platform.billing.read',
   /** Step 4.2 — trigger an AMC invoice, force-resync a tenant's Stripe state, or otherwise mutate billing on a tenant's behalf. A real-money control point, deliberately OWNER-only, the same "most tightly held" posture TENANT_DELETE/ADMIN_MANAGE already document. */
   BILLING_MANAGE: 'platform.billing.manage',
+  /** Step 4.3 — read any tenant's branding/custom-domain/rebrand state and the cross-tenant branding overview. Support-safe (read-only), the same "READ is broad, MANAGE is narrow" split BILLING_READ/BILLING_MANAGE already establish. */
+  BRANDING_READ: 'platform.branding.read',
+  /** Step 4.3 — verify/approve a tenant's custom domain, provision TLS for it, or force-reset a tenant's branding to defaults. OWNER-only, same posture as BILLING_MANAGE. */
+  BRANDING_MANAGE: 'platform.branding.manage',
 } as const;
 
 export type PlatformPermissionKey = (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];
@@ -60,5 +64,6 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleNameKey, readonly Pla
     PLATFORM_PERMISSIONS.AUDIT_READ,
     PLATFORM_PERMISSIONS.IMPERSONATION_START,
     PLATFORM_PERMISSIONS.BILLING_READ,
+    PLATFORM_PERMISSIONS.BRANDING_READ,
   ],
 };

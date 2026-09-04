@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
-import { NotificationChannel, NotificationProvider } from '@hrm/shared';
+import { DEFAULT_EMAIL_FROM_NAME, NotificationChannel, NotificationProvider } from '@hrm/shared';
+import { BrandingResolutionService } from '../branding/branding-resolution.service';
 import { EncryptionService } from '../common/encryption/encryption.service';
 import { CircuitBreakerService } from '../resilience/circuit-breaker/circuit-breaker.service';
 import { NotificationLocaleResolverService } from './notification-locale-resolver.service';
@@ -52,6 +53,7 @@ export class NotificationDeliveryService {
   constructor(
     private readonly localeResolver: NotificationLocaleResolverService,
     private readonly renderer: NotificationTemplateRenderer,
+    private readonly branding: BrandingResolutionService,
     private readonly circuitBreaker: CircuitBreakerService,
     private readonly encryption: EncryptionService,
     @Inject(EMAIL_PROVIDER) private readonly emailProvider: NotificationProvider,
@@ -117,7 +119,7 @@ export class NotificationDeliveryService {
   ): Promise<RenderedNotification> {
     return withTenantContext(tenantId, async (tx: Prisma.TransactionClient) => {
       const locale = await this.localeResolver.resolveRecipientLocale(tx, tenantId, recipientUserId);
-      const rendered = await this.renderer.render(tx, eventType, channel, locale.language, payload);
+      const rendered = await this.renderer.render(tx, tenantId, eventType, channel, locale.language, payload);
 
       if (channel !== 'IN_APP') {
         const recipient = await tx.user.findUniqueOrThrow({
@@ -143,6 +145,18 @@ export class NotificationDeliveryService {
               : channel === 'SLACK'
                 ? await this.resolveSlackWebhookUrl(tx, tenantId)
                 : recipient.id;
+        // Step 4.3 (white-label) — a branded sender identity is only
+        // meaningful for EMAIL (SMS/PUSH/SLACK have no analogous "from"
+        // concept). Reuses the SAME cached resolution `render()` above
+        // already paid for — a second call within the same request/job is
+        // a Redis cache hit, not a second DB round-trip.
+        const fromIdentity =
+          channel === 'EMAIL'
+            ? await this.branding.resolve(tx, tenantId).then((effective) => ({
+                fromName: effective.emailFromName ?? DEFAULT_EMAIL_FROM_NAME,
+                fromAddress: effective.emailFromAddress ?? undefined,
+              }))
+            : {};
         const provider = this.providerFor(channel);
         await this.circuitBreaker.execute(`notification-provider:${channel}`, () =>
           provider.send({
@@ -151,6 +165,7 @@ export class NotificationDeliveryService {
             subject: rendered.subject,
             body: rendered.body,
             locale: locale.language,
+            ...fromIdentity,
           }),
         );
       }

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { BrandingModule } from '../branding/branding.module';
 import { NOTIFICATIONS_QUEUE } from '../queue/queue.constants';
 import { NotificationDeliveryService } from './notification-delivery.service';
 import { NotificationLocaleResolverService } from './notification-locale-resolver.service';
@@ -36,6 +37,12 @@ import { SlackNotificationProvider } from './providers/slack.provider';
       name: NOTIFICATIONS_QUEUE,
       defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 1000 } },
     }),
+    // Step 4.3 — NotificationTemplateRenderer/NotificationDeliveryService
+    // resolve the tenant's branded product name (every template) and
+    // email sender identity (EMAIL channel only) via
+    // BrandingResolutionService. BrandingModule doesn't import this
+    // module back, so this is not circular.
+    BrandingModule,
   ],
   controllers: [NotificationsController],
   providers: [

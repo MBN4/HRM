@@ -100,6 +100,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/integrations.md`](./docs/conventions/integrations.md)                       | Outbound webhooks (signed, breaker-wrapped, queued), the versioned `/v1` public API + API keys + per-key rate limits + OpenAPI, the adapter-seam catalog (accounting/Slack/biometric/bank-export), and SSO (OIDC real, SAML seam) + ENTERPRISE gating. (3.3)                                                   |
 | [`docs/conventions/vendor-console.md`](./docs/conventions/vendor-console.md)                   | The vendor super-admin console: platform identity/roles (separate from tenant `User`), mandatory MFA, the cross-tenant owner-`prisma` access pattern, tenant lifecycle (incl. `TENANT_STATUS` now enforced), Country Pack authoring/versioning, usage metrics, and impersonation + its audit guarantees. (4.1) |
 | [`docs/conventions/billing.md`](./docs/conventions/billing.md)                                 | SaaS-only billing via Stripe: real Subscription-state production (replacing the 0.6 stub), seat metering, the Stripe adapter seam (real vs. mock), signed/idempotent inbound webhooks, proration preview vs. the authoritative charge, AMC invoicing, and non-payment → suspension. (4.2)                      |
+| [`docs/conventions/white-label.md`](./docs/conventions/white-label.md)                         | Per-tenant branding model + hot-path caching, theme tokens across portal/mobile/email, the branded-custom-domain + TLS-provisioning seam extending 0.3's resolution, the gated full-rebrand capability (live-re-checked), and vendor oversight + dual audit. (4.3)                                             |
 
 ## 5. Build log summary
 
@@ -392,6 +393,30 @@ additive configuration or a new DI binding, never a fork of this codebase.
   vendor-console `/billing` + per-tenant billing card surfaces. See
   [`docs/conventions/billing.md`](./docs/conventions/billing.md).
 
+- **4.3** — White-label / branding (Phase 4's final slice, lighter than
+  4.1/4.2 by design — mostly a theming layer CONSUMING systems that
+  already exist): a `TenantBranding` row (logo/colors/product name/login
+  copy/email identity/gated full-rebrand bit) resolved through one
+  hot-path-cached service (Redis, the same `REDIS_CLIENT` token
+  idempotency/rate-limiting already use) and applied across `apps/portal`,
+  `apps/mobile`, and outbound email (`{{productName}}` now interpolates
+  into notification templates). A real bug this step's OWN Playwright
+  suite caught and fixed: both web/mobile `BrandingProvider`s must
+  re-fetch when the auth context's `user` changes, not just once on
+  mount, or a fresh login under header-based tenant resolution shows
+  stale default branding forever. Branded custom domains extend 0.3's
+  EXISTING `custom_domain` resolution strategy (now gated on a real
+  `verificationStatus === 'VERIFIED'` check, DNS-TXT-proven) plus a
+  `CERT_PROVIDER` TLS-provisioning seam (mock bound by default; a real
+  ACME client is a documented, `NotImplementedException` seam — genuinely
+  can't be exercised in this environment). Full rebrand (hiding the
+  "Powered by" identity) is ENTERPRISE-gated via the EXISTING 0.6
+  `@RequireFeature` mechanism, re-checked LIVE on every read so a lapsed
+  entitlement restores vendor identity immediately. Vendor oversight
+  (`apps/admin`'s new `/branding`) mirrors 4.2's READ-both-roles/
+  MANAGE-owner-only split, every action dual-audited exactly like 4.1/4.2.
+  See [`docs/conventions/white-label.md`](./docs/conventions/white-label.md).
+
 - [x] **4.1** Vendor super-admin console — platform admin identity/MFA
       (separate from tenant `User`), least-privilege platform roles,
       tenant lifecycle (`TENANT_STATUS` now enforced), Country Pack
@@ -406,9 +431,20 @@ additive configuration or a new DI binding, never a fork of this codebase.
       the authoritative charge, AMC invoicing for lifetime tenants, and
       tenant-portal + vendor-console billing surfaces. See
       [`docs/conventions/billing.md`](./docs/conventions/billing.md).
-- [ ] **Phase 4 remaining** — **4.3** white-labeling (per-tenant
-      branding/theming on top of the multi-tenant core, in the spirit of
-      CLAUDE.md § 2's "customizable without forking").
+- [x] **4.3** White-label / branding — per-tenant `TenantBranding` (logo,
+      colors, product name, login copy, email identity), hot-path Redis-
+      cached resolution applied across `apps/portal`/`apps/mobile`/
+      outbound email, branded custom domains extending 0.3's resolution
+      (DNS-verified) + a TLS-provisioning seam, the gated (ENTERPRISE-
+      only, live-re-checked) full-rebrand capability, and vendor oversight
+      (`apps/admin`) with dual audit. See
+      [`docs/conventions/white-label.md`](./docs/conventions/white-label.md).
+
+**PHASE 4 COMPLETE.** Vendor super-admin console (4.1) + SaaS billing via
+Stripe (4.2) + white-label/branding (4.3) — the platform is now a
+commercially operable SaaS AND on-prem product built entirely on top of
+Phase 0–3's foundation.
+
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see
       [`docs/conventions/audit-custom-fields.md`](./docs/conventions/audit-custom-fields.md)

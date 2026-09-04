@@ -29,14 +29,14 @@ const TEMPLATES: TemplateSeed[] = [
     eventType: 'auth.password_reset_requested',
     channel: 'EMAIL',
     locale: 'en',
-    subject: 'Reset your HRM password',
+    subject: 'Reset your {{productName}} password',
     body: 'Hello, a password reset was requested for your account. Use this code to continue: {{token}}. If you did not request this, you can ignore this email.',
   },
   {
     eventType: 'auth.password_reset_requested',
     channel: 'EMAIL',
     locale: 'ar',
-    subject: 'إعادة تعيين كلمة مرور HRM',
+    subject: 'إعادة تعيين كلمة مرور {{productName}}',
     body: 'مرحبًا، تم طلب إعادة تعيين كلمة المرور لحسابك. استخدم هذا الرمز للمتابعة: {{token}}. إذا لم تطلب ذلك، يمكنك تجاهل هذه الرسالة.',
   },
   {

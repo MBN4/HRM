@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
 import { interpolateTemplate, NotificationChannel } from '@hrm/shared';
+import { BrandingResolutionService } from '../branding/branding-resolution.service';
 
 const FALLBACK_LOCALE = 'en';
 
@@ -21,20 +22,33 @@ export interface RenderedNotification {
  * notification; inside the worker this surfaces as a job failure, which
  * is the correct outcome — a missing template is an ops/content gap that
  * should be visible (via retries -> dead-letter), not swallowed.
+ *
+ * Step 4.3 (white-label) — every render also merges in `{{productName}}`,
+ * resolved via `BrandingResolutionService` (cached, hot-path-cheap), so
+ * ANY template — today just the password-reset EMAIL/IN_APP templates,
+ * see seed-notification-templates.ts — can reference the tenant's branded
+ * product name instead of a hardcoded "HRM". An explicit `productName` key
+ * already present in the triggering event's own payload wins (unlikely in
+ * practice, but the merge order makes the precedence explicit).
  */
 @Injectable()
 export class NotificationTemplateRenderer {
+  constructor(private readonly branding: BrandingResolutionService) {}
+
   async render(
     tx: Prisma.TransactionClient,
+    tenantId: string,
     eventType: string,
     channel: NotificationChannel,
     locale: string,
     payload: Record<string, unknown>,
   ): Promise<RenderedNotification> {
     const template = await this.findTemplate(tx, eventType, channel, locale);
+    const effectiveBranding = await this.branding.resolve(tx, tenantId);
+    const vars = { productName: effectiveBranding.productName, ...payload };
     return {
-      subject: template.subject ? interpolateTemplate(template.subject, payload) : undefined,
-      body: interpolateTemplate(template.body, payload),
+      subject: template.subject ? interpolateTemplate(template.subject, vars) : undefined,
+      body: interpolateTemplate(template.body, vars),
     };
   }
 

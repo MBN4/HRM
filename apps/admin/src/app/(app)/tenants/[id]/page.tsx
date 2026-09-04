@@ -9,6 +9,7 @@ import { deleteTenant, getTenant, listTenantUsers, resumeTenant, suspendTenant, 
 import { getTenantUsage } from '../../../../lib/api/usage';
 import { startImpersonation } from '../../../../lib/api/impersonation';
 import { createAmcInvoice, getTenantBilling, resyncSubscription } from '../../../../lib/api/billing';
+import { approveDomain, getTenantDomain, provisionTls, resetTenantBranding, verifyDomain } from '../../../../lib/api/branding';
 import { apiFetch, ApiError } from '../../../../lib/api/client';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../../components/ui/Card';
 import { PageSpinner, Spinner } from '../../../../components/ui/Spinner';
@@ -26,12 +27,15 @@ export default function TenantDetailPage() {
   const { data: tenant, loading, error, reload } = useAsync(() => getTenant(params.id), [params.id]);
   const { data: usage, reload: reloadUsage } = useAsync(() => getTenantUsage(params.id), [params.id]);
   const { data: billing, reload: reloadBilling } = useAsync(() => getTenantBilling(params.id), [params.id]);
+  const { data: domain, reload: reloadDomain } = useAsync(() => getTenantDomain(params.id), [params.id]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showImpersonate, setShowImpersonate] = useState(false);
   const [showLicense, setShowLicense] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showAmcInvoice, setShowAmcInvoice] = useState(false);
   const [resyncing, setResyncing] = useState(false);
+  const [domainActionPending, setDomainActionPending] = useState<string | null>(null);
+  const [showResetBranding, setShowResetBranding] = useState(false);
 
   // Only the INITIAL load blocks the whole page — a subsequent `reload()`
   // (after suspend/resume/edit/...) must not unmount this page's own
@@ -226,6 +230,105 @@ export default function TenantDetailPage() {
           )}
         </CardBody>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Branding</CardTitle>
+          {canManage && (
+            <Button variant="danger" size="sm" onClick={() => setShowResetBranding(true)}>
+              Reset to defaults
+            </Button>
+          )}
+        </CardHeader>
+        <CardBody className="space-y-4 text-sm">
+          {!domain ? (
+            <p className="text-ink-400">No custom domain requested.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-medium text-ink-800">{domain.domain}</span>
+                <StatusBadge status={domain.verificationStatus} />
+                <StatusBadge status={domain.certStatus} />
+              </div>
+              {canManage && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={domainActionPending === 'verify'}
+                    onClick={async () => {
+                      setDomainActionPending('verify');
+                      setActionError(null);
+                      try {
+                        await verifyDomain(tenant.id, domain.id);
+                        reloadDomain();
+                      } catch (err) {
+                        setActionError(err instanceof ApiError ? err.message : 'Something went wrong.');
+                      } finally {
+                        setDomainActionPending(null);
+                      }
+                    }}
+                  >
+                    Verify (DNS)
+                  </Button>
+                  {domain.verificationStatus !== 'VERIFIED' && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      loading={domainActionPending === 'approve'}
+                      onClick={async () => {
+                        setDomainActionPending('approve');
+                        setActionError(null);
+                        try {
+                          await approveDomain(tenant.id, domain.id);
+                          reloadDomain();
+                        } catch (err) {
+                          setActionError(err instanceof ApiError ? err.message : 'Something went wrong.');
+                        } finally {
+                          setDomainActionPending(null);
+                        }
+                      }}
+                    >
+                      Approve manually
+                    </Button>
+                  )}
+                  {domain.verificationStatus === 'VERIFIED' && domain.certStatus !== 'ISSUED' && (
+                    <Button
+                      size="sm"
+                      loading={domainActionPending === 'tls'}
+                      onClick={async () => {
+                        setDomainActionPending('tls');
+                        setActionError(null);
+                        try {
+                          await provisionTls(tenant.id, domain.id);
+                          reloadDomain();
+                        } catch (err) {
+                          setActionError(err instanceof ApiError ? err.message : 'Something went wrong.');
+                        } finally {
+                          setDomainActionPending(null);
+                        }
+                      }}
+                    >
+                      Provision TLS
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </CardBody>
+      </Card>
+
+      {showResetBranding && (
+        <ResetBrandingModal
+          tenantId={tenant.id}
+          onClose={() => setShowResetBranding(false)}
+          onReset={() => {
+            setShowResetBranding(false);
+            reloadDomain();
+          }}
+        />
+      )}
 
       {canManage && <EditTenantForm tenantId={tenant.id} current={tenant} onSaved={reload} />}
 
@@ -585,6 +688,45 @@ function DeleteTenantModal({
           </Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** A policy-violation/support-requested force-reset — see docs/conventions/white-label.md. Owner-gated on the page above; this modal itself just confirms and calls it. */
+function ResetBrandingModal({ tenantId, onClose, onReset }: { tenantId: string; onClose: () => void; onReset: () => void }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleConfirm() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await resetTenantBranding(tenantId);
+      onReset();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title="Reset branding — irreversible" onClose={onClose}>
+      <div className="space-y-4">
+        <Alert tone="error">
+          This resets the tenant&apos;s logo, colors, product name, login copy, email identity, and full-rebrand toggle back to plain
+          defaults. This cannot be undone.
+        </Alert>
+        {error && <Alert tone="error">{error}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" variant="danger" loading={submitting} onClick={handleConfirm}>
+            Reset branding
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

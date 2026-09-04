@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter, Noto_Kufi_Arabic } from 'next/font/google';
 import { I18nProvider } from '../i18n/I18nProvider';
 import { AuthProvider } from '../lib/auth/AuthContext';
+import { BrandingProvider } from '../lib/branding/BrandingProvider';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
@@ -24,7 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" dir="ltr" className={`${inter.variable} ${notoKufiArabic.variable}`}>
       <body>
         <AuthProvider>
-          <I18nProvider>{children}</I18nProvider>
+          <BrandingProvider>
+            <I18nProvider>{children}</I18nProvider>
+          </BrandingProvider>
         </AuthProvider>
       </body>
     </html>

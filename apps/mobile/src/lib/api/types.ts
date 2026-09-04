@@ -197,3 +197,20 @@ export interface EffectiveCountryPackConfig {
   publicHolidays: Record<string, { date: string; name: string }[]>;
   [key: string]: unknown;
 }
+
+// Step 4.3 (white-label) — see docs/conventions/white-label.md. Mirrors
+// apps/portal's `PublicBranding` shape; the logo/favicon image itself is
+// NOT fetched here (no equivalent of the web's object-URL/blob pattern is
+// worth the native-image-caching complexity for this step — a documented
+// gap, see that doc's own "Known gaps" section).
+export interface PublicBranding {
+  productName: string;
+  hasLogo: boolean;
+  hasFavicon: boolean;
+  primaryColor: string | null;
+  secondaryColor: string | null;
+  accentColor: string | null;
+  loginHeadline: string | null;
+  loginSubtext: string | null;
+  showPoweredBy: boolean;
+}

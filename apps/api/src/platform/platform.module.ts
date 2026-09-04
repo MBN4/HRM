@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PasswordService } from '../auth/password.service';
 import { BillingModule } from '../billing/billing.module';
+import { BrandingModule } from '../branding/branding.module';
 import { PlatformAdminController } from './admins/platform-admin.controller';
 import { PlatformAdminService } from './admins/platform-admin.service';
 import { PlatformAuditController } from './audit/platform-audit.controller';
@@ -13,6 +14,8 @@ import { PlatformAuthService } from './auth/platform-auth.service';
 import { PlatformMfaService } from './auth/platform-mfa.service';
 import { PlatformBillingController } from './billing/platform-billing.controller';
 import { PlatformBillingService } from './billing/platform-billing.service';
+import { PlatformBrandingController } from './branding/platform-branding.controller';
+import { PlatformBrandingService } from './branding/platform-branding.service';
 import { PlatformCountryPackController } from './country-packs/platform-country-pack.controller';
 import { PlatformCountryPackService } from './country-packs/platform-country-pack.service';
 import { PlatformImpersonationController } from './impersonation/platform-impersonation.controller';
@@ -48,7 +51,11 @@ import { PlatformUsageService } from './usage/platform-usage.service';
   // BillingModule (4.2) — reused for BillingService (customer/subscription
   // sync, invoice/payment-method serialization) so PlatformBillingService
   // never re-implements the Stripe-object-to-row mapping.
-  imports: [PlatformAuthContextModule, AuthModule, BillingModule],
+  // BrandingModule (4.3) — reused for BrandingResolutionService (cache
+  // invalidation on a platform-triggered reset)/DomainVerificationService/
+  // CERT_PROVIDER so PlatformBrandingService never re-implements DNS/TLS
+  // provisioning a second time.
+  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule],
   controllers: [
     PlatformAuthController,
     PlatformAdminController,
@@ -58,6 +65,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformImpersonationController,
     PlatformAuditController,
     PlatformBillingController,
+    PlatformBrandingController,
   ],
   providers: [
     PasswordService,
@@ -71,6 +79,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformImpersonationService,
     PlatformAuditQueryService,
     PlatformBillingService,
+    PlatformBrandingService,
   ],
   exports: [PlatformAuditRecordService],
 })

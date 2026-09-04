@@ -192,3 +192,24 @@ export interface TenantBillingSummary {
   invoices: InvoiceSummary[];
   paymentMethods: PaymentMethodSummary[];
 }
+
+// Step 4.3 — white-label / branding oversight. See docs/conventions/white-label.md.
+export interface PlatformBrandingSummary {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  productName: string | null;
+  hasLogo: boolean;
+  fullRebrandEnabled: boolean;
+  domain: { id: string; domain: string; verificationStatus: string; certStatus: string } | null;
+}
+
+export interface BrandingDomain {
+  id: string;
+  domain: string;
+  verificationStatus: 'PENDING_VERIFICATION' | 'VERIFIED' | 'FAILED';
+  certStatus: 'NONE' | 'PENDING' | 'ISSUED' | 'FAILED';
+  certProvisionedAt: string | null;
+  certExpiresAt: string | null;
+  createdAt: string;
+}

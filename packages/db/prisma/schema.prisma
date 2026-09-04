@@ -120,6 +120,7 @@ model Tenant {
   invoices                       Invoice[]
   paymentMethods                 PaymentMethod[]
   billingEvents                  BillingEvent[]
+  branding                       TenantBranding?
   workflowTemplates              WorkflowTemplate[]
   workflowSteps                  WorkflowStep[]
   workflowInstances              WorkflowInstance[]
@@ -213,6 +214,25 @@ model Tenant {
   @@map("tenants")
 }
 
+// Step 4.3 (white-label) — has ownership been proven for a branded custom
+// domain, so it's safe to let it resolve real tenant traffic. See
+// docs/conventions/white-label.md.
+enum DomainVerificationStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  FAILED
+}
+
+// Step 4.3 — TLS provisioning state for a branded custom domain, via the
+// CERT_PROVIDER seam (MockCertProvider today; a real ACME client is a
+// documented seam, not built — see docs/conventions/white-label.md).
+enum DomainCertStatus {
+  NONE
+  PENDING
+  ISSUED
+  FAILED
+}
+
 // Custom-domain -> tenant mapping (e.g. "hr.acme-corp.example" -> the "acme"
 // tenant), one of three tenant-resolution strategies used by
 // apps/api's TenantResolutionService (see /CLAUDE.md § Conventions →
@@ -220,9 +240,15 @@ model Tenant {
 // — like `Tenant` itself — is deliberately EXEMPT from Row-Level Security:
 // resolving a request's tenant from its Host header has to happen before a
 // tenant context exists to filter by. Only `SELECT` is granted to `hrm_app`
-// (see the `add_tenant_domains` migration); managing domain mappings is an
-// admin/platform operation, not a tenant-scoped request, and has no write
-// path yet (lands with the vendor admin console).
+// (see the `add_tenant_domains` migration).
+//
+// Step 4.3 gives this table a real, gated WRITE path (`BrandingDomainService`)
+// — but because it stays RLS-EXEMPT (necessarily, per above), that write
+// path deliberately does NOT run through a tenant-scoped `tx`: it goes
+// through the OWNER `prisma` client, the same "RLS can't help here, the
+// app code itself must scope by tenantId" pattern
+// `PlatformTenantService`/`StripeWebhookService` already use for
+// `Tenant.status` writes. See docs/conventions/white-label.md.
 model TenantDomain {
   id        String   @id @default(uuid()) @db.Uuid
   tenantId  String   @map("tenant_id") @db.Uuid
@@ -230,10 +256,62 @@ model TenantDomain {
   domain    String   @unique
   createdAt DateTime @default(now()) @map("created_at")
 
+  // A domain only participates in TenantResolutionService's custom_domain
+  // strategy once VERIFIED — a freshly-requested (PENDING_VERIFICATION) row
+  // must never resolve real traffic before ownership is proven, or any
+  // tenant admin could hijack another domain's traffic just by requesting
+  // it first.
+  verificationStatus DomainVerificationStatus @default(PENDING_VERIFICATION) @map("verification_status")
+  // Random per-domain token the requester is asked to publish as a DNS TXT
+  // record (`_hrm-verify.<domain>`) — proof of control, checked by
+  // DomainVerificationService.
+  verificationToken  String                    @map("verification_token")
+  certStatus         DomainCertStatus          @default(NONE) @map("cert_status")
+  certProvisionedAt  DateTime?                 @map("cert_provisioned_at")
+  certExpiresAt      DateTime?                 @map("cert_expires_at")
+  requestedByUserId  String?                   @map("requested_by_user_id") @db.Uuid
+
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@map("tenant_domains")
+}
+
+// Step 4.3 (white-label) — per-tenant branding: logo, palette, product
+// name, favicon, login-page copy, email sender identity, and the gated
+// full-rebrand toggle. Ordinary tenant-scoped table (unlike TenantDomain
+// above) — RLS applies normally; see docs/conventions/white-label.md.
+model TenantBranding {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @unique @map("tenant_id") @db.Uuid
+
+  productName      String? @map("product_name")
+  logoStorageKey   String? @map("logo_storage_key")
+  faviconStorageKey String? @map("favicon_storage_key")
+  // Hex colors ("#rrggbb"), applied as CSS custom properties client-side.
+  primaryColor     String? @map("primary_color") @db.VarChar(7)
+  secondaryColor   String? @map("secondary_color") @db.VarChar(7)
+  accentColor      String? @map("accent_color") @db.VarChar(7)
+  loginHeadline    String? @map("login_headline")
+  loginSubtext     String? @map("login_subtext")
+  emailFromName    String? @map("email_from_name")
+  emailFromAddress String? @map("email_from_address")
+  // Lifetime/on-prem-oriented, gated behind FEATURE_FLAGS.FULL_REBRAND
+  // (ENTERPRISE-only in EDITION_FEATURES) at WRITE time via the existing
+  // @RequireFeature()/FeatureFlagGuard — see BrandingController. Even once
+  // set, the "Powered by" footer's visibility is re-derived from the LIVE
+  // entitlement on every read (never trusted from this stored bit alone),
+  // the same "never cache entitlement" posture FeatureFlagGuard documents
+  // for itself — a lapsed subscription/license restores the footer
+  // automatically.
+  fullRebrandEnabled Boolean  @default(false) @map("full_rebrand_enabled")
+  updatedByUserId    String?  @map("updated_by_user_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_brandings")
 }
 
 // A tenant may operate branches in different countries — country resolution

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { useI18n } from '../i18n/I18nContext';
 import { useAuth } from '../lib/auth/AuthContext';
+import { useBranding } from '../theme/BrandingContext';
 import { getStoredTenantSlug } from '../lib/tenant';
 import { ApiError } from '../lib/api/client';
 import { Button } from '../components/ui/Button';
@@ -20,6 +21,7 @@ import { colors, spacing, typography } from '../theme/tokens';
 export function LoginScreen() {
   const { t } = useI18n();
   const { login } = useAuth();
+  const { branding } = useBranding();
   const [workspace, setWorkspace] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,9 +52,9 @@ export function LoginScreen() {
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.appName}>{t('app.name')}</Text>
-          <Text style={styles.title}>{t('auth.login.title')}</Text>
-          <Text style={styles.subtitle}>{t('auth.login.subtitle')}</Text>
+          <Text style={styles.appName}>{branding.productName}</Text>
+          <Text style={styles.title}>{branding.loginHeadline || t('auth.login.title')}</Text>
+          <Text style={styles.subtitle}>{branding.loginSubtext || t('auth.login.subtitle')}</Text>
         </View>
 
         <View style={styles.form}>

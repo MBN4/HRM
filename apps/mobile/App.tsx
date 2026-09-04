@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nProvider, useI18n } from './src/i18n/I18nContext';
 import { useRtlSync } from './src/i18n/useRtlSync';
 import { AuthProvider } from './src/lib/auth/AuthContext';
+import { BrandingProvider } from './src/theme/BrandingContext';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { configureNotificationHandler } from './src/lib/push';
 import './src/navigation/types';
@@ -29,10 +30,12 @@ export default function App() {
       <I18nProvider>
         <RtlGate>
           <AuthProvider>
-            <NavigationContainer>
-              <StatusBar style="dark" />
-              <RootNavigator />
-            </NavigationContainer>
+            <BrandingProvider>
+              <NavigationContainer>
+                <StatusBar style="dark" />
+                <RootNavigator />
+              </NavigationContainer>
+            </BrandingProvider>
           </AuthProvider>
         </RtlGate>
       </I18nProvider>

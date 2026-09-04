@@ -465,4 +465,9 @@ gap, not a silent omission. Real SaaS billing (Stripe) landed in step 4.2
 — see [billing.md](./billing.md) — and is now the real consumer of this
 step's usage metrics/seat-count primitives it was flagged for; the
 vendor console itself gained a cross-tenant `/billing` overview and a
-per-tenant billing card as part of that step. White-labeling is Phase 4.3.
+per-tenant billing card as part of that step. White-labeling landed in
+step 4.3 — see [white-label.md](./white-label.md) — and reuses this
+step's own dual-audit pattern (`AuditRecordService.recordForTenant` +
+`PlatformAuditRecordService`) for its own branding/domain oversight
+actions; the vendor console gained a cross-tenant `/branding` overview
+and a per-tenant branding card as part of that step.
