@@ -55,6 +55,12 @@ export const WEBHOOK_EVENT_TYPES = [
   'lms.course_assigned',
   'lms.certification_expiring',
   'lms.certification_expired',
+  'billing.subscription_activated',
+  'billing.subscription_past_due',
+  'billing.subscription_canceled',
+  'billing.invoice_paid',
+  'billing.invoice_payment_failed',
+  'billing.amc_invoice_created',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -74,4 +80,5 @@ export const WEBHOOK_EVENT_NAMESPACES = [
   'checklist.*',
   'helpdesk.*',
   'lms.*',
+  'billing.*',
 ] as const;

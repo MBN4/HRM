@@ -16,7 +16,13 @@ import { setupSwagger } from './swagger';
 const SHUTDOWN_GRACE_PERIOD_MS = Number(process.env.SHUTDOWN_GRACE_PERIOD_MS ?? 5000);
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `rawBody: true` (step 4.2) — keeps the original request Buffer
+  // alongside Nest's normal parsed `req.body`, needed by
+  // `StripeWebhookController` to verify the `Stripe-Signature` header
+  // against the EXACT bytes Stripe signed (re-serializing the parsed JSON
+  // would not byte-for-byte match, and HMAC verification is byte-exact by
+  // construction) — see docs/conventions/billing.md.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.enableCors();
 
   // Step 3.3 — OpenAPI/Swagger for the versioned public API ONLY, not this

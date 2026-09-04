@@ -2297,3 +2297,134 @@ console, billing, white-label).
     tasks) and `pnpm lint` (8 tasks) both green (packages/db gained
     `@node-rs/argon2` for its new `seedPlatformAdmin` dev-bootstrap
     seed).
+
+- **4.2 — SaaS billing via Stripe, Phase 4's second slice — done.**
+  SaaS-mode ONLY, per its own brief — lifetime/on-prem tenants stay
+  entirely on the 0.6 signed-license path, verified by an e2e assertion
+  that an AMC invoice never changes a tenant's `licenses` row count. See
+  [`docs/conventions/billing.md`](./conventions/billing.md) for the full
+  write-up; summarized here.
+  - **Closes a real, previously-flagged gap.** 0.6's
+    `FeatureFlagResolutionService.resolveSaas` has read `Subscription.status`
+    correctly since it was written (TRIAL/ACTIVE = good standing,
+    PAST_DUE/CANCELED = an empty, blocked flag set) — completely
+    UNCHANGED by this step. What never existed until now was a real
+    PRODUCER of that row outside a seed/test fixture. `StripeWebhookService`
+    (authoritative, webhook-driven) and `BillingService` (optimistic,
+    interactive) are now the sole producers, sharing ONE mapping function
+    (`BillingService.applySubscriptionFromStripe`) so the two paths can
+    never disagree on how a Stripe object maps onto this schema.
+  - **Schema** (`packages/db`): `Subscription` gained
+    `stripeCustomerId`/`stripeSubscriptionId`/`stripePriceId`/`quantity`/
+    `currency`/`cancelAtPeriodEnd`/`trialEndsAt` (all nullable/defaulted —
+    every pre-existing row keeps working unchanged). Three new tables:
+    `Invoice` (Decimal money throughout, `type` SUBSCRIPTION/SETUP_FEE/AMC,
+    `status` mirroring Stripe's own), `PaymentMethod` (display fields
+    only — brand/last4/expiry, never a PAN), `BillingEvent` (the
+    idempotency DB-level backstop, `@@unique([tenantId, stripeEventId])`).
+    Two migrations (`add_billing_module`, `enable_rls_for_billing_module`)
+    — the SAME two-migration pattern (schema, then RLS) every prior step
+    since 3.3 already establishes.
+  - **The Stripe seam** (`apps/api/src/billing/stripe/`) — a
+    `STRIPE_CLIENT` Symbol-token interface naming ONLY the operations
+    this module calls (not a full SDK mirror), the SAME shape
+    `AUTH_PROVIDER`/`PAYROLL_PROVIDER_ADAPTER`/`ACCOUNTING_ADAPTER`
+    already establish. `RealStripeClient` wraps `stripe@17` (pinned —
+    later majors move `current_period_end`/`invoice.subscription` onto
+    line items, a real breaking type change). `MockStripeClient` (bound
+    whenever `STRIPE_SECRET_KEY` is unset, the default) is an in-memory,
+    deterministic fake — its `webhooks.constructEvent` reuses 3.3's
+    EXISTING outbound-webhook HMAC util verbatim, since Stripe's real
+    webhook signature scheme (`t=<ts>,v1=<hmac>`) is identical to the one
+    this codebase already uses for its own outbound webhooks.
+  - **Seat metering reuses THE 0.6 seat-count** — `SeatCapService.check`
+    was refactored to call a new `countActive` method, now shared by
+    seat-cap enforcement, 4.1's usage metrics, AND this step's billing —
+    one definition, never a second one drifting out of sync.
+    `BillingSeatMeteringService` is a NEW daily scheduled BullMQ job (the
+    SAME `onModuleInit` repeatable-job pattern 1.5's `AnalyticsRollupService`
+    established) keeping Stripe's billed quantity in sync between
+    explicit plan changes, deliberately un-prorated (`proration_behavior:
+'none'`) so an employee joining mid-month never triggers a same-day
+    surprise charge.
+  - **Inbound webhooks** — the ONE inbound-webhook endpoint in this
+    system, `POST /billing/webhooks/stripe`, `@Public()` (Stripe can't
+    authenticate as a platform admin and there's no tenant header to
+    resolve; tenant resolution happens INSIDE the service by looking up
+    the event's own Stripe customer id, the same narrow cross-tenant
+    lookup class `ApiKeyAuthService.validate` already establishes).
+    `main.ts` gained `{ rawBody: true }` so signature verification runs
+    against the EXACT bytes Stripe signed. TWO idempotency layers — 0.10's
+    `IdempotencyService` (Redis) plus `BillingEvent`'s own unique
+    constraint as the DB-level backstop, proven directly in the e2e suite
+    by delivering an identical event twice and asserting exactly one
+    `BillingEvent` row and one audit entry, not two. `billing.*` is
+    DELIBERATELY NOT added to `DomainEventAuditListener`'s subscription
+    list (unlike every other namespace) — the webhook service writes its
+    own precise, before/after audit rows directly, the same more-explicit
+    posture 4.1's `PlatformTenantService` already established over
+    `LicensingAdminService`'s older generic-event-only one.
+  - **PAST_DUE gates features; only a fully canceled subscription
+    suspends the tenant** — a deliberate two-tier design: a lapsed card
+    still lets an admin log in and fix payment (0.6's existing
+    resolution already disables gated features); only Stripe's own
+    terminal `customer.subscription.deleted` (after ITS OWN dunning
+    retries) suspends the tenant, the real "non-payment can drive
+    suspension" tie-in to 4.1's `TENANT_STATUS` enforcement. A real bug
+    caught during development: the suspend write must go through the
+    OWNER `prisma` client, not the tenant-scoped `tx` — `hrm_app` only
+    has `SELECT` on `tenants`, so an early draft's `tx.tenant.update(...)`
+    failed with `permission denied` the moment this path was actually
+    exercised by a test.
+  - **Money** — Decimal end to end (`toDecimalFromMinorUnits`, one
+    conversion point, reused by the webhook sync, AMC invoicing, and the
+    setup-fee charge). TWO different numbers, deliberately not conflated:
+    a pure, unit-tested (`proration.util.spec.ts`, 6 tests, zero Stripe/DB
+    dependency — the same "pure function, own spec file" posture
+    `payroll-variables.util.ts` establishes) Decimal proration PREVIEW
+    shown before a tenant confirms a plan change, vs. the AUTHORITATIVE
+    charge Stripe itself computes, recorded only once the `invoice.*`
+    webhook actually arrives. A one-time setup fee (`BILLING_PLANS`
+    reference figures, `@hrm/shared`) fires only on a tenant's FIRST ever
+    subscription, best-effort ONLY around the Stripe API call itself
+    (nothing's touched Postgres yet if that fails) — the subsequent DB
+    write is deliberately allowed to propagate rather than being
+    (falsely) swallowed, since a failed statement aborts every later one
+    in the same Postgres transaction regardless of a caught JS exception.
+  - **AMC invoicing** (`PlatformBillingService.createAmcInvoice`,
+    `platform.billing.manage`-gated, PLATFORM_OWNER only) — the
+    lifetime-tenant bridge: an invoice-only Stripe charge, NO Subscription
+    object involved, dual-audited exactly like 4.1's tenant-lifecycle
+    actions (a real `platformAdminId` threaded through explicitly, unlike
+    the webhook path's `actorPlatform: true` generic fallback).
+  - **Surfaces**: `apps/portal`'s new `/billing` (RBAC-gated
+    `billing.manage`, TENANT_ADMIN only — ownership/money territory,
+    deliberately not in `HR_MANAGER`'s list) — plan/seats/proration
+    preview/payment methods/invoices; payment-method collection is a
+    plain token field (`pm_card_visa`-style), not a full Stripe Elements
+    integration, the same "functional over fancy" posture 4.1's raw-JSON
+    country-pack editor already takes. `apps/admin`'s new `/billing`
+    (cross-tenant overview, cheap indexed read) plus a per-tenant Billing
+    card (resync lever, AMC invoicing) on the existing tenant detail page.
+  - Verified end-to-end over real HTTP by `apps/api/test/billing.e2e-spec.ts`
+    (18 tests: `billing.manage` deny-by-default; live seat metering;
+    upgrade/downgrade proration including a correctly negative downgrade
+    credit; webhook signature rejection; an unmatched Stripe customer
+    acknowledged and platform-audited rather than crashing;
+    `customer.subscription.updated` (active) driving the REAL, unmodified
+    0.6 entitlement pipeline end to end; a REDELIVERED webhook proven not
+    to double-apply via both `BillingEvent` and `audit_log` row counts;
+    PAST_DUE disabling features without suspending; a fully canceled
+    subscription suspending the tenant, dual-audited; a multi-currency
+    `eur` invoice recorded Decimal-correct; vendor-console read/manage
+    RBAC including AMC invoicing never touching `licenses`; cross-tenant
+    isolation for both interactive changes and inbound webhooks) plus
+    `proration.util.spec.ts` (6 pure-function unit tests). `apps/api`'s
+    full suite: **447 tests green** (423 existing + 6 new unit + 18 new
+    e2e), zero regressions. Full-repo `pnpm build`/`pnpm lint` green
+    across all 8 workspace tasks (added the real `stripe` npm package,
+    pinned to v17). `apps/portal`'s existing 76-test and `apps/admin`'s
+    existing 10-test Playwright suites both re-verified green, untouched
+    by this step — no new Playwright coverage was written for the two
+    new `/billing` pages in this pass (the task's own test list was
+    backend-e2e-focused), a natural, documented follow-up.

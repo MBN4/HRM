@@ -99,6 +99,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/lms.md`](./docs/conventions/lms.md)                                         | Learning & Development — courses/content/quizzes as config-as-data, completion gating, certification expiry+renewal, required-training compliance (rollup + bounded drill-down), two scheduled BullMQ jobs. (3.2)                                                                                              |
 | [`docs/conventions/integrations.md`](./docs/conventions/integrations.md)                       | Outbound webhooks (signed, breaker-wrapped, queued), the versioned `/v1` public API + API keys + per-key rate limits + OpenAPI, the adapter-seam catalog (accounting/Slack/biometric/bank-export), and SSO (OIDC real, SAML seam) + ENTERPRISE gating. (3.3)                                                   |
 | [`docs/conventions/vendor-console.md`](./docs/conventions/vendor-console.md)                   | The vendor super-admin console: platform identity/roles (separate from tenant `User`), mandatory MFA, the cross-tenant owner-`prisma` access pattern, tenant lifecycle (incl. `TENANT_STATUS` now enforced), Country Pack authoring/versioning, usage metrics, and impersonation + its audit guarantees. (4.1) |
+| [`docs/conventions/billing.md`](./docs/conventions/billing.md)                                 | SaaS-only billing via Stripe: real Subscription-state production (replacing the 0.6 stub), seat metering, the Stripe adapter seam (real vs. mock), signed/idempotent inbound webhooks, proration preview vs. the authoritative charge, AMC invoicing, and non-payment → suspension. (4.2)                      |
 
 ## 5. Build log summary
 
@@ -365,6 +366,32 @@ additive configuration or a new DI binding, never a fork of this codebase.
   audit sink unmodified throughout — never rebuilt. See
   [`docs/conventions/vendor-console.md`](./docs/conventions/vendor-console.md).
 
+- **4.2** — SaaS billing via Stripe (Phase 4's second slice, SaaS-mode
+  ONLY — lifetime/on-prem tenants are completely unaffected, still
+  license-file based): closes the gap 0.6 flagged at the time —
+  `Subscription` rows drove SaaS entitlement since 0.6, but nothing ever
+  produced a real one outside a seed/test fixture. `StripeWebhookService`/
+  `BillingService` are now the sole real producers, through a
+  Symbol-token `STRIPE_CLIENT` seam (`RealStripeClient`, the actual
+  `stripe` SDK; `MockStripeClient`, an in-memory fake bound whenever
+  `STRIPE_SECRET_KEY` is unset — what lets the full suite run with no
+  live Stripe account). Seat metering reuses 0.6's OWN seat-count
+  (`SeatCapService.countActive`, one definition, no drift) both for
+  interactive plan changes and a new daily scheduled BullMQ sync.
+  Inbound webhooks: raw-body HMAC signature verification, TWO idempotency
+  layers (Redis + a `BillingEvent` DB-level backstop — the exact use case
+  0.10's idempotency primitive was earmarked for), and direct (not
+  generic-listener) audit writes. `PAST_DUE` gates features (0.6's
+  existing resolution, unchanged); only a fully Stripe-canceled
+  subscription suspends the tenant — the real tie-in to 4.1's
+  `TENANT_STATUS` enforcement. Proration: a pure, unit-tested Decimal
+  PREVIEW locally, the AUTHORITATIVE charge always recorded from Stripe's
+  own webhook. AMC (annual maintenance) invoicing is the platform's
+  invoice-only bridge for lifetime tenants, who otherwise never touch
+  Stripe. New tenant-portal `/billing` (RBAC-gated `billing.manage`) and
+  vendor-console `/billing` + per-tenant billing card surfaces. See
+  [`docs/conventions/billing.md`](./docs/conventions/billing.md).
+
 - [x] **4.1** Vendor super-admin console — platform admin identity/MFA
       (separate from tenant `User`), least-privilege platform roles,
       tenant lifecycle (`TENANT_STATUS` now enforced), Country Pack
@@ -372,12 +399,16 @@ additive configuration or a new DI binding, never a fork of this codebase.
       permission-gated/time-boxed/loudly-audited impersonation. `apps/admin`
       built out from its prior placeholder. See
       [`docs/conventions/vendor-console.md`](./docs/conventions/vendor-console.md).
-- [ ] **Phase 4 remaining** — **4.2** real SaaS billing (0.6's
-      `Subscription` model is a stub for this — a real Stripe integration;
-      4.1's usage metrics are its named first consumer) and **4.3**
-      white-labeling (per-tenant branding/theming on top of the
-      multi-tenant core, in the spirit of CLAUDE.md § 2's "customizable
-      without forking").
+- [x] **4.2** SaaS billing via Stripe (SaaS-mode only) — real
+      `Subscription`-state production replacing the 0.6 stub, seat
+      metering, the Stripe adapter seam (real/mock), signed/idempotent
+      inbound webhooks, non-payment → suspension, proration preview vs.
+      the authoritative charge, AMC invoicing for lifetime tenants, and
+      tenant-portal + vendor-console billing surfaces. See
+      [`docs/conventions/billing.md`](./docs/conventions/billing.md).
+- [ ] **Phase 4 remaining** — **4.3** white-labeling (per-tenant
+      branding/theming on top of the multi-tenant core, in the spirit of
+      CLAUDE.md § 2's "customizable without forking").
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see
       [`docs/conventions/audit-custom-fields.md`](./docs/conventions/audit-custom-fields.md)

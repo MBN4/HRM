@@ -36,6 +36,14 @@ export const NOTIFICATION_EVENT_TYPES = [
   'lms.course_assigned',
   'lms.certification_expiring',
   'lms.certification_expired',
+  // Step 4.2 (billing) — emitted by StripeWebhookService/PlatformBillingService,
+  // see docs/conventions/billing.md.
+  'billing.subscription_activated',
+  'billing.subscription_past_due',
+  'billing.subscription_canceled',
+  'billing.invoice_paid',
+  'billing.invoice_payment_failed',
+  'billing.amc_invoice_created',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -61,4 +69,10 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'lms.course_assigned': ['IN_APP', 'EMAIL'],
   'lms.certification_expiring': ['IN_APP', 'EMAIL'],
   'lms.certification_expired': ['IN_APP', 'EMAIL'],
+  'billing.subscription_activated': ['IN_APP'],
+  'billing.subscription_past_due': ['IN_APP', 'EMAIL'],
+  'billing.subscription_canceled': ['IN_APP', 'EMAIL'],
+  'billing.invoice_paid': ['IN_APP'],
+  'billing.invoice_payment_failed': ['IN_APP', 'EMAIL'],
+  'billing.amc_invoice_created': ['IN_APP', 'EMAIL'],
 };

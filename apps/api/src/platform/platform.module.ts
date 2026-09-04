@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PasswordService } from '../auth/password.service';
+import { BillingModule } from '../billing/billing.module';
 import { PlatformAdminController } from './admins/platform-admin.controller';
 import { PlatformAdminService } from './admins/platform-admin.service';
 import { PlatformAuditController } from './audit/platform-audit.controller';
@@ -10,6 +11,8 @@ import { PlatformAuthContextModule } from './auth/platform-auth-context.module';
 import { PlatformAuthController } from './auth/platform-auth.controller';
 import { PlatformAuthService } from './auth/platform-auth.service';
 import { PlatformMfaService } from './auth/platform-mfa.service';
+import { PlatformBillingController } from './billing/platform-billing.controller';
+import { PlatformBillingService } from './billing/platform-billing.service';
 import { PlatformCountryPackController } from './country-packs/platform-country-pack.controller';
 import { PlatformCountryPackService } from './country-packs/platform-country-pack.service';
 import { PlatformImpersonationController } from './impersonation/platform-impersonation.controller';
@@ -42,7 +45,10 @@ import { PlatformUsageService } from './usage/platform-usage.service';
  * for their own near-identical `JwtModule` registrations.
  */
 @Module({
-  imports: [PlatformAuthContextModule, AuthModule],
+  // BillingModule (4.2) — reused for BillingService (customer/subscription
+  // sync, invoice/payment-method serialization) so PlatformBillingService
+  // never re-implements the Stripe-object-to-row mapping.
+  imports: [PlatformAuthContextModule, AuthModule, BillingModule],
   controllers: [
     PlatformAuthController,
     PlatformAdminController,
@@ -51,6 +57,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformUsageController,
     PlatformImpersonationController,
     PlatformAuditController,
+    PlatformBillingController,
   ],
   providers: [
     PasswordService,
@@ -63,6 +70,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformUsageService,
     PlatformImpersonationService,
     PlatformAuditQueryService,
+    PlatformBillingService,
   ],
   exports: [PlatformAuditRecordService],
 })

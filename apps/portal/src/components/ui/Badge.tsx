@@ -75,6 +75,13 @@ const STATUS_TONE: Record<string, Tone> = {
   EXPIRING: 'warning',
   MISSING: 'danger',
   ARCHIVED: 'neutral',
+  // Billing (step 4.2) — SubscriptionStatus/InvoiceStatus not already
+  // covered above (ACTIVE/CANCELED/DRAFT/PAID are reused as-is) —
+  // additive only.
+  TRIAL: 'info',
+  PAST_DUE: 'warning',
+  VOID: 'neutral',
+  UNCOLLECTIBLE: 'danger',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

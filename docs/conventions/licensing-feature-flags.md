@@ -44,11 +44,13 @@ verification notes.
   1. **SaaS** (`LICENSE_MODE=saas`, the default) — reads the tenant's
      `Subscription` row. `Subscription.edition` (NOT `Tenant.edition`)
      is what's read here: a subscription's plan is what a real billing
-     system (Stripe integration is Phase 4.2 — this step is explicitly a
-     stub for that) naturally attaches edition/seat data to, and one
-     field as the single source of truth avoids two columns drifting out
-     of sync. `Tenant.edition` keeps its original 0.2 display/legacy
-     role. A `TRIAL`/`ACTIVE` subscription resolves
+     system naturally attaches edition/seat data to, and one field as
+     the single source of truth avoids two columns drifting out of
+     sync. This resolution logic is UNCHANGED since 0.6 — what changed
+     in step 4.2 is WHO writes `Subscription` rows: real Stripe webhooks
+     now do (`StripeWebhookService`), not a hand-created stub — see
+     [billing.md](./billing.md). `Tenant.edition` keeps its original 0.2
+     display/legacy role. A `TRIAL`/`ACTIVE` subscription resolves
      `EDITION_FEATURES[subscription.edition]`; `PAST_DUE`/`CANCELED` (or
      no subscription row at all) resolves an EMPTY flag set — this is
      what makes `@RequireFeature` return 403 the moment a subscription

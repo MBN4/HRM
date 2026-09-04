@@ -24,6 +24,15 @@ const STATUS_TONE: Record<string, Tone> = {
   PLATFORM_SUPPORT: 'info',
   SHARED_DB: 'neutral',
   DB_PER_TENANT: 'info',
+  // Billing (step 4.2) — SubscriptionStatus/InvoiceStatus not already
+  // covered above (TRIAL/ACTIVE reused as-is) — additive only.
+  PAST_DUE: 'warning',
+  CANCELED: 'neutral',
+  DRAFT: 'neutral',
+  OPEN: 'info',
+  PAID: 'success',
+  VOID: 'neutral',
+  UNCOLLECTIBLE: 'danger',
 };
 
 export function StatusBadge({ status }: { status: string }) {

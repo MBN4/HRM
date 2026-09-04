@@ -137,3 +137,58 @@ export interface TenantAuditLogEntry {
   after: unknown;
   metadata: unknown;
 }
+
+// --- Billing (step 4.2) — see docs/conventions/billing.md. ---
+
+export interface PlatformSubscriptionSummary {
+  tenantId: string;
+  tenantName: string;
+  tenantSlug: string;
+  tenantStatus: string;
+  edition: string;
+  status: string;
+  quantity: number | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+export interface InvoiceSummary {
+  id: string;
+  type: 'SUBSCRIPTION' | 'SETUP_FEE' | 'AMC';
+  status: 'DRAFT' | 'OPEN' | 'PAID' | 'VOID' | 'UNCOLLECTIBLE';
+  currency: string;
+  amountDue: string;
+  amountPaid: string;
+  amountRemaining: string;
+  description: string | null;
+  dueDate: string | null;
+  issuedAt: string | null;
+  paidAt: string | null;
+  hostedInvoiceUrl: string | null;
+  invoicePdfUrl: string | null;
+}
+
+export interface PaymentMethodSummary {
+  id: string;
+  brand: string | null;
+  last4: string | null;
+  expMonth: number | null;
+  expYear: number | null;
+  isDefault: boolean;
+}
+
+export interface TenantBillingSummary {
+  subscription: {
+    edition: TenantEdition;
+    status: string;
+    currency: string;
+    quantity: number | null;
+    currentPeriodEnd: string | null;
+    trialEndsAt: string | null;
+    cancelAtPeriodEnd: boolean;
+    hasPaymentMethod: boolean;
+  };
+  activeSeats: number;
+  invoices: InvoiceSummary[];
+  paymentMethods: PaymentMethodSummary[];
+}

@@ -114,8 +114,19 @@ export class NotificationRecipientResolverService {
       case 'lms.certification_expired':
         return typeof payload.employeeUserId === 'string' ? [payload.employeeUserId] : [];
 
+      // Step 4.2 — billing state (both good and bad news) is
+      // TENANT_ADMIN's job to react to, the SAME "owning role" fallback
+      // `licensing.issued`/`.revoked` already establish; billing has no
+      // other natural per-user target the way `workflow.submitted`'s
+      // approver or `lms.course_assigned`'s assignee do.
       case 'licensing.issued':
-      case 'licensing.revoked': {
+      case 'licensing.revoked':
+      case 'billing.subscription_activated':
+      case 'billing.subscription_past_due':
+      case 'billing.subscription_canceled':
+      case 'billing.invoice_paid':
+      case 'billing.invoice_payment_failed':
+      case 'billing.amc_invoice_created': {
         const admins = await tx.userRole.findMany({
           where: { role: { name: SYSTEM_ROLES.TENANT_ADMIN }, user: { status: 'ACTIVE' } },
           select: { userId: true },

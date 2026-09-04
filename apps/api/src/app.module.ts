@@ -7,6 +7,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { BillingModule } from './billing/billing.module';
 import { I18nModule } from './common/i18n/i18n.module';
 import { EncryptionModule } from './common/encryption/encryption.module';
 import { HashingModule } from './common/hashing/hashing.module';
@@ -85,6 +86,13 @@ import { WorkflowModule } from './workflow/workflow.module';
     // country-pack admin, usage metrics, cross-tenant audit, impersonation.
     // See docs/conventions/vendor-console.md.
     PlatformModule,
+    // Step 4.2 — SaaS billing/subscriptions via Stripe: the real
+    // subscription-state producer FeatureFlagResolutionService's SaaS mode
+    // has been reading from since 0.6, seat metering, invoices, payment
+    // methods, and the vendor console's billing oversight (PlatformModule
+    // imports this module for BillingService — see billing.module.ts).
+    // See docs/conventions/billing.md.
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

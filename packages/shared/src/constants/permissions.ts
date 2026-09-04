@@ -72,6 +72,12 @@ export const PERMISSIONS = {
   API_KEY_MANAGE: 'api_key.manage',
   SSO_MANAGE: 'sso.manage',
   INTEGRATION_MANAGE: 'integration.manage',
+  // Step 4.2 (billing) — viewing/managing the tenant's own SaaS
+  // subscription, plan, payment methods, and invoices. Ownership/security-
+  // and-money territory, the SAME reasoning LICENSE_MANAGE/AUDIT_READ
+  // already document for themselves — TENANT_ADMIN only (via
+  // ALL_PERMISSIONS), deliberately NOT copied into HR_MANAGER's list.
+  BILLING_MANAGE: 'billing.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

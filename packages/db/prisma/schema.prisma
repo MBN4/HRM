@@ -117,6 +117,9 @@ model Tenant {
   subscription                   Subscription?
   licenses                       License[]
   featureFlagOverrides           TenantFeatureFlagOverride[]
+  invoices                       Invoice[]
+  paymentMethods                 PaymentMethod[]
+  billingEvents                  BillingEvent[]
   workflowTemplates              WorkflowTemplate[]
   workflowSteps                  WorkflowStep[]
   workflowInstances              WorkflowInstance[]
@@ -603,8 +606,7 @@ enum SubscriptionStatus {
   CANCELED
 }
 
-// SaaS-mode (LICENSE_MODE=saas) entitlement source — a stand-in for real
-// billing (Stripe integration is Phase 4.2). `edition` here, NOT
+// SaaS-mode (LICENSE_MODE=saas) entitlement source. `edition` here, NOT
 // `Tenant.edition`, is what FeatureFlagResolutionService reads in SaaS
 // mode: a subscription's plan is naturally what a real billing system
 // attaches edition/seat data to, and keeping a single field as
@@ -613,21 +615,155 @@ enum SubscriptionStatus {
 // is nullable: SaaS-mode seat-cap enforcement is "flagged" (audited), not
 // blocking (see Seat-cap enforcement in Conventions) — a null cap means
 // the check is skipped entirely for that tenant.
+//
+// Step 4.2 (billing) — this row is now driven by REAL Stripe state, not a
+// manually-created stub: `stripeSubscriptionId`/`stripeCustomerId` link it
+// to Stripe's own objects, and every field below `currentPeriodEnd` is
+// updated ONLY by `StripeWebhookService` reacting to a verified, signed
+// `customer.subscription.*` event (or, for a brand-new tenant, by
+// `BillingService.startCheckout`'s own create-then-sync path) — never
+// edited by hand outside a test/seed fixture. `stripeCustomerId`/
+// `stripeSubscriptionId` are nullable because a tenant can exist (even
+// TRIAL) before ever reaching Stripe (see BillingService.ensureCustomer).
 model Subscription {
-  id               String             @id @default(uuid()) @db.Uuid
-  tenantId         String             @map("tenant_id") @db.Uuid
-  edition          TenantEdition
-  status           SubscriptionStatus @default(TRIAL)
-  seatCap          Int?               @map("seat_cap")
-  currentPeriodEnd DateTime?          @map("current_period_end")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+  id                   String             @id @default(uuid()) @db.Uuid
+  tenantId             String             @map("tenant_id") @db.Uuid
+  edition              TenantEdition
+  status               SubscriptionStatus @default(TRIAL)
+  seatCap              Int?               @map("seat_cap")
+  currentPeriodEnd     DateTime?          @map("current_period_end")
+  // ISO 4217, lowercase (Stripe's own convention) — the currency this
+  // subscription is actually billed in, which may differ from
+  // Tenant.baseCurrencyCode (a tenant's REPORTING currency, see
+  // docs/conventions/payroll.md) when Stripe Tax/multi-currency pricing
+  // puts the customer on a different billing currency.
+  currency             String             @default("usd") @db.VarChar(3)
+  stripeCustomerId     String?            @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?            @unique @map("stripe_subscription_id")
+  stripePriceId        String?            @map("stripe_price_id")
+  // The billed quantity (active seats) as of the last seat-metering sync —
+  // see BillingSeatMeteringService. Snapshotted, not derived live, so a
+  // rendered "current plan" screen never has to re-run SeatCapService's
+  // own COUNT just to display what Stripe was last told.
+  quantity             Int?
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+  trialEndsAt          DateTime?          @map("trial_ends_at")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
 
   // At most one subscription per tenant.
   @@unique([tenantId])
   @@map("subscriptions")
+}
+
+enum InvoiceType {
+  SUBSCRIPTION
+  SETUP_FEE
+  // Lifetime/on-prem tenants pay via a signed license file (0.6), never a
+  // Subscription — but the vendor still needs to bill them for ongoing
+  // annual maintenance/support. AMC invoices are Stripe Invoice objects
+  // created directly (no Stripe Subscription involved) via the platform
+  // console — see PlatformBillingService.createAmcInvoice.
+  AMC
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+// One row per Stripe Invoice — SaaS subscription invoices arrive via
+// webhook (`invoice.*` events); AMC/setup-fee invoices are created
+// directly by the platform console and then kept in sync the same way.
+// Every monetary column is `Decimal` — see docs/conventions/payroll.md's
+// "Money and multi-currency" section, reused verbatim: NEVER a float,
+// summed only via `Prisma.Decimal` arithmetic.
+model Invoice {
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  subscriptionId   String?       @map("subscription_id") @db.Uuid
+  type             InvoiceType   @default(SUBSCRIPTION)
+  status           InvoiceStatus @default(DRAFT)
+  stripeInvoiceId  String?       @unique @map("stripe_invoice_id")
+  stripeCustomerId String?       @map("stripe_customer_id")
+  currency         String        @db.VarChar(3)
+  amountDue        Decimal       @map("amount_due") @db.Decimal(14, 2)
+  amountPaid       Decimal       @default(0) @map("amount_paid") @db.Decimal(14, 2)
+  amountRemaining  Decimal       @map("amount_remaining") @db.Decimal(14, 2)
+  description      String?
+  periodStart      DateTime?     @map("period_start")
+  periodEnd        DateTime?     @map("period_end")
+  dueDate          DateTime?     @map("due_date")
+  hostedInvoiceUrl String?       @map("hosted_invoice_url")
+  invoicePdfUrl    String?       @map("invoice_pdf_url")
+  issuedAt         DateTime?     @map("issued_at")
+  paidAt           DateTime?     @map("paid_at")
+  voidedAt         DateTime?     @map("voided_at")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@map("invoices")
+}
+
+// A tenant's stored, tokenized payment method — Stripe holds the actual
+// card/bank details; this table only ever stores the non-sensitive display
+// fields Stripe's own API already returns unencrypted (brand/last4/expiry)
+// plus the `stripePaymentMethodId` reference. No PAN/CVC ever reaches this
+// system, so there's nothing here for EncryptionService to protect — the
+// same "adapter/DB layer never sees the raw secret" posture Stripe's own
+// hosted Elements/Checkout is designed to guarantee end to end.
+model PaymentMethod {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  stripePaymentMethodId String   @unique @map("stripe_payment_method_id")
+  type                  String
+  brand                 String?
+  last4                 String?  @db.VarChar(4)
+  expMonth              Int?     @map("exp_month")
+  expYear               Int?     @map("exp_year")
+  isDefault             Boolean  @default(false) @map("is_default")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("payment_methods")
+}
+
+// The durable idempotency backstop for inbound Stripe webhooks — the SAME
+// "two independent layers, no single one trusted alone" posture
+// docs/conventions/payroll.md documents for PayrollRunLine: 0.10's
+// `IdempotencyService` (Redis, `execute('stripe-webhook', event.id, fn)`)
+// is the fast-path guard, and this table's `@@unique([tenantId,
+// stripeEventId])` is the DB-level backstop — a redelivered event that
+// somehow raced past the Redis claim (a TTL eviction, a process restart)
+// still hits a P2002 here and is treated as "already applied", never
+// double-applied. Tenant-scoped (ordinary RLS) since a webhook event
+// always resolves to exactly one tenant's Stripe customer before this row
+// is written — see StripeWebhookService.handleEvent. An event that cannot
+// be resolved to any tenant (a stale/orphaned Stripe object) is recorded
+// into PlatformAuditLog instead, never here.
+model BillingEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  stripeEventId  String   @map("stripe_event_id")
+  eventType      String   @map("event_type")
+  processedAt    DateTime @default(now()) @map("processed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, stripeEventId])
+  @@map("billing_events")
 }
 
 enum LicenseStatus {

@@ -8,6 +8,7 @@ import { usePlatformAuth } from '../../../../lib/auth/PlatformAuthContext';
 import { deleteTenant, getTenant, listTenantUsers, resumeTenant, suspendTenant, updateTenant } from '../../../../lib/api/tenants';
 import { getTenantUsage } from '../../../../lib/api/usage';
 import { startImpersonation } from '../../../../lib/api/impersonation';
+import { createAmcInvoice, getTenantBilling, resyncSubscription } from '../../../../lib/api/billing';
 import { apiFetch, ApiError } from '../../../../lib/api/client';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../../components/ui/Card';
 import { PageSpinner, Spinner } from '../../../../components/ui/Spinner';
@@ -24,10 +25,13 @@ export default function TenantDetailPage() {
   const canManage = me?.role === 'PLATFORM_OWNER';
   const { data: tenant, loading, error, reload } = useAsync(() => getTenant(params.id), [params.id]);
   const { data: usage, reload: reloadUsage } = useAsync(() => getTenantUsage(params.id), [params.id]);
+  const { data: billing, reload: reloadBilling } = useAsync(() => getTenantBilling(params.id), [params.id]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showImpersonate, setShowImpersonate] = useState(false);
   const [showLicense, setShowLicense] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [showAmcInvoice, setShowAmcInvoice] = useState(false);
+  const [resyncing, setResyncing] = useState(false);
 
   // Only the INITIAL load blocks the whole page — a subsequent `reload()`
   // (after suspend/resume/edit/...) must not unmount this page's own
@@ -144,10 +148,99 @@ export default function TenantDetailPage() {
         </Card>
       </div>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Billing</CardTitle>
+          {canManage && (
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={resyncing}
+                onClick={async () => {
+                  setResyncing(true);
+                  setActionError(null);
+                  try {
+                    await resyncSubscription(tenant.id);
+                    reloadBilling();
+                  } catch (err) {
+                    setActionError(err instanceof ApiError ? err.message : 'Something went wrong.');
+                  } finally {
+                    setResyncing(false);
+                  }
+                }}
+              >
+                Resync from Stripe
+              </Button>
+              <Button size="sm" onClick={() => setShowAmcInvoice(true)}>
+                New AMC invoice
+              </Button>
+            </div>
+          )}
+        </CardHeader>
+        <CardBody className="space-y-4 text-sm">
+          {!billing ? (
+            <Spinner className="h-4 w-4" />
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Row label="Plan" value={billing.subscription.edition} />
+                <Row label="Status" value={billing.subscription.status} />
+                <Row label="Seats billed" value={`${billing.activeSeats} active / ${billing.subscription.quantity ?? '—'} billed`} />
+                <Row
+                  label="Renews"
+                  value={billing.subscription.currentPeriodEnd ? new Date(billing.subscription.currentPeriodEnd).toLocaleDateString() : '—'}
+                />
+              </div>
+
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">Invoices</p>
+                {billing.invoices.length === 0 ? (
+                  <p className="text-ink-400">No invoices yet.</p>
+                ) : (
+                  <table className="w-full text-start text-sm">
+                    <thead>
+                      <tr className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-400">
+                        <th className="py-1.5 text-start font-medium">Type</th>
+                        <th className="py-1.5 text-start font-medium">Status</th>
+                        <th className="py-1.5 text-start font-medium">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-ink-50">
+                      {billing.invoices.map((invoice) => (
+                        <tr key={invoice.id}>
+                          <td className="py-1.5">{invoice.type}</td>
+                          <td className="py-1.5">
+                            <StatusBadge status={invoice.status} />
+                          </td>
+                          <td className="py-1.5 text-ink-600">
+                            {invoice.amountDue} {invoice.currency.toUpperCase()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
+        </CardBody>
+      </Card>
+
       {canManage && <EditTenantForm tenantId={tenant.id} current={tenant} onSaved={reload} />}
 
       {showImpersonate && <ImpersonateModal tenantId={tenant.id} onClose={() => setShowImpersonate(false)} />}
       {showLicense && <LicenseModal tenantId={tenant.id} onClose={() => setShowLicense(false)} onDone={reload} />}
+      {showAmcInvoice && (
+        <AmcInvoiceModal
+          tenantId={tenant.id}
+          onClose={() => setShowAmcInvoice(false)}
+          onCreated={() => {
+            setShowAmcInvoice(false);
+            reloadBilling();
+          }}
+        />
+      )}
       {showDelete && (
         <DeleteTenantModal
           tenantId={tenant.id}
@@ -489,6 +582,82 @@ function DeleteTenantModal({
           </Button>
           <Button type="submit" variant="danger" loading={submitting} disabled={confirmSlug !== slug}>
             Permanently delete
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Invoice-only, no Stripe Subscription — the lifetime/on-prem annual-
+ * maintenance path (see docs/conventions/billing.md), reachable from any
+ * tenant's own page since a SaaS tenant could conceivably owe a one-off
+ * charge too. `amountMinorUnits` is entered as whole-currency-unit dollars
+ * in this form and converted to minor units on submit — the ONE place that
+ * conversion happens, so nothing else in this file needs to think in cents.
+ */
+function AmcInvoiceModal({ tenantId, onClose, onCreated }: { tenantId: string; onClose: () => void; onCreated: () => void }) {
+  const [amount, setAmount] = useState(2500);
+  const [currency, setCurrency] = useState('usd');
+  const [description, setDescription] = useState('Annual maintenance & support');
+  const [dueInDays, setDueInDays] = useState<number | ''>(30);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await createAmcInvoice(tenantId, {
+        amountMinorUnits: Math.round(amount * 100),
+        currency: currency.toLowerCase(),
+        description,
+        ...(dueInDays !== '' ? { dueInDays } : {}),
+      });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Something went wrong.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal title="New AMC invoice" onClose={onClose}>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label htmlFor="amcAmount">Amount</Label>
+            <Input id="amcAmount" type="number" min={1} step="0.01" value={amount} onChange={(e) => setAmount(Number(e.target.value))} required />
+          </div>
+          <div>
+            <Label htmlFor="amcCurrency">Currency (ISO 4217)</Label>
+            <Input id="amcCurrency" value={currency} onChange={(e) => setCurrency(e.target.value)} maxLength={3} required />
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="amcDescription">Description</Label>
+          <Input id="amcDescription" value={description} onChange={(e) => setDescription(e.target.value)} required />
+        </div>
+        <div>
+          <Label htmlFor="amcDueInDays">Due in (days, blank = Stripe&apos;s own 30-day default)</Label>
+          <Input
+            id="amcDueInDays"
+            type="number"
+            min={1}
+            value={dueInDays}
+            onChange={(e) => setDueInDays(e.target.value === '' ? '' : Number(e.target.value))}
+          />
+        </div>
+        {error && <Alert tone="error">{error}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={submitting}>
+            Create invoice
           </Button>
         </div>
       </form>

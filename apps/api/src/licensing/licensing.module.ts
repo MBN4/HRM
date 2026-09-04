@@ -20,6 +20,9 @@ import { SeatCapService } from './seat-cap.service';
     LicensingAdminService,
     SeatCapService,
   ],
-  exports: [FeatureFlagResolutionService, FeatureFlagGuard],
+  // SeatCapService exported since step 4.2 — BillingModule reuses
+  // `countActive` as THE seat-counting definition for Stripe quantity
+  // metering (see that service's own doc comment).
+  exports: [FeatureFlagResolutionService, FeatureFlagGuard, SeatCapService],
 })
 export class LicensingModule {}

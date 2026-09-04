@@ -10,6 +10,7 @@ import {
   CalendarClock,
   CalendarDays,
   ClipboardCheck,
+  CreditCard,
   GraduationCap,
   LayoutDashboard,
   LifeBuoy,
@@ -97,6 +98,10 @@ export function Sidebar() {
   // Learning & Development (step 3.2) — see docs/conventions/lms.md.
   if (can(PERMISSIONS.LMS_AUTHOR) || can(PERMISSIONS.LMS_MANAGE)) {
     adminItems.push({ href: '/learning/admin', label: t('nav.learningAdmin'), icon: GraduationCap });
+  }
+  // Billing (step 4.2) — see docs/conventions/billing.md.
+  if (can(PERMISSIONS.BILLING_MANAGE)) {
+    adminItems.push({ href: '/billing', label: t('nav.billing'), icon: CreditCard });
   }
 
   return (

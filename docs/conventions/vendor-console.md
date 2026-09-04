@@ -461,6 +461,8 @@ engineer pastes it in manually. `AuditInterceptor`'s
 path only; domain-event-sourced audit entries (`DomainEventAuditListener`)
 do not currently carry the impersonation tag, since domain events don't
 carry actor context beyond their own payload — a real, honestly-labeled
-gap, not a silent omission. Real SaaS billing (Stripe) is Phase 4.2,
-already flagged as the eventual consumer of this step's usage metrics;
-white-labeling is Phase 4.3.
+gap, not a silent omission. Real SaaS billing (Stripe) landed in step 4.2
+— see [billing.md](./billing.md) — and is now the real consumer of this
+step's usage metrics/seat-count primitives it was flagged for; the
+vendor console itself gained a cross-tenant `/billing` overview and a
+per-tenant billing card as part of that step. White-labeling is Phase 4.3.

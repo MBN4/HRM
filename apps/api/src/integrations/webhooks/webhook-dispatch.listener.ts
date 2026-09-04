@@ -64,6 +64,11 @@ export class WebhookDispatchListener {
     this.dispatch(payload);
   }
 
+  @OnEvent('billing.*')
+  handleBilling(payload: { type: string; [key: string]: unknown }): void {
+    this.dispatch(payload);
+  }
+
   private dispatch(payload: { type: string; [key: string]: unknown }): void {
     this.webhooks.handleDomainEvent(payload.type, payload).catch((error: unknown) => {
       this.logger.error(`Failed to dispatch webhooks for event "${payload.type}": ${String(error)}`);

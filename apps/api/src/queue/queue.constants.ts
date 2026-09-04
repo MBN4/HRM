@@ -8,3 +8,4 @@ export const PERFORMANCE_CALIBRATION_QUEUE = 'performance-calibration';
 export const LMS_ROLLUP_QUEUE = 'lms-rollup';
 export const LMS_CERTIFICATION_EXPIRY_QUEUE = 'lms-certification-expiry';
 export const WEBHOOK_DELIVERY_QUEUE = 'webhook-delivery';
+export const BILLING_SEAT_SYNC_QUEUE = 'billing-seat-sync';

@@ -32,6 +32,10 @@ export const PLATFORM_PERMISSIONS = {
   ADMIN_MANAGE: 'platform.admin.manage',
   /** Gates the EXISTING (0.10) RateLimitAdminController per-tenant rate-limit override routes. */
   RATE_LIMIT_MANAGE: 'platform.rate_limit.manage',
+  /** Step 4.2 — read any tenant's subscription/invoice/payment-method state and the cross-tenant billing overview. Support-safe (read-only). */
+  BILLING_READ: 'platform.billing.read',
+  /** Step 4.2 — trigger an AMC invoice, force-resync a tenant's Stripe state, or otherwise mutate billing on a tenant's behalf. A real-money control point, deliberately OWNER-only, the same "most tightly held" posture TENANT_DELETE/ADMIN_MANAGE already document. */
+  BILLING_MANAGE: 'platform.billing.manage',
 } as const;
 
 export type PlatformPermissionKey = (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];
@@ -55,5 +59,6 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleNameKey, readonly Pla
     PLATFORM_PERMISSIONS.USAGE_READ,
     PLATFORM_PERMISSIONS.AUDIT_READ,
     PLATFORM_PERMISSIONS.IMPERSONATION_START,
+    PLATFORM_PERMISSIONS.BILLING_READ,
   ],
 };
