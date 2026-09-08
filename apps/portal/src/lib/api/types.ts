@@ -1140,3 +1140,61 @@ export interface BrandingSettings extends PublicBranding {
   fullRebrandEntitled: boolean;
   domain: BrandingDomain | null;
 }
+
+// Data migration & onboarding toolkit (step 3.5.1) — see
+// docs/conventions/data-migration.md. `ImportEntityTypeKey`/`ImportFieldSpec`/
+// `IMPORT_ENTITY_FIELDS` are imported straight from `@hrm/shared` (pure data,
+// no framework dependency) rather than duplicated here — unlike this file's
+// usual "mirror the backend DTO" convention, there is no backend DTO class
+// to mirror for that catalog, just a shared constant.
+export type ImportBatchStatus =
+  | 'UPLOADED'
+  | 'VALIDATING'
+  | 'DRY_RUN_COMPLETE'
+  | 'COMMITTING'
+  | 'COMMITTED'
+  | 'COMMITTED_WITH_ERRORS'
+  | 'FAILED';
+
+export interface ImportBatch {
+  id: string;
+  entityType: string;
+  mode: 'PARTIAL' | 'ALL_OR_NOTHING';
+  status: ImportBatchStatus;
+  fileName: string;
+  fileFormat: 'CSV' | 'XLSX';
+  columnMapping: Record<string, string>;
+  columnMappingTemplateId: string | null;
+  totalRows: number;
+  processedRows: number;
+  createCount: number;
+  updateCount: number;
+  skipCount: number;
+  errorCount: number;
+  dryRunCompletedAt: string | null;
+  committedAt: string | null;
+  failureReason: string | null;
+  initiatedByUserId: string | null;
+  initiatedByPlatformAdminId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportRowError {
+  id: string;
+  importBatchId: string;
+  phase: 'DRY_RUN' | 'COMMIT';
+  rowNumber: number;
+  message: string;
+  rowData: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ColumnMappingTemplate {
+  id: string;
+  entityType: string;
+  name: string;
+  mapping: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}

@@ -20,6 +20,9 @@ import { PlatformCountryPackController } from './country-packs/platform-country-
 import { PlatformCountryPackService } from './country-packs/platform-country-pack.service';
 import { PlatformImpersonationController } from './impersonation/platform-impersonation.controller';
 import { PlatformImpersonationService } from './impersonation/platform-impersonation.service';
+import { MigrationModule } from '../migration/migration.module';
+import { PlatformMigrationController } from './migration/platform-migration.controller';
+import { PlatformMigrationService } from './migration/platform-migration.service';
 import { PlatformTenantController } from './tenants/platform-tenant.controller';
 import { PlatformTenantService } from './tenants/platform-tenant.service';
 import { PlatformUsageController } from './usage/platform-usage.controller';
@@ -55,7 +58,10 @@ import { PlatformUsageService } from './usage/platform-usage.service';
   // invalidation on a platform-triggered reset)/DomainVerificationService/
   // CERT_PROVIDER so PlatformBrandingService never re-implements DNS/TLS
   // provisioning a second time.
-  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule],
+  // MigrationModule (3.5.1) — reused for `ImportBatchService` so
+  // `PlatformMigrationService` never re-implements upload/dry-run/commit
+  // orchestration a second time. See docs/conventions/data-migration.md.
+  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule],
   controllers: [
     PlatformAuthController,
     PlatformAdminController,
@@ -66,6 +72,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformAuditController,
     PlatformBillingController,
     PlatformBrandingController,
+    PlatformMigrationController,
   ],
   providers: [
     PasswordService,
@@ -80,6 +87,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformAuditQueryService,
     PlatformBillingService,
     PlatformBrandingService,
+    PlatformMigrationService,
   ],
   exports: [PlatformAuditRecordService],
 })

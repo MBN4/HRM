@@ -211,6 +211,14 @@ model Tenant {
   // See PlatformAdmin/ImpersonationSession below.
   impersonationSessions ImpersonationSession[]
 
+  // Step 3.5.1 — data migration & onboarding toolkit (see
+  // docs/conventions/data-migration.md).
+  columnMappingTemplates      ColumnMappingTemplate[]
+  importBatches               ImportBatch[]
+  importRowErrors             ImportRowError[]
+  migratedAttendanceSummaries MigratedAttendanceSummary[]
+  migratedPayslipRecords      MigratedPayslipRecord[]
+
   @@map("tenants")
 }
 
@@ -1706,6 +1714,11 @@ model Employee {
   lmsEnrollments            Enrollment[]
   lmsQuizAttempts           QuizAttempt[]
   lmsCertifications         Certification[]
+
+  // Step 3.5.1 — data migration & onboarding toolkit (see
+  // docs/conventions/data-migration.md).
+  migratedAttendanceSummaries MigratedAttendanceSummary[]
+  migratedPayslipRecords      MigratedPayslipRecord[]
 
   // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
@@ -4419,4 +4432,230 @@ model SlackWorkspaceConfig {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("slack_workspace_configs")
+}
+
+// --- Data migration & onboarding toolkit ------------------------------------
+//
+// Step 3.5.1 — see docs/conventions/data-migration.md. Imports a new
+// client's EXISTING data (Excel/CSV) into the platform through the REAL
+// module services (EmployeeService, LeaveBalanceService, ...) — this
+// toolkit owns zero employee/leave/country-pack validation logic itself,
+// exactly the "thin consumer" posture 3.1's operations modules already
+// established. Every import is a two-phase `ImportBatch`
+// (VALIDATE/dry-run, then COMMIT, never both at once) — see the model doc
+// comment below for the state machine.
+
+enum ImportEntityType {
+  BRANCH
+  DEPARTMENT
+  DESIGNATION
+  COST_CENTER
+  EMPLOYEE
+  LEAVE_BALANCE
+  ATTENDANCE_HISTORY
+  PAYSLIP_HISTORY
+}
+
+// PARTIAL (default) — valid rows commit, invalid rows are reported, never
+// silently dropped. ALL_OR_NOTHING — a single row error fails the entire
+// commit (nothing written), for a tenant that wants an all-clean-or-nothing
+// guarantee instead. Selected per batch at creation, never a global default
+// baked into the importer itself.
+enum ImportMode {
+  PARTIAL
+  ALL_OR_NOTHING
+}
+
+// UPLOADED (file stored, not yet parsed) -> VALIDATING (dry-run job running)
+// -> DRY_RUN_COMPLETE (safe to review; nothing written yet) -> COMMITTING
+// (commit job running) -> COMMITTED / COMMITTED_WITH_ERRORS (PARTIAL mode
+// with some row errors) / FAILED (either phase's job crashed, or
+// ALL_OR_NOTHING found any row error and wrote nothing). A batch may be
+// re-validated (re-run dry-run after fixing the column mapping) any number
+// of times before its first commit; `POST .../commit` is refused unless
+// `status = DRY_RUN_COMPLETE` — the STATE MACHINE ITSELF is the first of
+// two idempotency layers guarding commit (see data-migration.md): a second
+// commit attempt against an already-COMMITTING/COMMITTED batch is a `409`,
+// never a re-run. The second layer is data-level: every importer resolves
+// its target row by NATURAL KEY (employeeCode, branch/department/
+// designation name, cost-center code) and UPSERTS — so even importing the
+// exact same file twice as a brand-new batch updates the existing rows
+// instead of duplicating them.
+enum ImportBatchStatus {
+  UPLOADED
+  VALIDATING
+  DRY_RUN_COMPLETE
+  COMMITTING
+  COMMITTED
+  COMMITTED_WITH_ERRORS
+  FAILED
+}
+
+// A tenant's saved column-mapping (client spreadsheet header -> this
+// platform's field name) for one entity type, reusable across repeat
+// imports (e.g. a monthly leave-balance top-up from the same HRIS export).
+// Tenant-scoped, ordinary RLS.
+model ColumnMappingTemplate {
+  id              String           @id @default(uuid()) @db.Uuid
+  tenantId        String           @map("tenant_id") @db.Uuid
+  name            String
+  entityType      ImportEntityType @map("entity_type")
+  // `{ [ourFieldKey]: "client's column header" }`.
+  mapping         Json
+  createdByUserId String?          @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entityType, name])
+  @@map("column_mapping_templates")
+}
+
+// One row per upload. `fileStorageKey` addresses the uploaded source file
+// in S3/MinIO (1.1's `StorageService`, reused as-is) — PURGED (set to
+// null, object deleted) once the batch reaches a terminal state and the
+// retention window elapses (`IMPORT_FILE_RETENTION_HOURS`, a scheduled
+// sweep — see data-migration.md): raw uploaded PII must not live in
+// object storage indefinitely once its job is done. `initiatedByUserId`
+// (a tenant self-service import) and `initiatedByPlatformAdminId` (a
+// vendor/platform admin running onboarding import on a tenant's behalf,
+// see docs/conventions/vendor-console.md) are mutually exclusive plain
+// ids — the latter is NOT an FK (`PlatformAdmin` is a structurally
+// separate, non-tenant-scoped identity space, the same "just an id, no
+// relation" pattern `AuditLog`'s own `impersonatedByPlatformAdminId`-style
+// metadata already uses across a tenant boundary).
+model ImportBatch {
+  id         String            @id @default(uuid()) @db.Uuid
+  tenantId   String            @map("tenant_id") @db.Uuid
+  entityType ImportEntityType  @map("entity_type")
+  mode       ImportMode        @default(PARTIAL)
+  status     ImportBatchStatus @default(UPLOADED)
+
+  fileName       String  @map("file_name")
+  fileFormat     String  @map("file_format") @db.VarChar(8) // CSV | XLSX
+  fileStorageKey String? @map("file_storage_key")
+  filePurgedAt   DateTime? @map("file_purged_at")
+
+  // `{ [ourFieldKey]: "client's column header" }` — snapshotted onto the
+  // batch at creation (even when sourced from a ColumnMappingTemplate) so
+  // a later edit/deletion of that template never changes an in-flight or
+  // historical batch's own behavior.
+  columnMapping           Json
+  columnMappingTemplateId String? @map("column_mapping_template_id") @db.Uuid
+
+  totalRows     Int @default(0) @map("total_rows")
+  processedRows Int @default(0) @map("processed_rows")
+  createCount   Int @default(0) @map("create_count")
+  updateCount   Int @default(0) @map("update_count")
+  skipCount     Int @default(0) @map("skip_count")
+  errorCount    Int @default(0) @map("error_count")
+
+  dryRunCompletedAt DateTime? @map("dry_run_completed_at")
+  committedAt       DateTime? @map("committed_at")
+  // Top-level job failure (the whole dry-run/commit job crashed — a
+  // corrupt file, an unreachable dependency), as opposed to a per-row
+  // `ImportRowError` (a specific row was invalid) — kept separate so the
+  // UI can tell "your file has 3 bad rows" apart from "something broke on
+  // our end, try again."
+  failureReason     String?   @map("failure_reason")
+
+  initiatedByUserId          String? @map("initiated_by_user_id") @db.Uuid
+  initiatedByPlatformAdminId String? @map("initiated_by_platform_admin_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rowErrors ImportRowError[]
+
+  // Lets ImportRowError define a composite FK of (tenantId, id) -> this
+  // table, same pattern as every other entity in this schema.
+  @@unique([tenantId, id])
+  @@index([tenantId, entityType, status])
+  @@index([tenantId, status, filePurgedAt])
+  @@map("import_batches")
+}
+
+// One row per failed row from either phase — the "actionable, plain-
+// language, downloadable error report" the brief calls for. `phase`
+// distinguishes a DRY_RUN finding (nothing was written) from a COMMIT
+// finding (this exact row was skipped while its batch-mates committed, in
+// PARTIAL mode). Re-running dry-run (after the client fixes their mapping)
+// DELETES this batch's prior DRY_RUN rows first — see
+// `MigrationValidationService` — so this table never accumulates stale
+// findings from a superseded dry-run pass.
+model ImportRowError {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  importBatchId String   @map("import_batch_id") @db.Uuid
+  phase         String   @db.VarChar(16) // DRY_RUN | COMMIT
+  rowNumber     Int      @map("row_number")
+  message       String
+  // The mapped (not raw) row data that failed, so the downloadable report
+  // shows the client their OWN column values next to the reason.
+  rowData       Json     @map("row_data")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  importBatch ImportBatch @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, importBatchId, phase, rowNumber])
+  @@map("import_row_errors")
+}
+
+// Historical attendance data migrated from a client's prior system —
+// READ-ONLY, deliberately NOT written into `AttendanceDailySummary` (1.3's
+// live, RECOMPUTED rollup table): mixing migrated history into a table a
+// scheduled job freely overwrites/recomputes would silently erase it the
+// first time that job runs for the same employee/day. Kept in its own
+// table instead, clearly marked as migrated — see data-migration.md's
+// "why not the real rollup table" note.
+model MigratedAttendanceSummary {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  importBatchId   String   @map("import_batch_id") @db.Uuid
+  employeeId      String   @map("employee_id") @db.Uuid
+  workDate        DateTime @map("work_date") @db.Date
+  status          String   @db.VarChar(16)
+  workedMinutes   Int?     @map("worked_minutes")
+  overtimeMinutes Int?     @map("overtime_minutes")
+  note            String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, employeeId, workDate])
+  @@map("migrated_attendance_summaries")
+}
+
+// Historical payslip/payroll data migrated from a client's prior system —
+// READ-ONLY, deliberately NOT a real `PayrollRun`/`PayrollRunLine` (2.1):
+// this toolkit never recomputes historical payroll (no tax/statutory
+// engine involvement, per the brief's own explicit scope call) — it just
+// carries the client's own already-final historical figures forward for
+// reference. `grossPay`/`netPay` are field-level gated behind
+// `salary.view` at the API layer (see docs/conventions/field-level-permissions.md),
+// the same posture `Employee.compensation` already takes, though — an
+// honest, documented gap — unlike `Employee.baseSalaryEncrypted` these are
+// NOT encrypted at rest (see data-migration.md's known-gaps note).
+model MigratedPayslipRecord {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  importBatchId String   @map("import_batch_id") @db.Uuid
+  employeeId    String   @map("employee_id") @db.Uuid
+  periodYear    Int      @map("period_year")
+  periodMonth   Int      @map("period_month")
+  currencyCode  String   @map("currency_code") @db.VarChar(3)
+  grossPay      Decimal  @map("gross_pay") @db.Decimal(14, 2)
+  netPay        Decimal  @map("net_pay") @db.Decimal(14, 2)
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, employeeId, periodYear, periodMonth])
+  @@map("migrated_payslip_records")
 }

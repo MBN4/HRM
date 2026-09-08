@@ -110,4 +110,34 @@ export class LeaveBalanceService {
   async listForEmployee(tx: Prisma.TransactionClient, employeeId: string, periodYear: number): Promise<LeaveBalance[]> {
     return tx.leaveBalance.findMany({ where: { employeeId, periodYear }, orderBy: { leaveType: 'asc' } });
   }
+
+  /**
+   * Additive (step 3.5.1, the data migration toolkit's leave opening-balance
+   * importer) — see docs/conventions/data-migration.md. Deliberately
+   * DIFFERENT from `adjust()` above: a client migrating mid-year is
+   * providing their CURRENT accrued/carried-over totals from their prior
+   * system, to be SET exactly as given, not applied as a delta on top of
+   * whatever this (freshly created) row already holds. Still routes
+   * through `getOrCreateBalance` for the real entitlement-snapshot
+   * resolution (Country Pack + tenant override, branch-driven) — this
+   * method never invents an `entitledDays` value itself.
+   */
+  async setOpeningBalance(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    employeeId: string,
+    branchId: string,
+    leaveType: LeaveType,
+    periodYear: number,
+    opening: { accruedDays: number; carriedOverDays?: number },
+  ): Promise<LeaveBalance> {
+    const balance = await this.getOrCreateBalance(tx, tenantId, employeeId, branchId, leaveType, periodYear);
+    return tx.leaveBalance.update({
+      where: { id: balance.id },
+      data: {
+        accruedDays: opening.accruedDays,
+        ...(opening.carriedOverDays !== undefined && { carriedOverDays: opening.carriedOverDays }),
+      },
+    });
+  }
 }

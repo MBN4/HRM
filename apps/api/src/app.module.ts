@@ -17,6 +17,7 @@ import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { EmployeesModule } from './employees/employees.module';
 import { LeaveModule } from './leave/leave.module';
 import { LicensingModule } from './licensing/licensing.module';
+import { MigrationModule } from './migration/migration.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { PerformanceModule } from './performance/performance.module';
@@ -100,6 +101,12 @@ import { WorkflowModule } from './workflow/workflow.module';
     // gated full-rebrand capability for lifetime/on-prem tenants. See
     // docs/conventions/white-label.md.
     BrandingModule,
+    // Step 3.5.1 — the data migration & onboarding toolkit: column-mapped
+    // CSV/XLSX import of a new client's existing org structure/employees/
+    // leave opening balances, dry-run-then-commit, routed through the REAL
+    // module services (EmployeeService, LeaveBalanceService, ...). See
+    // docs/conventions/data-migration.md.
+    MigrationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

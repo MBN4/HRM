@@ -2555,6 +2555,167 @@ suspend/bill tenants and author country packs from `apps/admin`; a SaaS
 tenant subscribes, upgrades, and pays through real Stripe-driven
 entitlement; and any tenant — SaaS or lifetime — can present the product
 under its own name, colors, domain, and (if entitled) fully white-labeled
-identity. Phase 5 (scale hardening — PgBouncer/read replicas, the
-`audit_log`/`attendance_records` partitioning already flagged since 0.2/
-0.9/1.3, horizontal scaling) and Phase 6 (scope not yet defined) remain.
+identity.
+
+## 3.5.1 — Data migration & onboarding toolkit
+
+Phase 3.5's first slice (go-live enabler, numbered ahead of Phase 5's scale
+work per the task brief) — `packages/db`, `packages/shared`, `apps/api/src/migration`,
+`apps/api/src/platform/migration`, `apps/portal/src/app/(app)/migration`,
+`apps/admin/src/app/(app)/migration`. See
+[`docs/conventions/data-migration.md`](./conventions/data-migration.md) for
+the full write-up. Imports a new client's EXISTING employee/HR data
+(CSV/XLSX) — the SAME thin-consumer posture 3.1's operations modules
+established: this toolkit owns ZERO employee/leave/country-pack validation
+logic of its own, routing every write through the REAL 1.1 `EmployeeService`
+and 1.2 `LeaveBalanceService` (the latter additively exported this step).
+
+- **Two-phase `ImportBatch`, a real state machine** —
+  `UPLOADED -> VALIDATING -> DRY_RUN_COMPLETE -> COMMITTING ->
+COMMITTED`/`COMMITTED_WITH_ERRORS`/`FAILED`. `POST /migration/batches/:id/commit`
+  is refused (`409`) unless `status = DRY_RUN_COMPLETE` — THE first of two
+  idempotency layers; the second is DATA-level, every importer resolving its
+  target row by NATURAL KEY (employeeCode, branch/department/designation
+  name, cost-center code) and upserting, so even a brand-new batch importing
+  the same file twice updates instead of duplicating.
+- **The dry-run mechanism — zero duplicated validation logic.** Every
+  importer's `processRow` calls the REAL service either way; `runImportRow`
+  (`migration-row-runner.ts`) is what makes a DRY RUN trustworthy: it runs
+  the exact same call inside its own `withTenantContext` transaction, then
+  deliberately throws a private sentinel wrapping the result to force
+  Postgres to roll the transaction back regardless of outcome — a dry run
+  can never write to a target entity table, by construction, not by
+  convention. A COMMIT runs the identical call with no rollback, one
+  transaction per row (the same per-row-isolation shape 1.1's
+  `EmployeeImportProcessor` already established).
+- **Importers**: BRANCH/DEPARTMENT/DESIGNATION/COST_CENTER (plain reference
+  tables, no dedicated service exists, so these write directly, natural-key
+  upsert); EMPLOYEE (the primary one — routes through `EmployeeService.create`/
+  `.update`, so country-driven required fields, encryption, and custom
+  fields are enforced identically to a direct `POST /employees` call);
+  LEAVE_BALANCE (routes through `LeaveBalanceService.getOrCreateBalance` +
+  a NEW additive `setOpeningBalance` method — a genuine SET of the client's
+  current accrued/carried-over totals, deliberately different from the
+  existing `adjust()` action's DELTA semantics); ATTENDANCE_HISTORY/
+  PAYSLIP_HISTORY (explicitly scoped down per the brief — READ-ONLY
+  historical records in two NEW, purpose-built tables,
+  `MigratedAttendanceSummary`/`MigratedPayslipRecord`, deliberately NOT the
+  real `AttendanceDailySummary`/`PayrollRun` tables, which are freely
+  recomputed/tax-and-statutory-engine-driven — this toolkit never
+  recomputes historical payroll or attendance).
+- **Manager-by-employeeCode linking — the one explicitly-named cross-row
+  case.** `EntityImporter.finalize` is an optional second pass over every
+  STAGED row, run only after all of them exist (or would exist, for a dry
+  run) — `EmployeeImporter` uses it to resolve `managerEmployeeCode` even
+  when the manager's own row appears LATER in the file than its reports.
+  A finalize failure (an unresolvable manager code) is a SEPARATE row error
+  from the employee's own create/update outcome — the employee still gets
+  created even if only its manager link fails to resolve.
+- **Column mapping** (`{ourFieldKey: "client's column header"}`) —
+  `IMPORT_ENTITY_FIELDS` (`@hrm/shared`) is the one field catalog both the
+  backend (`assertColumnMappingComplete`, rejecting an incomplete mapping
+  BEFORE any file parsing) and the portal/admin mapping-step UI read from.
+  `ColumnMappingTemplate` (tenant-scoped, `@@unique([tenantId, entityType, name])`)
+  makes a mapping reusable across repeat imports.
+- **File handling** — CSV via the EXISTING `csv-parse` dependency (1.1);
+  XLSX via a NEW dependency, `xlsx` (SheetJS), added to `apps/api` AND (for
+  client-side header detection before any upload) `apps/portal`/`apps/admin`
+  — both formats normalize to the same all-string-values row shape, so
+  every downstream coercion is format-agnostic. Uploaded files are stored
+  via 1.1's EXISTING `StorageService` (`migration/<tenantId>/<batchId>/<fileName>`)
+  and PURGED (`MigrationPurgeService`, a manual-trigger sweep — the SAME
+  "not wired to a scheduler yet" tradeoff 0.7/1.2/1.3/3.1 already take) once
+  a batch reaches a terminal state and `IMPORT_FILE_RETENTION_HOURS`
+  (default 72h) elapses — raw uploaded PII does not live in object storage
+  indefinitely. `StorageService` gained one additive method,
+  `deleteObject` — the first caller in this codebase that ever needed to
+  remove a stored object rather than only write/read one.
+- **BullMQ, one queue, two job names.** `migration` (`MigrationProcessor`)
+  handles both `validate` and `commit` jobs, forwarding to
+  `MigrationProcessingService` — the SAME reusable pattern every prior
+  BullMQ-backed module already established (see `QueueModule`'s doc
+  comment), sharing one processor rather than two nearly-identical ones.
+- **Row-level error reporting** — `ImportRowError` (a real table, not a
+  growing JSON blob on `ImportBatch`) holds the mapped row data next to a
+  plain-language reason; `GET /migration/batches/:id/report` streams a CSV
+  (columns = the entity's own field catalog + `message`) a client can open
+  directly to see their own values next to why each row failed.
+  `mode: PARTIAL` (default) imports valid rows and reports the rest;
+  `ALL_OR_NOTHING` refuses to commit at all (nothing written) if the last
+  dry run found any row error.
+- **Who runs it** — tenant self-serve (`apps/portal`'s new `/migration`
+  wizard: upload -> map -> dry run -> review -> commit -> download report,
+  RBAC-gated on a NEW `migration.manage` permission, TENANT_ADMIN + HR_MANAGER)
+  and vendor/platform-admin-on-a-tenant's-behalf (`apps/admin`'s new
+  `/migration` page, a NEW `PLATFORM_PERMISSIONS.TENANT_MIGRATION_MANAGE`
+  held by BOTH platform roles — the same onboarding-support risk tier
+  `IMPERSONATION_START` already documents). A platform-triggered batch
+  reuses `ImportBatchService` UNCHANGED, opened via `withTenantContext`
+  (RLS still enforced, defense-in-depth) rather than the owner `prisma`
+  client platform services usually reach for — and is DUAL-audited exactly
+  like 4.1/4.2/4.3's own platform-triggered tenant actions (the platform's
+  own `PlatformAuditLog` AND, via the EXISTING `AuditRecordService.recordForTenant`,
+  the TARGET TENANT's own `audit_log`, `initiatedByPlatformAdminId` visible
+  on the batch row itself).
+- **A real, general bug caught and fixed while writing the Playwright
+  suite**: `packages/shared`'s `messages.ts` catalog gained new
+  `migration.status.*`/`nav.migration`/etc. keys, but `apps/portal`
+  resolves them from `packages/shared`'s COMPILED `dist`, not its source —
+  the portal build silently rendered the literal `[[migration.status.DRY_RUN_COMPLETE]]`
+  fallback string (this catalog's own documented "missing from every
+  locale" behavior) until `packages/shared` was rebuilt. Not a code bug,
+  but a real, easy-to-repeat monorepo-workflow trap worth recording:
+  editing `packages/shared/src/**` requires `pnpm --filter @hrm/shared build`
+  before any consuming app's dev/build/test run will see it.
+- **Known, documented gaps for this phase** (not required by this step's
+  brief, flagged so they aren't silently forgotten): importing does not
+  itself enforce per-branch data scoping on the CALLER (`allowedBranchIds`
+  is threaded through every importer as `null`/unrestricted) — accepted
+  since `migration.manage` is already TENANT_ADMIN/HR_MANAGER-only,
+  tenant-setup territory rather than a routine branch-scoped HR workflow;
+  `ATTENDANCE_HISTORY`/`PAYSLIP_HISTORY` have no natural key of their own
+  (a pure append log), so re-importing the same historical file as a
+  BRAND-NEW batch appends duplicates — the batch-status-guard idempotency
+  layer still fully covers "committing the SAME batch twice," just not
+  "uploading the same file twice as two different batches," for these two
+  entity types only; `MigratedPayslipRecord.grossPay`/`.netPay` are
+  field-level gated behind `salary.view` but, unlike
+  `Employee.baseSalaryEncrypted`, NOT encrypted at rest (an honest,
+  documented asymmetry for what is explicitly scoped-down historical
+  reference data); `ALL_OR_NOTHING` is gated at commit-START against the
+  last dry run's `errorCount` rather than one giant all-rows-or-nothing
+  transaction (which would reintroduce the long-transaction/connection-pool
+  risk 0.10 specifically protects against) — a row that passes dry-run but
+  fails at the moment of commit (e.g. a referenced branch deleted in
+  between) is still recorded as a per-row error rather than rolling back
+  every already-committed row in that same batch, a narrow, documented
+  race; no department targeting/picker changes were needed (this module
+  doesn't touch departments beyond importing them).
+- Verified end-to-end over real HTTP by `apps/api/test/migration.e2e-spec.ts`
+  (10 tests: a dry run leaving `branches` untouched then a commit writing
+  it with a REAL non-identity column mapping honored; re-committing an
+  already-committed batch refused and non-duplicating; a messy EMPLOYEE
+  file where a US row missing SSN/W4 and a QA row missing QATAR_ID both
+  fail with a clear reason while the valid US/QA rows commit through the
+  real country-pack-driven path; manager-by-employeeCode linking resolving
+  correctly even when the manager's row appears AFTER its report's;
+  LEAVE_BALANCE opening-balance import setting `accruedDays`/
+  `carriedOverDays` exactly via the real `LeaveBalanceService`; a saved
+  column-mapping template listed and reused; RBAC deny-by-default; and
+  cross-tenant isolation — RLS, not application code, blocking tenant B
+  from reading tenant A's batches) plus `apps/portal/tests/migration.spec.ts`
+  (3 Playwright tests: the full upload -> map -> dry-run -> review ->
+  commit -> CSV-report-download flow through the real UI against a messy
+  file, a saved mapping template reused for a second import, and a plain
+  EMPLOYEE seeing no "Data import" nav entry). `apps/api`'s full suite:
+  **478 tests green** (468 existing + 10 new). `apps/portal`'s Playwright
+  suite: **85 tests** (82 existing + 3 new); one pre-existing, unrelated
+  `operations-modules.spec.ts` test flaked once under full-suite load and
+  passed cleanly both in isolation and as part of its own serial block —
+  the SAME class of test-parallelism flakiness this log already documents
+  for itself in 4.3, nothing to do with this step. `apps/admin` gained a
+  new onboarding `/migration` page (build/lint verified clean; no new
+  Playwright spec for it this step — the identical dry-run/commit/report
+  code path is already fully proven by both the backend e2e suite's
+  platform-admin scenario and the portal's own Playwright spec). Full-repo
+  `pnpm build`/`pnpm lint` green across all workspace tasks.

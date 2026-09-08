@@ -20,6 +20,7 @@ import {
   Receipt,
   Settings,
   Target,
+  Upload,
   User,
   UserMinus,
   UserPlus,
@@ -109,6 +110,11 @@ export function Sidebar() {
   // White-label / branding (step 4.3) — see docs/conventions/white-label.md.
   if (can(PERMISSIONS.BRANDING_MANAGE)) {
     adminItems.push({ href: '/branding', label: t('nav.branding'), icon: Paintbrush });
+  }
+  // Data migration & onboarding toolkit (step 3.5.1) — see
+  // docs/conventions/data-migration.md.
+  if (can(PERMISSIONS.MIGRATION_MANAGE)) {
+    adminItems.push({ href: '/migration', label: t('nav.migration'), icon: Upload });
   }
 
   return (

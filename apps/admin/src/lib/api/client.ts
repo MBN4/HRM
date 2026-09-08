@@ -71,7 +71,9 @@ async function doFetch(path: string, opts: ApiRequestOptions, isRetry: boolean):
   const headers: Record<string, string> = {};
 
   let body: BodyInit | undefined;
-  if (opts.body !== undefined) {
+  if (opts.body instanceof FormData) {
+    body = opts.body;
+  } else if (opts.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(opts.body);
   }
@@ -122,4 +124,46 @@ async function request<T>(path: string, opts: ApiRequestOptions, isRetry: boolea
 
 export function apiFetch<T = unknown>(path: string, opts: ApiRequestOptions = {}): Promise<T> {
   return request<T>(path, opts, false);
+}
+
+export interface ApiBlobResult {
+  blob: Blob;
+  filename: string | null;
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * The binary counterpart to `apiFetch` — added for the data migration
+ * toolkit's error-report CSV download (step 3.5.1, see
+ * docs/conventions/data-migration.md), mirroring `apps/portal`'s own
+ * `apiFetchBlob` exactly (see that file's doc comment) — this console had
+ * no binary-download route before this step.
+ */
+export async function apiFetchBlob(
+  path: string,
+  opts: { method?: 'GET' | 'POST'; query?: ApiRequestOptions['query'] } = {},
+): Promise<ApiBlobResult> {
+  const res = await doFetch(path, { method: opts.method ?? 'GET', query: opts.query }, false);
+
+  if (!res.ok) {
+    const contentType = res.headers.get('content-type') ?? '';
+    let data: unknown = null;
+    let message = res.statusText;
+    if (contentType.includes('application/json')) {
+      const text = await res.text();
+      data = text ? JSON.parse(text) : null;
+      const rawMessage = data && typeof data === 'object' ? (data as { message?: unknown }).message : undefined;
+      message = Array.isArray(rawMessage) ? rawMessage.join(', ') : (rawMessage as string) || res.statusText;
+    }
+    throw new ApiError(res.status, message, data);
+  }
+
+  const blob = await res.blob();
+  const filename = parseContentDispositionFilename(res.headers.get('content-disposition'));
+  return { blob, filename };
 }

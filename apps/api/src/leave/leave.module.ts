@@ -30,6 +30,12 @@ import { LeaveWorkflowEventsListener } from './leave-workflow-events.listener';
   ],
   controllers: [LeaveController],
   providers: [LeaveService, LeaveBalanceService, LeaveAccrualService, LeaveAccrualProcessor, LeaveWorkflowEventsListener],
-  exports: [LeaveService],
+  // `LeaveBalanceService` additively exported (step 3.5.1) so the data
+  // migration toolkit's leave opening-balance importer can call
+  // `getOrCreateBalance`/`setOpeningBalance` directly rather than
+  // reimplementing entitlement-snapshot resolution — the SAME
+  // consumer-imports-the-reused-module direction 3.1's Expense->Payroll
+  // `ExchangeRateService` export already establishes.
+  exports: [LeaveService, LeaveBalanceService],
 })
 export class LeaveModule {}

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, Paintbrush, ShieldAlert, UserCog } from 'lucide-react';
+import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, Paintbrush, ShieldAlert, Upload, UserCog } from 'lucide-react';
 import { usePlatformAuth } from '../../lib/auth/PlatformAuthContext';
 
 const NAV_ITEMS = [
@@ -11,6 +11,10 @@ const NAV_ITEMS = [
   { href: '/billing', label: 'Billing', icon: CreditCard, ownerOnly: false },
   { href: '/branding', label: 'Branding', icon: Paintbrush, ownerOnly: false },
   { href: '/country-packs', label: 'Country packs', icon: Globe2, ownerOnly: false },
+  // Data migration & onboarding toolkit (step 3.5.1) — TENANT_MIGRATION_MANAGE
+  // is held by BOTH platform roles, the same onboarding-support risk tier
+  // IMPERSONATION_START already documents — see docs/conventions/data-migration.md.
+  { href: '/migration', label: 'Data import', icon: Upload, ownerOnly: false },
   { href: '/impersonation', label: 'Impersonation', icon: ShieldAlert, ownerOnly: false },
   { href: '/audit', label: 'Audit trail', icon: FileClock, ownerOnly: false },
   { href: '/admins', label: 'Platform admins', icon: UserCog, ownerOnly: true },

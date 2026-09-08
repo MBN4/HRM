@@ -90,6 +90,14 @@ const STATUS_TONE: Record<string, Tone> = {
   NONE: 'neutral',
   ISSUED: 'success',
   FAILED: 'danger',
+  // Data migration & onboarding toolkit (step 3.5.1) — ImportBatchStatus
+  // not already covered above (FAILED is reused as-is) — additive only.
+  UPLOADED: 'neutral',
+  VALIDATING: 'info',
+  DRY_RUN_COMPLETE: 'info',
+  COMMITTING: 'info',
+  COMMITTED: 'success',
+  COMMITTED_WITH_ERRORS: 'warning',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

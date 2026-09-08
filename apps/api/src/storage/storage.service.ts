@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { Readable } from 'node:stream';
 
 export interface UploadObjectParams {
@@ -74,5 +74,15 @@ export class StorageService {
   async downloadObject(key: string): Promise<DownloadedObject> {
     const result = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
     return { body: result.Body as Readable, contentType: result.ContentType };
+  }
+
+  /**
+   * Additive (step 3.5.1, the data migration toolkit's uploaded-file purge
+   * sweep — see docs/conventions/data-migration.md) — the first real
+   * consumer that ever needs to remove an object rather than only write/read
+   * one. No caller before this step needed to delete a stored object.
+   */
+  async deleteObject(key: string): Promise<void> {
+    await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 }

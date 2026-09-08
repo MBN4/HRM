@@ -85,6 +85,14 @@ export const PERMISSIONS = {
   // already document for themselves — TENANT_ADMIN only (via
   // ALL_PERMISSIONS), deliberately NOT copied into HR_MANAGER's list.
   BRANDING_MANAGE: 'branding.manage',
+  // Step 3.5.1 (data migration & onboarding toolkit) — self-serve import of
+  // a new client's existing HR data. Setup/onboarding territory rather than
+  // day-to-day HR policy, but unlike BILLING_MANAGE/BRANDING_MANAGE this is
+  // work HR_MANAGER genuinely owns in practice (the same reasoning
+  // COUNTRY_PACK_OVERRIDE_MANAGE/CUSTOM_FIELD_MANAGE already document for
+  // themselves) — granted to TENANT_ADMIN (via ALL_PERMISSIONS) and
+  // explicitly to HR_MANAGER, deliberately NOT MANAGER/EMPLOYEE.
+  MIGRATION_MANAGE: 'migration.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -149,6 +157,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.LMS_AUTHOR,
     PERMISSIONS.LMS_ASSIGN,
     PERMISSIONS.LMS_MANAGE,
+    PERMISSIONS.MIGRATION_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

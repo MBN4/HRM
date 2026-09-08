@@ -213,3 +213,44 @@ export interface BrandingDomain {
   certExpiresAt: string | null;
   createdAt: string;
 }
+
+// Data migration & onboarding toolkit (step 3.5.1) — vendor onboarding
+// import surface. See docs/conventions/data-migration.md and
+// docs/conventions/vendor-console.md.
+export type ImportBatchStatus =
+  | 'UPLOADED'
+  | 'VALIDATING'
+  | 'DRY_RUN_COMPLETE'
+  | 'COMMITTING'
+  | 'COMMITTED'
+  | 'COMMITTED_WITH_ERRORS'
+  | 'FAILED';
+
+export interface ImportBatch {
+  id: string;
+  entityType: string;
+  mode: 'PARTIAL' | 'ALL_OR_NOTHING';
+  status: ImportBatchStatus;
+  fileName: string;
+  fileFormat: 'CSV' | 'XLSX';
+  totalRows: number;
+  processedRows: number;
+  createCount: number;
+  updateCount: number;
+  skipCount: number;
+  errorCount: number;
+  failureReason: string | null;
+  initiatedByPlatformAdminId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportRowError {
+  id: string;
+  importBatchId: string;
+  phase: 'DRY_RUN' | 'COMMIT';
+  rowNumber: number;
+  message: string;
+  rowData: Record<string, unknown>;
+  createdAt: string;
+}

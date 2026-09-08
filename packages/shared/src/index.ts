@@ -48,3 +48,4 @@ export * from './integrations/slack.validator';
 export * from './validators/platform.validator';
 export * from './validators/billing.validator';
 export * from './validators/branding.validator';
+export * from './validators/migration.validator';

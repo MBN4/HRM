@@ -40,6 +40,8 @@ export const PLATFORM_PERMISSIONS = {
   BRANDING_READ: 'platform.branding.read',
   /** Step 4.3 — verify/approve a tenant's custom domain, provision TLS for it, or force-reset a tenant's branding to defaults. OWNER-only, same posture as BILLING_MANAGE. */
   BRANDING_MANAGE: 'platform.branding.manage',
+  /** Step 3.5.1 — run/oversee the data migration toolkit on a tenant's behalf during onboarding (upload, dry-run, commit, review error reports). Onboarding-support work, the same non-destructive risk tier IMPERSONATION_START already documents for itself — held by BOTH roles. */
+  TENANT_MIGRATION_MANAGE: 'platform.tenant.migration.manage',
 } as const;
 
 export type PlatformPermissionKey = (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];
@@ -65,5 +67,6 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleNameKey, readonly Pla
     PLATFORM_PERMISSIONS.IMPERSONATION_START,
     PLATFORM_PERMISSIONS.BILLING_READ,
     PLATFORM_PERMISSIONS.BRANDING_READ,
+    PLATFORM_PERMISSIONS.TENANT_MIGRATION_MANAGE,
   ],
 };

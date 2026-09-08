@@ -101,6 +101,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/vendor-console.md`](./docs/conventions/vendor-console.md)                   | The vendor super-admin console: platform identity/roles (separate from tenant `User`), mandatory MFA, the cross-tenant owner-`prisma` access pattern, tenant lifecycle (incl. `TENANT_STATUS` now enforced), Country Pack authoring/versioning, usage metrics, and impersonation + its audit guarantees. (4.1) |
 | [`docs/conventions/billing.md`](./docs/conventions/billing.md)                                 | SaaS-only billing via Stripe: real Subscription-state production (replacing the 0.6 stub), seat metering, the Stripe adapter seam (real vs. mock), signed/idempotent inbound webhooks, proration preview vs. the authoritative charge, AMC invoicing, and non-payment → suspension. (4.2)                      |
 | [`docs/conventions/white-label.md`](./docs/conventions/white-label.md)                         | Per-tenant branding model + hot-path caching, theme tokens across portal/mobile/email, the branded-custom-domain + TLS-provisioning seam extending 0.3's resolution, the gated full-rebrand capability (live-re-checked), and vendor oversight + dual audit. (4.3)                                             |
+| [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md)                   | Data migration & onboarding toolkit: dry-run-via-rollback safety model, importers routed through the real Employee/Leave services, natural-key idempotency, manager-by-code linking, column-mapping templates, uploaded-file purge, tenant self-serve vs. platform-on-behalf-of. (3.5.1)                       |
 
 ## 5. Build log summary
 
@@ -444,6 +445,39 @@ additive configuration or a new DI binding, never a fork of this codebase.
 Stripe (4.2) + white-label/branding (4.3) — the platform is now a
 commercially operable SaaS AND on-prem product built entirely on top of
 Phase 0–3's foundation.
+
+- **3.5.1** — Data migration & onboarding toolkit (Phase 3.5's first
+  slice, the go-live enabler): a two-phase `ImportBatch`
+  (VALIDATE/dry-run — proven never to write, via a deliberate
+  transaction-rollback sentinel, not a second hand-maintained "preview"
+  code path — then COMMIT, refused unless the last dry run succeeded)
+  importing BRANCH/DEPARTMENT/DESIGNATION/COST_CENTER (direct writes, no
+  dedicated service exists for these), EMPLOYEE (routed through the REAL
+  1.1 `EmployeeService`, so country-driven required fields/encryption/
+  custom fields are enforced identically to a direct API call, plus
+  manager-by-employeeCode linking resolved after every row is staged),
+  LEAVE_BALANCE opening balances (routed through 1.2's `LeaveBalanceService`,
+  a new additive `setOpeningBalance` — a SET, not the existing `adjust()`
+  action's DELTA), and scoped-down, read-only ATTENDANCE_HISTORY/
+  PAYSLIP_HISTORY (two new dedicated tables, never the real recomputed/
+  tax-engine-driven ones). Natural-key upsert in every importer plus the
+  batch's own status-machine guard make re-running an import safe.
+  CSV/XLSX column mapping (a NEW `xlsx` dependency), reusable
+  `ColumnMappingTemplate`s, a downloadable per-row CSV error report,
+  uploaded-file purge after a retention window, and both a tenant
+  self-serve portal wizard (`migration.manage`) and a vendor/platform
+  onboarding surface on a tenant's behalf (`TENANT_MIGRATION_MANAGE`,
+  dual-audited exactly like 4.1/4.2/4.3's own platform actions). See
+  [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
+  Phase 3.5 remaining: **3.5.2** (benefits administration) and **3.5.3**
+  (e-signatures) are not yet built; **3.5.4** (statutory reporting) is
+  deferred.
+
+- [x] **3.5.1** Data migration & onboarding toolkit — see
+      [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
+- [ ] **3.5.2** Benefits administration — not yet built.
+- [ ] **3.5.3** E-signatures — not yet built.
+- [ ] **3.5.4** Statutory reporting — deferred.
 
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to
       partition `audit_log` — see
