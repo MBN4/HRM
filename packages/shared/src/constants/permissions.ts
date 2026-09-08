@@ -93,6 +93,17 @@ export const PERMISSIONS = {
   // themselves) — granted to TENANT_ADMIN (via ALL_PERMISSIONS) and
   // explicitly to HR_MANAGER, deliberately NOT MANAGER/EMPLOYEE.
   MIGRATION_MANAGE: 'migration.manage',
+  // Step 3.5.2 (benefits administration) — the same read/self-service/
+  // manage split EXPENSE_READ/EXPENSE_WRITE/EXPENSE_MANAGE already
+  // establish: BENEFITS_READ (view plans + your own enrollments — seeded
+  // onto every role including EMPLOYEE), BENEFITS_ENROLL (self-elect a
+  // self-election-enabled plan, add/remove your own dependents — also
+  // seeded broadly), BENEFITS_MANAGE (define plans, enroll/unenroll ANY
+  // employee, view branch-scoped cost reporting — TENANT_ADMIN/HR_MANAGER
+  // only).
+  BENEFITS_READ: 'benefits.read',
+  BENEFITS_ENROLL: 'benefits.enroll',
+  BENEFITS_MANAGE: 'benefits.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -158,6 +169,9 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.LMS_ASSIGN,
     PERMISSIONS.LMS_MANAGE,
     PERMISSIONS.MIGRATION_MANAGE,
+    PERMISSIONS.BENEFITS_READ,
+    PERMISSIONS.BENEFITS_ENROLL,
+    PERMISSIONS.BENEFITS_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -186,6 +200,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.LMS_READ,
     PERMISSIONS.LMS_ENROLL,
     PERMISSIONS.LMS_ASSIGN,
+    PERMISSIONS.BENEFITS_READ,
+    PERMISSIONS.BENEFITS_ENROLL,
   ],
   [SYSTEM_ROLES.EMPLOYEE]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -207,5 +223,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.POLICY_READ,
     PERMISSIONS.LMS_READ,
     PERMISSIONS.LMS_ENROLL,
+    PERMISSIONS.BENEFITS_READ,
+    PERMISSIONS.BENEFITS_ENROLL,
   ],
 };

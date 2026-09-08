@@ -1,13 +1,16 @@
 import { Inject } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
-import type { Prisma } from '@hrm/db';
+import type { Employee, Prisma } from '@hrm/db';
 import { Prisma as PrismaNS, withTenantContext } from '@hrm/db';
 import { PAYROLL_RUN_QUEUE } from '../../queue/queue.constants';
 import { IdempotencyService } from '../../resilience/idempotency/idempotency.service';
+import { EncryptionService } from '../../common/encryption/encryption.service';
+import { resolveActiveBenefitContributions } from '../../benefits/benefits-payroll-input.util';
 import { resolvePayrollPackConfig, ResolvedPayrollPack } from '../payroll-pack.util';
 import { PayrollEngineService } from '../engine/payroll-engine.service';
 import { PAYROLL_PROVIDER_ADAPTER, PayrollProviderAdapter } from '../delegate/payroll-provider.interface';
+import { buildPayrollVariables, computeYearsOfService, periodEndDate, periodStartDate } from '../payroll-variables.util';
 import { MultiCurrencyRollupService } from './multi-currency-rollup.service';
 import { ExchangeRateService } from './exchange-rate.service';
 import type { PayrollRunJobData } from './payroll-run-queue.service';
@@ -39,6 +42,7 @@ export class PayrollRunProcessor extends WorkerHost {
     private readonly engine: PayrollEngineService,
     private readonly rollup: MultiCurrencyRollupService,
     private readonly exchangeRates: ExchangeRateService,
+    private readonly encryption: EncryptionService,
     @Inject(PAYROLL_PROVIDER_ADAPTER) private readonly delegateAdapter: PayrollProviderAdapter,
   ) {
     super();
@@ -116,6 +120,19 @@ export class PayrollRunProcessor extends WorkerHost {
               ? { ...(await this.delegateAdapter.submitEmployee(tx, tenantId, employee, pack, period)), computedVia: 'DELEGATE' as const }
               : { ...(await this.engine.computeForEmployee(tx, employee, pack, period)), computedVia: 'ENGINE' as const };
 
+          // Benefits payroll-input hand-off (step 3.5.2, ORCHESTRATION
+          // only — see docs/conventions/benefits.md). Mirrors the
+          // reimbursement hand-off below exactly: an additive touch to
+          // this PROCESSOR, never to `PayrollEngineService`/the rules
+          // engine. Every ACTIVE, payroll-affecting `BenefitEnrollment`
+          // for this employee/period produces an employee deduction/
+          // employer contribution pair, applied BEFORE reimbursements
+          // (a benefit contribution is computed against GROSS pay, the
+          // same timing a CountryPack statutory component uses; a
+          // reimbursement is explicitly a straight net-pay add-on, the
+          // last step).
+          const withBenefits = await this.mergeBenefitContributions(tx, tenantId, employee, run, result);
+
           // Expense reimbursement hand-off (step 3.1, ORCHESTRATION only —
           // see docs/conventions/operations-modules.md). Mirrors the
           // FINAL_SETTLEMENT hand-off's own shape: an additive touch to
@@ -130,7 +147,7 @@ export class PayrollRunProcessor extends WorkerHost {
             tenantId,
             employeeId,
             run.currencyCode,
-            result,
+            withBenefits,
           );
 
           await this.upsertLine(tx, tenantId, payrollRunId, employeeId, branchId, {
@@ -144,13 +161,41 @@ export class PayrollRunProcessor extends WorkerHost {
             computedAt: new Date(),
           });
 
+          const line = await tx.payrollRunLine.findUniqueOrThrow({
+            where: { tenantId_payrollRunId_employeeId: { tenantId, payrollRunId, employeeId } },
+          });
+
           if (reimbursedClaimIds.length > 0) {
-            const line = await tx.payrollRunLine.findUniqueOrThrow({
-              where: { tenantId_payrollRunId_employeeId: { tenantId, payrollRunId, employeeId } },
-            });
             await tx.expenseClaim.updateMany({
               where: { tenantId, id: { in: reimbursedClaimIds } },
               data: { status: 'REIMBURSED', reimbursementPayrollRunLineId: line.id, reimbursedAt: new Date() },
+            });
+          }
+
+          for (const contribution of withBenefits.contributions) {
+            await tx.benefitContributionRecord.upsert({
+              where: {
+                tenantId_enrollmentId_periodYear_periodMonth: {
+                  tenantId,
+                  enrollmentId: contribution.enrollmentId,
+                  periodYear: run.periodYear,
+                  periodMonth: run.periodMonth,
+                },
+              },
+              update: { payrollRunId, payrollRunLineId: line.id, employeeAmount: contribution.employeeAmount, employerAmount: contribution.employerAmount },
+              create: {
+                tenantId,
+                employeeId,
+                planId: contribution.planId,
+                enrollmentId: contribution.enrollmentId,
+                payrollRunId,
+                payrollRunLineId: line.id,
+                periodYear: run.periodYear,
+                periodMonth: run.periodMonth,
+                currencyCode: run.currencyCode,
+                employeeAmount: contribution.employeeAmount,
+                employerAmount: contribution.employerAmount,
+              },
             });
           }
         }),
@@ -222,6 +267,67 @@ export class PayrollRunProcessor extends WorkerHost {
     };
   }
 
+  /**
+   * Every ACTIVE, payroll-affecting `BenefitEnrollment` for this employee/
+   * period (see `resolveActiveBenefitContributions`, imported directly —
+   * plain-function reuse across the module boundary, the SAME
+   * `countBusinessDays`/`computeStatutoryComponent` pattern this
+   * processor/engine already establish) produces an employee deduction +
+   * employer contribution pair, added straight onto net pay/employer cost
+   * — see docs/conventions/benefits.md. Computed against the variables the
+   * engine/adapter has ALREADY resolved this period (`result.grossPay`),
+   * exactly like a CountryPack `statutory.component` would be. Persisting
+   * the actual `BenefitContributionRecord` rows happens back in
+   * `processEmployee`, once this employee's line id is known.
+   */
+  private async mergeBenefitContributions(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    employee: Employee,
+    run: { periodYear: number; periodMonth: number },
+    result: { grossPay: number; netPay: number; employerCost: number; componentBreakdown: unknown },
+  ): Promise<{
+    netPay: number;
+    employerCost: number;
+    componentBreakdown: unknown;
+    contributions: { enrollmentId: string; planId: string; employeeAmount: number; employerAmount: number }[];
+  }> {
+    const periodStart = periodStartDate(run.periodYear, run.periodMonth);
+    const periodEnd = periodEndDate(run.periodYear, run.periodMonth);
+    const basicSalaryMonthly = employee.baseSalaryEncrypted ? Number(this.encryption.decrypt(employee.baseSalaryEncrypted)) : 0;
+    const yearsOfService = computeYearsOfService(employee.joinDate, periodEnd);
+    const variables = buildPayrollVariables({ basicSalaryMonthly, periodGross: result.grossPay, yearsOfService });
+
+    const resolved = await resolveActiveBenefitContributions(tx, tenantId, employee, periodStart, periodEnd, variables);
+    if (resolved.length === 0) {
+      return { netPay: result.netPay, employerCost: result.employerCost, componentBreakdown: result.componentBreakdown, contributions: [] };
+    }
+
+    const breakdown = Array.isArray(result.componentBreakdown) ? [...(result.componentBreakdown as unknown[])] : [];
+    let netPay = result.netPay;
+    let employerCost = result.employerCost;
+    const contributions: { enrollmentId: string; planId: string; employeeAmount: number; employerAmount: number }[] = [];
+
+    for (const { enrollment, contribution } of resolved) {
+      if (contribution.employeeAmount > 0) {
+        netPay -= contribution.employeeAmount;
+        breakdown.push({ key: `benefit_${enrollment.planId}_employee`, label: `${contribution.planName} (Employee)`, type: 'DEDUCTION', amount: contribution.employeeAmount });
+      }
+      if (contribution.employerAmount > 0) {
+        employerCost += contribution.employerAmount;
+        breakdown.push({ key: `benefit_${enrollment.planId}_employer`, label: `${contribution.planName} (Employer)`, type: 'EMPLOYER_COST', amount: contribution.employerAmount });
+      }
+      contributions.push({
+        enrollmentId: contribution.enrollmentId,
+        planId: contribution.planId,
+        employeeAmount: contribution.employeeAmount,
+        employerAmount: contribution.employerAmount,
+      });
+    }
+
+    return { netPay: round2(netPay), employerCost: round2(employerCost), componentBreakdown: breakdown, contributions };
+  }
+
   private async upsertLine(
     tx: Prisma.TransactionClient,
     tenantId: string,
@@ -278,6 +384,10 @@ export class PayrollRunProcessor extends WorkerHost {
       },
     });
   }
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function sumDecimal(values: (Prisma.Decimal | null)[]): Prisma.Decimal {

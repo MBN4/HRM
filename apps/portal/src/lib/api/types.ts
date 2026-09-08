@@ -1198,3 +1198,83 @@ export interface ColumnMappingTemplate {
   createdAt: string;
   updatedAt: string;
 }
+
+// --- Benefits Administration (step 3.5.2) ------------------------------
+
+export type BenefitType = 'HEALTH_INSURANCE' | 'PROVIDENT_FUND' | 'PENSION' | 'LIFE_INSURANCE' | 'BONUS_INCENTIVE' | 'ALLOWANCE' | 'OTHER';
+export type BenefitCostBasis = 'FIXED_AMOUNT' | 'PERCENTAGE_OF_BASE' | 'FORMULA';
+export type BenefitEnrollmentStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'CANCELLED' | 'EXPIRED';
+
+export interface BenefitPlanTier {
+  id: string;
+  planId: string;
+  key: string;
+  label: string;
+  employeeAmount: string;
+  employerAmount: string;
+  order: number;
+}
+
+export interface BenefitPlan {
+  id: string;
+  code: string;
+  name: string;
+  benefitType: BenefitType;
+  description: string | null;
+  currencyCode: string;
+  costBasis: BenefitCostBasis;
+  fixedAmount: string | null;
+  percentageOfBase: string | null;
+  percentageRate: number | null;
+  formula: unknown;
+  employeeSharePercent: number;
+  employerSharePercent: number;
+  hasTiers: boolean;
+  allowSelfElection: boolean;
+  requiresApproval: boolean;
+  affectsPayroll: boolean;
+  isActive: boolean;
+  tiers: BenefitPlanTier[];
+}
+
+export interface BenefitEnrollment {
+  id: string;
+  employeeId: string;
+  planId: string;
+  coverageTierId: string | null;
+  status: BenefitEnrollmentStatus;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  workflowInstanceId: string | null;
+  dependents: { employeeDependentId: string }[];
+  createdAt: string;
+}
+
+export interface BenefitStatutoryComponent {
+  name: string;
+  appliesTo: 'EMPLOYEE' | 'EMPLOYER' | 'BOTH';
+  kind: 'PERCENTAGE' | 'TIERED_BY_YEARS_OF_SERVICE' | 'FORMULA';
+}
+
+export interface BenefitStatutoryPreview {
+  countryCode: string;
+  components: BenefitStatutoryComponent[];
+}
+
+export interface BenefitCostReportLine {
+  planId?: string;
+  name?: string;
+  planName?: string;
+  benefitType?: string;
+  /** Present only for a caller with `salary.view` — omitted (not null) otherwise. Always check `'employeeTotal' in line` rather than truthiness. */
+  employeeTotal?: string;
+  /** Present only for a caller with `salary.view` — omitted (not null) otherwise. Always check `'employerTotal' in line` rather than truthiness. */
+  employerTotal?: string;
+}
+
+export interface BenefitCostReport {
+  periodYear: number;
+  periodMonth: number;
+  plans: BenefitCostReportLine[];
+  statutory: BenefitCostReportLine[];
+}

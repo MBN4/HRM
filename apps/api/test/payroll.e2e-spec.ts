@@ -313,8 +313,15 @@ describe('payroll (e2e)', () => {
       const state = annualSalary * 0.05;
       const ss = Math.min(annualSalary, 168_600) * 0.062;
       const medicare = annualSalary * 0.0145;
+      // State Disability Insurance — added in step 3.5.2 (Benefits
+      // administration) as the US pack's first EMPLOYEE-side statutory
+      // component (see docs/conventions/benefits.md) — reduces net pay
+      // exactly like the tax layers above, computed by the SAME unmodified
+      // engine.
+      const sdi = Math.min(annualSalary, 153_164) * 0.009;
       const expectedMonthlyTax = Math.round(((fed + state + ss + medicare) / 12) * 100) / 100;
-      const expectedNet = Math.round((expectedGross - expectedMonthlyTax) * 100) / 100;
+      const expectedMonthlySdi = Math.round((sdi / 12) * 100) / 100;
+      const expectedNet = Math.round((expectedGross - expectedMonthlyTax - expectedMonthlySdi) * 100) / 100;
       expect(Number(mainLine.netPay)).toBeCloseTo(expectedNet, 1);
       expect(mainLine.computedVia).toBe('ENGINE');
 
@@ -322,6 +329,9 @@ describe('payroll (e2e)', () => {
       const breakdown = mainLine.componentBreakdown as { key: string; type: string }[];
       expect(breakdown.some((c) => c.key === 'futa' && c.type === 'EMPLOYER_COST')).toBe(true);
       expect(breakdown.some((c) => c.key === 'futa' && c.type === 'EMPLOYEE_STATUTORY')).toBe(false);
+      // SDI is EMPLOYEE-only — the opposite shape from FUTA, same engine.
+      expect(breakdown.some((c) => c.key === 'state_disability_insurance' && c.type === 'EMPLOYEE_STATUTORY')).toBe(true);
+      expect(breakdown.some((c) => c.key === 'state_disability_insurance' && c.type === 'EMPLOYER_COST')).toBe(false);
       expect(Number(mainLine.employerCost)).toBeGreaterThan(Number(mainLine.grossPay));
     });
 
@@ -338,7 +348,12 @@ describe('payroll (e2e)', () => {
 
       // No income tax at all (Qatar's tax.layers: []).
       expect(Number(line.grossPay)).toBeCloseTo(9000, 2);
-      expect(Number(line.netPay)).toBeCloseTo(9000, 2); // gratuity is EMPLOYER-only, never reduces net pay.
+      // GRSIA pension — added in step 3.5.2 (Benefits administration) as
+      // this pack's first EMPLOYEE-side statutory deduction (see
+      // docs/conventions/benefits.md); 5% of basicSalary (9000), unlike the
+      // gratuity below this DOES reduce net pay.
+      const expectedGrsiaEmployee = Math.round(9000 * 0.05 * 100) / 100;
+      expect(Number(line.netPay)).toBeCloseTo(9000 - expectedGrsiaEmployee, 2);
 
       const breakdown = line.componentBreakdown as { key: string; type: string; amount: number }[];
       const gratuity = breakdown.find((c) => c.key === 'end_of_service_gratuity');
@@ -350,6 +365,13 @@ describe('payroll (e2e)', () => {
       // formula would return if the engine mistakenly used it directly.
       expect(gratuity!.amount).toBeGreaterThan(50);
       expect(gratuity!.amount).toBeLessThan(2000);
+
+      const grsiaEmployee = breakdown.find((c) => c.key === 'grsia_pension_employee');
+      const grsiaEmployer = breakdown.find((c) => c.key === 'grsia_pension_employer');
+      expect(grsiaEmployee?.type).toBe('EMPLOYEE_STATUTORY');
+      expect(grsiaEmployee?.amount).toBeCloseTo(expectedGrsiaEmployee, 2);
+      expect(grsiaEmployer?.type).toBe('EMPLOYER_COST');
+      expect(grsiaEmployer?.amount).toBeCloseTo(Math.round(9000 * 0.1 * 100) / 100, 2);
 
       // Multi-currency rollup: QAR -> the tenant's USD base currency, via the seeded exchange rate, exact Decimal math.
       expect(run.totalGrossBase).not.toBeNull();

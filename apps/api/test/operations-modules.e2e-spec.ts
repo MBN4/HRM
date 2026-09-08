@@ -336,11 +336,13 @@ describe('operations modules (e2e)', () => {
         expect(run.status).toBe('CALCULATED');
 
         const line = await prisma.payrollRunLine.findFirstOrThrow({ where: { payrollRunId: runId, employeeId: reportEmployeeId } });
-        // No income tax in Qatar's pack, no employee-side statutory
-        // deduction — net pay is basic salary (9000) PLUS the 1500 QAR
-        // reimbursement, added straight on by `PayrollRunProcessor`
-        // (never by `PayrollEngineService`/the rules engine).
-        expect(Number(line.netPay)).toBeCloseTo(10500, 2);
+        // No income tax in Qatar's pack — but since step 3.5.2 (Benefits
+        // administration) the pack DOES carry an EMPLOYEE-side GRSIA
+        // pension deduction (5% of basic salary, see
+        // docs/conventions/benefits.md): 9000 - 450 GRSIA + 1500 QAR
+        // reimbursement (added straight on by `PayrollRunProcessor`, never
+        // by `PayrollEngineService`/the rules engine) = 10050.
+        expect(Number(line.netPay)).toBeCloseTo(10050, 2);
         const breakdown = line.componentBreakdown as { key: string; amount: number }[];
         const reimbursementLine = breakdown.find((c) => c.key === 'reimbursements');
         expect(reimbursementLine?.amount).toBeCloseTo(1500, 2);

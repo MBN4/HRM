@@ -18,6 +18,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { LeaveModule } from './leave/leave.module';
 import { LicensingModule } from './licensing/licensing.module';
 import { MigrationModule } from './migration/migration.module';
+import { BenefitsModule } from './benefits/benefits.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { PerformanceModule } from './performance/performance.module';
@@ -107,6 +108,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     // module services (EmployeeService, LeaveBalanceService, ...). See
     // docs/conventions/data-migration.md.
     MigrationModule,
+    BenefitsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

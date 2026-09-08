@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   CreditCard,
   GraduationCap,
+  HeartPulse,
   LayoutDashboard,
   LifeBuoy,
   Megaphone,
@@ -50,6 +51,7 @@ export function Sidebar() {
     { href: '/leave', label: t('nav.leave'), icon: CalendarDays },
     { href: '/attendance', label: t('nav.attendance'), icon: CalendarClock },
     { href: '/expenses', label: t('nav.expenses'), icon: Receipt },
+    { href: '/benefits', label: t('nav.benefits'), icon: HeartPulse },
     { href: '/assets', label: t('nav.assets'), icon: Boxes },
     { href: '/helpdesk', label: t('nav.helpdesk'), icon: LifeBuoy },
     { href: '/learning', label: t('nav.learning'), icon: GraduationCap },
@@ -115,6 +117,10 @@ export function Sidebar() {
   // docs/conventions/data-migration.md.
   if (can(PERMISSIONS.MIGRATION_MANAGE)) {
     adminItems.push({ href: '/migration', label: t('nav.migration'), icon: Upload });
+  }
+  // Benefits administration (step 3.5.2) — see docs/conventions/benefits.md.
+  if (can(PERMISSIONS.BENEFITS_MANAGE)) {
+    adminItems.push({ href: '/benefits/admin', label: t('nav.benefitsAdmin'), icon: HeartPulse });
   }
 
   return (

@@ -98,6 +98,10 @@ const STATUS_TONE: Record<string, Tone> = {
   COMMITTING: 'info',
   COMMITTED: 'success',
   COMMITTED_WITH_ERRORS: 'warning',
+  // Benefits administration (step 3.5.2) — BenefitEnrollmentStatus not
+  // already covered above (PENDING_APPROVAL/ACTIVE/CANCELLED are reused
+  // as-is) — additive only.
+  EXPIRED: 'neutral',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

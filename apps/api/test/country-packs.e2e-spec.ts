@@ -171,7 +171,11 @@ describe('country packs (e2e)', () => {
       expect(res.body.locale.rtl).toBe(true);
       expect(res.body.workingTime.weekendDays.slice().sort()).toEqual(['FRIDAY', 'SATURDAY']);
       expect(res.body.tax.layers).toEqual([]);
-      expect(res.body.statutory.components.map((c: { name: string }) => c.name)).toEqual(['end_of_service_gratuity']);
+      expect(res.body.statutory.components.map((c: { name: string }) => c.name)).toEqual([
+        'end_of_service_gratuity',
+        'grsia_pension_employee',
+        'grsia_pension_employer',
+      ]);
       expect(res.body.requiredEmployeeFields).toEqual(['QATAR_ID', 'VISA_SPONSORSHIP']);
     });
 
@@ -195,6 +199,8 @@ describe('country packs (e2e)', () => {
       expect(putRes.body.leaveDefaults.sickDays).toBe(14);
       expect(putRes.body.statutory.components.map((c: { name: string }) => c.name)).toEqual([
         'end_of_service_gratuity',
+        'grsia_pension_employee',
+        'grsia_pension_employer',
       ]);
 
       const getRes = await getEffective(TENANT_A_SLUG, tokenAdminA, branchAQaId).expect(200);

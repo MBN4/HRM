@@ -53,16 +53,29 @@ describe('computeStatutoryComponent', () => {
 });
 
 describe('cross-country divergence proof: the SAME computeStatutoryComponents function, different data', () => {
-  it('the US pack has no end-of-service-style component; Qatar has no percentage-of-salary withholding component', () => {
+  it('the US pack has no end-of-service-style component; Qatar has no PROGRESSIVE_BRACKETS-style component', () => {
     expect(USA_PACK.statutory.components.some((c) => c.kind === 'TIERED_BY_YEARS_OF_SERVICE')).toBe(false);
-    expect(QATAR_PACK.statutory.components.some((c) => c.kind === 'PERCENTAGE')).toBe(false);
+    expect(QATAR_PACK.statutory.components.some((c) => (c.kind as string) === 'PROGRESSIVE_BRACKETS')).toBe(false);
+  });
+
+  // Step 3.5.2 (Benefits administration, see docs/conventions/benefits.md)
+  // added an EMPLOYEE-side PERCENTAGE component to EACH reference pack
+  // (US: state_disability_insurance; Qatar: grsia_pension_employee) —
+  // previously the US pack's only statutory component (FUTA) was
+  // employer-only and Qatar's only component (the gratuity) was TIERED,
+  // not PERCENTAGE at all. This proves the SAME generic PERCENTAGE
+  // algorithm now applies to both countries' employee-side withholding,
+  // still with zero country-code branch in the calculator itself.
+  it('both packs now carry an EMPLOYEE-side PERCENTAGE statutory component, computed by the SAME generic algorithm', () => {
+    expect(USA_PACK.statutory.components.some((c) => c.kind === 'PERCENTAGE' && c.appliesTo === 'EMPLOYEE')).toBe(true);
+    expect(QATAR_PACK.statutory.components.some((c) => c.kind === 'PERCENTAGE' && c.appliesTo === 'EMPLOYEE')).toBe(true);
   });
 
   it('computes both countries\' full statutory component sets without any country-code branch in the calculator itself', () => {
     const usResults = computeStatutoryComponents(USA_PACK.statutory.components, { annualSalary: 60_000 });
     const qaResults = computeStatutoryComponents(QATAR_PACK.statutory.components, { basicSalary: 5_000, yearsOfService: 10 });
 
-    expect(usResults.map((r) => r.name)).toEqual(['futa']);
-    expect(qaResults.map((r) => r.name)).toEqual(['end_of_service_gratuity']);
+    expect(usResults.map((r) => r.name)).toEqual(['futa', 'state_disability_insurance']);
+    expect(qaResults.map((r) => r.name)).toEqual(['end_of_service_gratuity', 'grsia_pension_employee', 'grsia_pension_employer']);
   });
 });

@@ -90,6 +90,23 @@ export const USA_PACK: CountryPackConfig = {
         rate: 0.006,
         cap: 7_000,
       },
+      {
+        // State Disability Insurance — illustrative EMPLOYEE-side statutory
+        // withholding (several US states, e.g. California, mandate one).
+        // Added in step 3.5.2 (Benefits administration) specifically to
+        // demonstrate an EMPLOYEE-side statutory component on the US pack —
+        // FUTA above is employer-only, so this is the pack's first employee
+        // withholding outside `tax.layers`. Computed by the SAME unmodified
+        // `computeStatutoryComponent` PayrollEngineService already calls for
+        // every statutory component — no engine change was needed for this
+        // addition to take effect. See docs/conventions/benefits.md.
+        name: 'state_disability_insurance',
+        appliesTo: 'EMPLOYEE',
+        kind: 'PERCENTAGE',
+        base: 'annualSalary',
+        rate: 0.009,
+        cap: 153_164,
+      },
     ],
   },
   requiredEmployeeFields: ['SSN', 'W4'],
@@ -140,8 +157,7 @@ export const QATAR_PACK: CountryPackConfig = {
       {
         // End-of-service gratuity: illustrative 3 weeks' basic salary per year for the first 5
         // years of service, 4 weeks' basic salary per year beyond that — employer-funded, no
-        // employee withholding. (Qatar's GRSIA pension scheme, which applies only to Qatari
-        // national employees, is deliberately out of scope for this reference pack.)
+        // employee withholding.
         name: 'end_of_service_gratuity',
         appliesTo: 'EMPLOYER',
         kind: 'TIERED_BY_YEARS_OF_SERVICE',
@@ -150,6 +166,35 @@ export const QATAR_PACK: CountryPackConfig = {
           { upToYears: 5, weeksPerYear: 3 },
           { upToYears: null, weeksPerYear: 4 },
         ],
+      },
+      {
+        // GRSIA — Qatar's General Retirement and Social Insurance Authority
+        // pension scheme (applies, in reality, only to Qatari national
+        // employees; modeled here for every employee on this reference
+        // pack, illustrative/simplified for demonstration purposes, not
+        // certified guidance). Previously an explicitly-flagged gap in this
+        // reference pack ("deliberately out of scope") — added in step
+        // 3.5.2 (Benefits administration) as two asymmetric PERCENTAGE
+        // components (illustrative rates: 5% employee, 10% employer, of
+        // basic salary — a real scheme's employee/employer rates typically
+        // differ, which a single `BOTH` component can't express since it
+        // applies one rate to both sides equally), proving Benefits'
+        // statutory surface needs no engine change: `PayrollEngineService`
+        // already applies every `statutory.components` entry generically,
+        // employee and employer sides alike. See
+        // docs/conventions/benefits.md.
+        name: 'grsia_pension_employee',
+        appliesTo: 'EMPLOYEE',
+        kind: 'PERCENTAGE',
+        base: 'basicSalary',
+        rate: 0.05,
+      },
+      {
+        name: 'grsia_pension_employer',
+        appliesTo: 'EMPLOYER',
+        kind: 'PERCENTAGE',
+        base: 'basicSalary',
+        rate: 0.1,
       },
     ],
   },

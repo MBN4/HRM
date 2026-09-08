@@ -102,6 +102,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/billing.md`](./docs/conventions/billing.md)                                 | SaaS-only billing via Stripe: real Subscription-state production (replacing the 0.6 stub), seat metering, the Stripe adapter seam (real vs. mock), signed/idempotent inbound webhooks, proration preview vs. the authoritative charge, AMC invoicing, and non-payment → suspension. (4.2)                      |
 | [`docs/conventions/white-label.md`](./docs/conventions/white-label.md)                         | Per-tenant branding model + hot-path caching, theme tokens across portal/mobile/email, the branded-custom-domain + TLS-provisioning seam extending 0.3's resolution, the gated full-rebrand capability (live-re-checked), and vendor oversight + dual audit. (4.3)                                             |
 | [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md)                   | Data migration & onboarding toolkit: dry-run-via-rollback safety model, importers routed through the real Employee/Leave services, natural-key idempotency, manager-by-code linking, column-mapping templates, uploaded-file purge, tenant self-serve vs. platform-on-behalf-of. (3.5.1)                       |
+| [`docs/conventions/benefits.md`](./docs/conventions/benefits.md)                               | Benefits administration: plan config mirroring `PayrollComponentDefinition`, statutory schemes needing zero payroll-engine change, enrollment + optional workflow approval, the benefits→payroll input hand-off, cost reporting. (3.5.2)                                                                       |
 
 ## 5. Build log summary
 
@@ -469,13 +470,46 @@ Phase 0–3's foundation.
   onboarding surface on a tenant's behalf (`TENANT_MIGRATION_MANAGE`,
   dual-audited exactly like 4.1/4.2/4.3's own platform actions). See
   [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
-  Phase 3.5 remaining: **3.5.2** (benefits administration) and **3.5.3**
-  (e-signatures) are not yet built; **3.5.4** (statutory reporting) is
-  deferred.
+
+- **3.5.2** — Benefits administration (Phase 3.5's second slice): tenant-
+  configurable `BenefitPlan`/`BenefitPlanTier` mirroring
+  `PayrollComponentDefinition`'s own `FIXED_AMOUNT`/`PERCENTAGE_OF_BASE`/
+  `FORMULA` cost structure field-for-field (`FORMULA` reusing 0.5's closed
+  `Expr` AST as-is), one cost split into an employee deduction + employer
+  contribution via `employeeSharePercent`/`employerSharePercent`;
+  `BenefitEnrollment` (admin-assigned or ESS self-elected, reusing 1.1's
+  `EmployeeDependent` directly, optional approval via a REAL 0.7
+  `WorkflowInstance` — THE RULE, zero bespoke logic). THE BOUNDARY, same
+  shape as payroll.md's own: this module never computes pay —
+  `PayrollRunProcessor` gained one additive `mergeBenefitContributions`
+  step (pure functions imported directly, no module coupling either
+  direction) mirroring 3.1's expense-reimbursement hand-off exactly,
+  `PayrollEngineService` itself untouched. Country-mandated STATUTORY
+  schemes needed ZERO payroll-side wiring at all — the engine already
+  applies every resolved CountryPack `statutory.components` entry
+  generically since 0.5/2.1; this step added real asymmetric
+  employee/employer statutory data to BOTH reference packs for the first
+  time (US: `state_disability_insurance`; Qatar: `grsia_pension_employee`/
+  `_employer`, closing a gap the QA pack's own comment had flagged as
+  "deliberately out of scope" since 0.5) plus a third, ad-hoc Pakistan
+  pack (EOBI-style) proving the divergence generically — updating five
+  pre-existing tests' hardcoded net-pay/statutory assertions as a real,
+  foreseeable ripple effect, all green with the new numbers. Cost
+  reporting reads ALREADY-COMPUTED data only (no new rollup table), field-
+  level gated behind `salary.view`. New `apps/portal` pages `/benefits`
+  (ESS) and `/benefits/admin` (plan authoring — `FORMULA` plans
+  deliberately not authorable through the form, the same gap
+  `payroll.ts`'s own `UpsertPayrollComponentInput` already carries). See
+  [`docs/conventions/benefits.md`](./docs/conventions/benefits.md).
+  Phase 3.5 remaining: **3.5.3** (e-signatures) is not yet built; **3.5.4**
+  (statutory reporting) is deferred.
 
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
-- [ ] **3.5.2** Benefits administration — not yet built.
+- [x] **3.5.2** Benefits administration — plan config, statutory schemes
+      (zero engine change), enrollment + optional workflow approval, the
+      benefits→payroll input hand-off, cost reporting. See
+      [`docs/conventions/benefits.md`](./docs/conventions/benefits.md).
 - [ ] **3.5.3** E-signatures — not yet built.
 - [ ] **3.5.4** Statutory reporting — deferred.
 

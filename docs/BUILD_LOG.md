@@ -2719,3 +2719,99 @@ COMMITTED`/`COMMITTED_WITH_ERRORS`/`FAILED`. `POST /migration/batches/:id/commit
   code path is already fully proven by both the backend e2e suite's
   platform-admin scenario and the portal's own Playwright spec). Full-repo
   `pnpm build`/`pnpm lint` green across all workspace tasks.
+- **3.5.2 Benefits administration — done — 2026-09-08.** See
+  [`docs/conventions/benefits.md`](./conventions/benefits.md) for the full
+  write-up. Backend (`packages/db`, `packages/shared`, `apps/api/src/benefits`)
+  - portal UI (`apps/portal`) together, the SAME "thin module, consumer of
+    systems that already exist" posture 3.1's four operations modules
+    established: `BenefitPlan`/`BenefitPlanTier` (tenant-configurable cost
+    structure mirroring `PayrollComponentDefinition` field-for-field —
+    `FIXED_AMOUNT`/`PERCENTAGE_OF_BASE`/`FORMULA`, `FORMULA` reusing 0.5's
+    closed `Expr` AST as-is), `BenefitEnrollment`/`BenefitEnrollmentDependent`
+    (admin-assigned or ESS self-elected, reusing 1.1's `EmployeeDependent`
+    directly, optional approval via a REAL 0.7 `WorkflowInstance`,
+    `entityType: "BENEFIT_ENROLLMENT"` — THE RULE, zero bespoke approval
+    logic), `BenefitContributionRecord` (the per-period payroll-input proof
+    row). THE BOUNDARY, same shape as payroll.md's own: this module never
+    computes pay — `PayrollRunProcessor` gained one additive
+    `mergeBenefitContributions` step (imported as PURE functions from
+    `apps/api/src/benefits/benefits-payroll-input.util.ts`, no NestJS
+    module coupling either direction) mirroring the 3.1 expense-
+    reimbursement hand-off exactly, `PayrollEngineService` itself completely
+    untouched. Country-mandated STATUTORY schemes need NO new payroll-side
+    wiring at all — `PayrollEngineService` already applies every resolved
+    CountryPack `statutory.components` entry generically (employee AND
+    employer sides alike) since 0.5/2.1; this step's own statutory surface
+    (`BenefitsStatutoryService`) is READ-ONLY visibility, calling Payroll's
+    own `resolvePayrollPackConfig` directly. Proven with real, asymmetric
+    employee/employer statutory data added to BOTH reference packs for the
+    first time (US gains an EMPLOYEE-side `state_disability_insurance`
+    alongside the pre-existing employer-only `futa`; Qatar gains a `BOTH`-
+    sided `grsia_pension_employee`/`_employer` pair, closing a gap the QA
+    pack's own comment had explicitly flagged as "deliberately out of
+    scope" since 0.5) — required updating five pre-existing tests'
+    hardcoded net-pay/statutory-component-list assertions across
+    `payroll.e2e-spec.ts`, `country-packs.e2e-spec.ts`,
+    `operations-modules.e2e-spec.ts`, `recruitment-lifecycle.e2e-spec.ts`,
+    and `statutory-calculator.spec.ts` to account for the new components —
+    a real, foreseeable ripple effect of extending shared reference-pack
+    fixtures, caught and fixed, all now passing with the new numbers. A
+    THIRD country (Pakistan, EOBI-style, asymmetric 1%/5% employee/employer)
+    proves the divergence generically without touching either shipped
+    reference pack — an ad-hoc test-only `CountryPack` row, the SAME
+    "test-specific fixture, never touching seed-country-packs.ts" precedent
+    payroll.e2e-spec.ts's own DELEGATE-mode pack already established.
+    Cost reporting (`BenefitsCostReportService`) reads ALREADY-COMPUTED data
+    only — plan totals from `BenefitContributionRecord`, statutory totals
+    read back out of the SAME `PayrollRunLine.componentBreakdown` the
+    engine already produces (filtered to exclude this module's own
+    `benefit_*`-keyed lines, which would otherwise double-count the
+    employer-share plan totals) — never a second aggregation/rollup table,
+    since one branch/period's headcount is a bounded, cheap live query, the
+    same "no rollup needed yet" scope call 3.1's own cost surfaces make for
+    themselves. Money fields (`BenefitContributionRecord`/cost-report
+    amounts) are field-level gated behind `salary.view`, the SAME existing
+    `PermissionSerializerInterceptor`/`@RequiresPermission()` mechanism
+    every other salary-adjacent DTO uses; an employee's OWN
+    `GET /benefits/my-benefits` stays ungated — "your own data is never out
+    of scope." New RBAC: `benefits.read`/`benefits.enroll` (seeded onto
+    every role including EMPLOYEE) vs. `benefits.manage` (TENANT_ADMIN/
+    HR_MANAGER). Portal: `/benefits` (ESS — available plans, elect,
+    dependents, my enrollments) and `/benefits/admin` (plan authoring —
+    `FORMULA` plans deliberately NOT authorable through this form, the SAME
+    documented gap `payroll.ts`'s own `UpsertPayrollComponentInput` already
+    carries; enroll-any-employee; statutory scheme viewer by branch; cost
+    report), a new Sidebar entry in both the ESS and admin nav sections.
+    Deferred, documented seams (per this step's own scope line): no
+    provider-integration adapter (a real insurance-carrier API) and no
+    complex open-enrollment-WINDOW machinery (effective-dated enrollment
+    rows exist; a scheduled "enrollment period opens/closes" job does not).
+    Verified end-to-end over real HTTP by `apps/api/test/benefits.e2e-spec.ts`
+    (14 tests: FIXED_AMOUNT/PERCENTAGE_OF_BASE/FORMULA/tiered plan
+    configuration each producing the correct Decimal employee-deduction +
+    employer-contribution pair in a real payroll run without touching the
+    engine; a tiered plan's dependent + coverage-tier selection changing the
+    resulting cost; a third-country (Pakistan) statutory contribution
+    computed by the identical engine as Qatar's, both differing correctly
+    from the SAME `GET /benefits/statutory` endpoint; enrollment approval
+    via the real 0.7 workflow gating whether a payroll run picks it up at
+    all; branch-scoped cost reporting combining plan + statutory totals with
+    no double-counting, field-omitted for a caller without `salary.view`;
+    deny-by-default RBAC on plan authoring/enrolling-on-behalf/cost
+    reporting; cross-tenant isolation via RLS) plus five pre-existing test
+    files' updated assertions (see above). `apps/api`'s full suite: **493
+    tests green** (479 existing + 14 new). `apps/portal/tests/benefits.spec.ts`
+    (5 Playwright tests: admin authoring a FIXED_AMOUNT and a tiered plan;
+    a manager adding a real dependent via their own profile then electing
+    the FAMILY tier with it covered; a plain employee self-electing a
+    simple plan; the statutory-scheme panel showing different components
+    for a QA vs. a US branch; a QA-branch employee rendering the page
+    right-to-left) — the payroll-input/statutory-divergence/cost-report MATH
+    is proven at the API level already, so this suite only proves UI WIRING,
+    the same posture every prior console's own Playwright spec already
+    takes. `apps/portal`'s full Playwright suite: **90 tests** (85 existing +
+    5 new); one pre-existing, unrelated `operations-modules.spec.ts` test
+    flaked once under full-suite load and passed cleanly in isolation — the
+    SAME class of test-parallelism flakiness this log already documents for
+    itself in 3.5.1/4.3, nothing to do with this step. Full-repo `pnpm
+build`/`pnpm lint` green across all eight workspace tasks.

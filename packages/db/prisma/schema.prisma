@@ -81,26 +81,26 @@ enum TenantProvisionMode {
 // before a tenant context exists to filter by. `TenantDomain` below is the
 // only other table with this same exemption, for the same reason.
 model Tenant {
-  id                 String        @id @default(uuid()) @db.Uuid
+  id                 String              @id @default(uuid()) @db.Uuid
   name               String
-  slug               String        @unique
-  status             TenantStatus  @default(TRIAL)
-  edition            TenantEdition @default(STARTER)
+  slug               String              @unique
+  status             TenantStatus        @default(TRIAL)
+  edition            TenantEdition       @default(STARTER)
   // ISO 3166-1 alpha-2. Branches resolve their own countryCode; this is only
   // the fallback used where a branch hasn't been assigned one.
-  defaultCountryCode String        @map("default_country_code") @db.VarChar(2)
-  hostingRegion      String        @map("hosting_region")
+  defaultCountryCode String              @map("default_country_code") @db.VarChar(2)
+  hostingRegion      String              @map("hosting_region")
   // ISO 4217 — the tenant's REPORTING currency for multi-branch/
   // multi-currency payroll rollups (step 2.1). A small, additive seam
   // column, same pattern as Branch.geofenceLat/Employee.terminatedAt — see
   // docs/conventions/payroll.md. Defaults to USD so no existing tenant row
   // is left null.
-  baseCurrencyCode   String        @default("USD") @map("base_currency_code") @db.VarChar(3)
+  baseCurrencyCode   String              @default("USD") @map("base_currency_code") @db.VarChar(3)
   // Step 4.1 — see TenantProvisionMode above. Vendor-console display/intent
   // field, defaulted so no existing tenant row is left null.
   provisionMode      TenantProvisionMode @default(SHARED_DB) @map("provision_mode")
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
 
   branches                       Branch[]
   departments                    Department[]
@@ -219,6 +219,13 @@ model Tenant {
   migratedAttendanceSummaries MigratedAttendanceSummary[]
   migratedPayslipRecords      MigratedPayslipRecord[]
 
+  // Step 3.5.2 — Benefits administration (see docs/conventions/benefits.md).
+  benefitPlans                BenefitPlan[]
+  benefitPlanTiers            BenefitPlanTier[]
+  benefitEnrollments          BenefitEnrollment[]
+  benefitEnrollmentDependents BenefitEnrollmentDependent[]
+  benefitContributionRecords  BenefitContributionRecord[]
+
   @@map("tenants")
 }
 
@@ -273,11 +280,11 @@ model TenantDomain {
   // Random per-domain token the requester is asked to publish as a DNS TXT
   // record (`_hrm-verify.<domain>`) — proof of control, checked by
   // DomainVerificationService.
-  verificationToken  String                    @map("verification_token")
-  certStatus         DomainCertStatus          @default(NONE) @map("cert_status")
-  certProvisionedAt  DateTime?                 @map("cert_provisioned_at")
-  certExpiresAt      DateTime?                 @map("cert_expires_at")
-  requestedByUserId  String?                   @map("requested_by_user_id") @db.Uuid
+  verificationToken  String                   @map("verification_token")
+  certStatus         DomainCertStatus         @default(NONE) @map("cert_status")
+  certProvisionedAt  DateTime?                @map("cert_provisioned_at")
+  certExpiresAt      DateTime?                @map("cert_expires_at")
+  requestedByUserId  String?                  @map("requested_by_user_id") @db.Uuid
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -293,17 +300,17 @@ model TenantBranding {
   id       String @id @default(uuid()) @db.Uuid
   tenantId String @unique @map("tenant_id") @db.Uuid
 
-  productName      String? @map("product_name")
-  logoStorageKey   String? @map("logo_storage_key")
-  faviconStorageKey String? @map("favicon_storage_key")
+  productName        String?  @map("product_name")
+  logoStorageKey     String?  @map("logo_storage_key")
+  faviconStorageKey  String?  @map("favicon_storage_key")
   // Hex colors ("#rrggbb"), applied as CSS custom properties client-side.
-  primaryColor     String? @map("primary_color") @db.VarChar(7)
-  secondaryColor   String? @map("secondary_color") @db.VarChar(7)
-  accentColor      String? @map("accent_color") @db.VarChar(7)
-  loginHeadline    String? @map("login_headline")
-  loginSubtext     String? @map("login_subtext")
-  emailFromName    String? @map("email_from_name")
-  emailFromAddress String? @map("email_from_address")
+  primaryColor       String?  @map("primary_color") @db.VarChar(7)
+  secondaryColor     String?  @map("secondary_color") @db.VarChar(7)
+  accentColor        String?  @map("accent_color") @db.VarChar(7)
+  loginHeadline      String?  @map("login_headline")
+  loginSubtext       String?  @map("login_subtext")
+  emailFromName      String?  @map("email_from_name")
+  emailFromAddress   String?  @map("email_from_address")
   // Lifetime/on-prem-oriented, gated behind FEATURE_FLAGS.FULL_REBRAND
   // (ENTERPRISE-only in EDITION_FEATURES) at WRITE time via the existing
   // @RequireFeature()/FeatureFlagGuard — see BrandingController. Even once
@@ -495,10 +502,10 @@ model User {
   roles    UserRole[]
   branches UserBranch[]
 
-  headOfBranches    Branch[]           @relation("BranchHead")
-  headOfDepartments Department[]       @relation("DepartmentHead")
-  workflowRequests  WorkflowInstance[] @relation("WorkflowRequester")
-  employeeProfile   Employee?
+  headOfBranches        Branch[]               @relation("BranchHead")
+  headOfDepartments     Department[]           @relation("DepartmentHead")
+  workflowRequests      WorkflowInstance[]     @relation("WorkflowRequester")
+  employeeProfile       Employee?
   // Step 4.1 — vendor-console support sessions impersonating THIS user.
   impersonationSessions ImpersonationSession[]
 
@@ -840,11 +847,11 @@ model PaymentMethod {
 // be resolved to any tenant (a stale/orphaned Stripe object) is recorded
 // into PlatformAuditLog instead, never here.
 model BillingEvent {
-  id             String   @id @default(uuid()) @db.Uuid
-  tenantId       String   @map("tenant_id") @db.Uuid
-  stripeEventId  String   @map("stripe_event_id")
-  eventType      String   @map("event_type")
-  processedAt    DateTime @default(now()) @map("processed_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  stripeEventId String   @map("stripe_event_id")
+  eventType     String   @map("event_type")
+  processedAt   DateTime @default(now()) @map("processed_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -964,30 +971,30 @@ enum PlatformAdminStatus {
 // tenant `Role`/`Permission` — the vendor's own ops model is a fixed,
 // reviewed set of two roles, not tenant-customizable data.
 model PlatformAdmin {
-  id             String              @id @default(uuid()) @db.Uuid
-  email          String              @unique
-  name           String
-  hashedPassword String              @map("hashed_password")
-  role           PlatformRoleName
-  status         PlatformAdminStatus @default(ACTIVE)
+  id                     String              @id @default(uuid()) @db.Uuid
+  email                  String              @unique
+  name                   String
+  hashedPassword         String              @map("hashed_password")
+  role                   PlatformRoleName
+  status                 PlatformAdminStatus @default(ACTIVE)
   // TOTP secret (RFC 6238), AES-256-GCM encrypted via the existing
   // EncryptionService — reversible, since every login must verify a fresh
   // 30-second code against it. MFA is MANDATORY, enforced in
   // PlatformAuthService, not by a DB constraint: a freshly created admin
   // has mfaEnabled=false and cannot complete login (only the enrollment
   // step) until enrollment finishes.
-  mfaSecretEncrypted     String?  @map("mfa_secret_encrypted")
-  mfaEnabled             Boolean  @default(false) @map("mfa_enabled")
+  mfaSecretEncrypted     String?             @map("mfa_secret_encrypted")
+  mfaEnabled             Boolean             @default(false) @map("mfa_enabled")
   // One-time recovery codes, argon2id-hashed via the existing
   // HashingService (one-way — only ever verified, never decrypted, the
   // opposite tradeoff from mfaSecretEncrypted above, same
   // hash-vs-encrypt split documented for API keys vs. webhook secrets in
   // docs/conventions/integrations.md). Each is removed from this array the
   // moment it's used.
-  mfaRecoveryCodesHashed Json?     @map("mfa_recovery_codes_hashed")
-  lastLoginAt            DateTime? @map("last_login_at")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
+  mfaRecoveryCodesHashed Json?               @map("mfa_recovery_codes_hashed")
+  lastLoginAt            DateTime?           @map("last_login_at")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
 
   @@map("platform_admins")
 }
@@ -1720,6 +1727,10 @@ model Employee {
   migratedAttendanceSummaries MigratedAttendanceSummary[]
   migratedPayslipRecords      MigratedPayslipRecord[]
 
+  // Step 3.5.2 — Benefits administration (see docs/conventions/benefits.md).
+  benefitEnrollments         BenefitEnrollment[]
+  benefitContributionRecords BenefitContributionRecord[]
+
   // Lets other tenant-scoped tables (future Attendance/Payroll) define
   // a composite FK of (tenantId, employeeId) -> (tenantId, id) against this
   // table, same pattern as every other entity in this schema.
@@ -1748,6 +1759,12 @@ model EmployeeDependent {
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
 
+  // Step 3.5.2 — a dependent may be covered under one or more benefit
+  // enrollments (e.g. an EMPLOYEE_FAMILY tier). See
+  // docs/conventions/benefits.md.
+  benefitEnrollmentDependents BenefitEnrollmentDependent[]
+
+  @@unique([tenantId, id])
   @@index([tenantId, employeeId])
   @@map("employee_dependents")
 }
@@ -4532,9 +4549,9 @@ model ImportBatch {
   mode       ImportMode        @default(PARTIAL)
   status     ImportBatchStatus @default(UPLOADED)
 
-  fileName       String  @map("file_name")
-  fileFormat     String  @map("file_format") @db.VarChar(8) // CSV | XLSX
-  fileStorageKey String? @map("file_storage_key")
+  fileName       String    @map("file_name")
+  fileFormat     String    @map("file_format") @db.VarChar(8) // CSV | XLSX
+  fileStorageKey String?   @map("file_storage_key")
   filePurgedAt   DateTime? @map("file_purged_at")
 
   // `{ [ourFieldKey]: "client's column header" }` — snapshotted onto the
@@ -4658,4 +4675,206 @@ model MigratedPayslipRecord {
 
   @@index([tenantId, employeeId, periodYear, periodMonth])
   @@map("migrated_payslip_records")
+}
+
+// --- Benefits Administration -------------------------------------------------
+//
+// Step 3.5.2 — see docs/conventions/benefits.md. THE BOUNDARY (same shape as
+// Payroll's own, 2.1): this module never computes pay. Active enrollments
+// (tenant-configured plans) and country-pack-declared statutory schemes
+// produce PAYROLL INPUTS — employee-side deductions, employer-side
+// contributions — merged onto a payroll run the SAME way Expenses'
+// reimbursement hand-off is (see docs/conventions/operations-modules.md):
+// an ADDITIVE step inside `PayrollRunProcessor`, the payroll ENGINE itself
+// completely untouched. Statutory schemes are never re-implemented here —
+// `PayrollEngineService` already applies every resolved CountryPack
+// `statutory.components` entry automatically (0.5's rules engine, unchanged);
+// this module's own statutory surface calls the SAME unmodified
+// `computeStatutoryComponents` purely for READ-ONLY preview/reporting, never
+// a second computation path a payroll run actually depends on.
+
+enum BenefitType {
+  HEALTH_INSURANCE
+  PROVIDENT_FUND
+  PENSION
+  LIFE_INSURANCE
+  BONUS_INCENTIVE
+  ALLOWANCE
+  OTHER
+}
+
+// Deliberately the SAME three-value shape as `PayrollComponentCalcKind`
+// (2.1) — a benefit plan's cost is computed exactly like a salary-structure
+// component: a flat amount, a percentage of the employee's basic salary, or
+// a `FORMULA` reusing 0.5's closed `Expr` AST as-is (imported, not
+// redefined — see packages/shared/src/validators/benefits.validator.ts).
+enum BenefitCostBasis {
+  FIXED_AMOUNT
+  PERCENTAGE_OF_BASE
+  FORMULA
+}
+
+// A benefit plan tenant-configurable definition. `costBasis`/`fixedAmount`/
+// `percentageOfBase`/`percentageRate`/`formula` compute the plan's TOTAL
+// period cost (mirroring `PayrollComponentDefinition` field-for-field);
+// `employeeSharePercent`/`employerSharePercent` (fractions summing to 1.0,
+// enforced by `createBenefitPlanSchema`) then split that total between the
+// employee deduction and the employer contribution — one cost structure,
+// one split, rather than two independently-configured amounts that could
+// silently drift apart. `hasTiers` plans instead price EACH
+// `BenefitPlanTier` with its own explicit employee/employer amounts,
+// bypassing the share split entirely (a tier already states both sides).
+// `affectsPayroll = false` models a purely informational perk (e.g. "office
+// gym pass") that must never reach a payroll run.
+model BenefitPlan {
+  id                   String           @id @default(uuid()) @db.Uuid
+  tenantId             String           @map("tenant_id") @db.Uuid
+  code                 String
+  name                 String
+  benefitType          BenefitType      @map("benefit_type")
+  description          String?
+  currencyCode         String           @map("currency_code") @db.VarChar(3)
+  costBasis            BenefitCostBasis @map("cost_basis")
+  fixedAmount          Decimal?         @map("fixed_amount") @db.Decimal(14, 2)
+  percentageOfBase     String?          @map("percentage_of_base")
+  percentageRate       Float?           @map("percentage_rate")
+  formula              Json?
+  employeeSharePercent Float            @default(0) @map("employee_share_percent")
+  employerSharePercent Float            @default(1) @map("employer_share_percent")
+  hasTiers             Boolean          @default(false) @map("has_tiers")
+  allowSelfElection    Boolean          @default(false) @map("allow_self_election")
+  requiresApproval     Boolean          @default(false) @map("requires_approval")
+  affectsPayroll       Boolean          @default(true) @map("affects_payroll")
+  isActive             Boolean          @default(true) @map("is_active")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tiers       BenefitPlanTier[]
+  enrollments BenefitEnrollment[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("benefit_plans")
+}
+
+// One coverage tier per row (e.g. EMPLOYEE_ONLY / EMPLOYEE_SPOUSE /
+// EMPLOYEE_FAMILY) — tenant-authored labels, not a closed enum, the same
+// "opaque key, meaning is tenant data" posture `Employee.statutoryFields`
+// already takes. Only meaningful when the owning plan's `hasTiers` is true;
+// `employeeAmount`/`employerAmount` are each tier's OWN explicit flat cost
+// (no percentage/formula tier pricing in this phase — see benefits.md's
+// documented, deliberate scope line).
+model BenefitPlanTier {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  planId         String   @map("plan_id") @db.Uuid
+  key            String
+  label          String
+  employeeAmount Decimal  @default(0) @map("employee_amount") @db.Decimal(14, 2)
+  employerAmount Decimal  @default(0) @map("employer_amount") @db.Decimal(14, 2)
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan        BenefitPlan         @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Cascade)
+  enrollments BenefitEnrollment[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, planId, key])
+  @@index([tenantId, planId])
+  @@map("benefit_plan_tiers")
+}
+
+enum BenefitEnrollmentStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+// One row per employee's enrollment in one plan. `effectiveFrom`/
+// `effectiveTo` (null = open-ended) gate which period(s) this enrollment
+// contributes to payroll — see `resolveActiveBenefitEnrollments` in
+// `apps/api/src/benefits/benefits-payroll-input.util.ts`. `requiresApproval`
+// plans start `PENDING_APPROVAL` and only flip to `ACTIVE` once the REAL 0.7
+// workflow approves them (`entityType: "BENEFIT_ENROLLMENT"`, THE RULE — no
+// bespoke approval logic here either); every other plan is `ACTIVE`
+// immediately.
+model BenefitEnrollment {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  employeeId         String                  @map("employee_id") @db.Uuid
+  planId             String                  @map("plan_id") @db.Uuid
+  coverageTierId     String?                 @map("coverage_tier_id") @db.Uuid
+  status             BenefitEnrollmentStatus @default(ACTIVE)
+  effectiveFrom      DateTime                @map("effective_from") @db.Date
+  effectiveTo        DateTime?               @map("effective_to") @db.Date
+  enrolledByUserId   String                  @map("enrolled_by_user_id") @db.Uuid
+  workflowInstanceId String?                 @map("workflow_instance_id") @db.Uuid
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+
+  tenant              Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee            Employee                     @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  plan                BenefitPlan                  @relation(fields: [tenantId, planId], references: [tenantId, id], onDelete: Cascade)
+  coverageTier        BenefitPlanTier?             @relation(fields: [tenantId, coverageTierId], references: [tenantId, id], onDelete: SetNull, map: "benefit_enrollments_tier_fkey")
+  dependents          BenefitEnrollmentDependent[]
+  contributionRecords BenefitContributionRecord[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, employeeId, status])
+  @@index([tenantId, planId, status])
+  @@map("benefit_enrollments")
+}
+
+// A covered dependent on one enrollment — reuses 1.1's `EmployeeDependent`
+// directly rather than duplicating name/relationship/DOB fields here.
+model BenefitEnrollmentDependent {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  enrollmentId        String   @map("enrollment_id") @db.Uuid
+  employeeDependentId String   @map("employee_dependent_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enrollment        BenefitEnrollment @relation(fields: [tenantId, enrollmentId], references: [tenantId, id], onDelete: Cascade)
+  employeeDependent EmployeeDependent @relation(fields: [tenantId, employeeDependentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, enrollmentId, employeeDependentId])
+  @@map("benefit_enrollment_dependents")
+}
+
+// The payroll-input PROOF row — one per (enrollment, period) actually
+// merged into a real payroll run line, written by `PayrollRunProcessor`'s
+// additive `mergeBenefitContributions` step (see
+// docs/conventions/benefits.md). `@@unique([tenantId, enrollmentId,
+// periodYear, periodMonth])` is this module's OWN idempotency backstop —
+// the same role `ExpenseClaim.reimbursementPayrollRunLineId` plays for a
+// one-time claim, expressed per-PERIOD here since an enrollment recurs
+// every period rather than being consumed once.
+model BenefitContributionRecord {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  employeeId       String   @map("employee_id") @db.Uuid
+  planId           String   @map("plan_id") @db.Uuid
+  enrollmentId     String   @map("enrollment_id") @db.Uuid
+  payrollRunId     String   @map("payroll_run_id") @db.Uuid
+  payrollRunLineId String?  @map("payroll_run_line_id") @db.Uuid
+  periodYear       Int      @map("period_year")
+  periodMonth      Int      @map("period_month")
+  currencyCode     String   @map("currency_code") @db.VarChar(3)
+  employeeAmount   Decimal  @map("employee_amount") @db.Decimal(14, 2)
+  employerAmount   Decimal  @map("employer_amount") @db.Decimal(14, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee   Employee          @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  enrollment BenefitEnrollment @relation(fields: [tenantId, enrollmentId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, enrollmentId, periodYear, periodMonth])
+  @@index([tenantId, payrollRunId])
+  @@index([tenantId, employeeId, periodYear, periodMonth])
+  @@map("benefit_contribution_records")
 }

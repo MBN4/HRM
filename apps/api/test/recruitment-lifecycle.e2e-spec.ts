@@ -504,7 +504,10 @@ describe('recruitment lifecycle (e2e)', () => {
       expect(run.settlementEmployeeId).toBe(departingEmployeeId);
 
       const line = await prisma.payrollRunLine.findFirstOrThrow({ where: { payrollRunId: settlementRunId, employeeId: departingEmployeeId } });
-      expect(Number(line.netPay)).toBeCloseTo(9000, 2); // gratuity is EMPLOYER-only, never reduces net pay.
+      // Gratuity is EMPLOYER-only, never reduces net pay — but since step
+      // 3.5.2 (Benefits administration) the pack's EMPLOYEE-side GRSIA
+      // pension component (5% of basic salary) does: 9000 - 450 = 8550.
+      expect(Number(line.netPay)).toBeCloseTo(9000 - 9000 * 0.05, 2);
       const breakdown = line.componentBreakdown as { key: string; type: string; amount: number }[];
       const gratuity = breakdown.find((c) => c.key === 'end_of_service_gratuity');
       expect(gratuity).toBeDefined();
