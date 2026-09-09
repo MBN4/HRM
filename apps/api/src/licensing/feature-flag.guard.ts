@@ -27,6 +27,20 @@ import { REQUIRE_FEATURE_KEY } from './require-feature.decorator';
  * `@RequireFeature` pay for it) and, in lifetime mode, MUST be fresh every
  * time (see LicenseVerificationService) rather than cached in the request
  * context the way permissions are.
+ *
+ * **Deliberately NOT cached, despite being flagged as a caching candidate
+ * in Phase 5.1** (see docs/conventions/scaling-data-layer.md § Caching —
+ * "Entitlement — considered, deliberately not cached" for the full
+ * write-up). A cached wrapper was built and wired in during that step,
+ * then reverted after the EXISTING `licensing-saas.e2e-spec.ts` suite
+ * caught it serving a STALE (pre-subscription-change) resolution whenever
+ * a `Subscription`/`License`/`TenantFeatureFlagOverride` row is written
+ * through any path other than the two hook points a cache could
+ * realistically invalidate from — which real tests (and, by the same
+ * logic, real future code) legitimately do. This is exactly the failure
+ * mode white-label.md's own `showPoweredBy` write-up already warned this
+ * class of check against; the revert is the direct, empirical
+ * confirmation of that warning, not a theoretical one.
  */
 @Injectable()
 export class FeatureFlagGuard implements NestInterceptor {

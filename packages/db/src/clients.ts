@@ -1,11 +1,14 @@
 import { PrismaClient } from '@prisma/client';
 import { resolveAdminPoolConfig, resolveAppPoolConfig, withPoolParams } from './pool-config';
+import { hasConfiguredReplica, resolveReplicaPoolConfig } from './replica-config';
 
 declare global {
   // eslint-disable-next-line no-var
   var __hrmPrisma: PrismaClient | undefined;
   // eslint-disable-next-line no-var
   var __hrmAppPrisma: PrismaClient | undefined;
+  // eslint-disable-next-line no-var
+  var __hrmReadAppPrisma: PrismaClient | undefined;
 }
 
 function ownerDatabaseUrl(): string {
@@ -63,4 +66,39 @@ export const appPrisma =
 
 if (process.env.NODE_ENV !== 'production') {
   global.__hrmAppPrisma = appPrisma;
+}
+
+/**
+ * Phase 5.1 (see docs/conventions/scaling-data-layer.md) — the READ
+ * REPLICA counterpart to `appPrisma`. Still the restricted `hrm_app` role
+ * (RLS is enforced identically on a streaming replica — `current_tenant`
+ * is a per-session/per-transaction Postgres SETTING, not table data, so it
+ * is completely orthogonal to what WAL streaming replicates), just pointed
+ * at a hot-standby server instead of the primary.
+ *
+ * **Additive, not required.** `APP_REPLICA_DATABASE_URL` is OPTIONAL: when
+ * unset (every environment before this step, and any deployment that
+ * chooses not to run a replica), `readAppPrisma` is simply `appPrisma`
+ * itself — every read/write-splitting call site (see
+ * `withReplicaTenantContext`) degrades to "read from the primary" with
+ * ZERO behavior change, never a crash or a silently-broken read path.
+ *
+ * Never write through this client. Nothing stops it in application code
+ * (unlike the owner-vs-`hrm_app` split, there is no separate DB role for
+ * "read-only") — but a REAL streaming replica's own Postgres engine
+ * rejects every write with `ERROR: cannot execute ... in a read-only
+ * transaction` regardless, which is the defense-in-depth backstop here,
+ * mirroring this project's general "no single layer trusted alone"
+ * posture. See `packages/db/test/read-replica.spec.ts` for the proof.
+ */
+export const appReadReplicaPrisma: PrismaClient =
+  global.__hrmReadAppPrisma ??
+  (hasConfiguredReplica()
+    ? new PrismaClient({
+        datasourceUrl: withPoolParams(process.env.APP_REPLICA_DATABASE_URL as string, resolveReplicaPoolConfig()),
+      })
+    : appPrisma);
+
+if (process.env.NODE_ENV !== 'production') {
+  global.__hrmReadAppPrisma = appReadReplicaPrisma;
 }

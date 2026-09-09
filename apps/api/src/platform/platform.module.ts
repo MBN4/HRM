@@ -3,6 +3,7 @@ import { AuthModule } from '../auth/auth.module';
 import { PasswordService } from '../auth/password.service';
 import { BillingModule } from '../billing/billing.module';
 import { BrandingModule } from '../branding/branding.module';
+import { CountryPacksModule } from '../country-packs/country-packs.module';
 import { PlatformAdminController } from './admins/platform-admin.controller';
 import { PlatformAdminService } from './admins/platform-admin.service';
 import { PlatformAuditController } from './audit/platform-audit.controller';
@@ -61,7 +62,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
   // MigrationModule (3.5.1) — reused for `ImportBatchService` so
   // `PlatformMigrationService` never re-implements upload/dry-run/commit
   // orchestration a second time. See docs/conventions/data-migration.md.
-  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule],
+  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule, CountryPacksModule],
   controllers: [
     PlatformAuthController,
     PlatformAdminController,

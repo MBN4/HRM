@@ -7,6 +7,7 @@ import {
   type CreateCountryPackVersionInput,
   type UpdateCountryPackVersionInput,
 } from '@hrm/shared';
+import { CountryPackResolutionService } from '../../country-packs/country-pack-resolution.service';
 import { PlatformAuditRecordService } from '../audit/platform-audit-record.service';
 
 export interface CountryPackVersionSummary {
@@ -53,7 +54,10 @@ function toSummary(pack: {
  */
 @Injectable()
 export class PlatformCountryPackService {
-  constructor(private readonly audit: PlatformAuditRecordService) {}
+  constructor(
+    private readonly audit: PlatformAuditRecordService,
+    private readonly countryPackResolution: CountryPackResolutionService,
+  ) {}
 
   async listCountries(): Promise<{ countryCode: string; versions: CountryPackVersionSummary[] }[]> {
     const rows = await prisma.countryPack.findMany({ orderBy: [{ countryCode: 'asc' }, { version: 'asc' }] });
@@ -103,6 +107,10 @@ export class PlatformCountryPackService {
       entityId: pack.id,
       after: { countryCode, version: 1 },
     });
+    // Phase 5.1 — a brand-new pack's first version is immediately ACTIVE,
+    // so every tenant resolving this country code is affected; bust every
+    // tenant's cached entry rather than waiting out the TTL.
+    await this.countryPackResolution.invalidateForCountryCode(countryCode);
 
     return toSummary(pack);
   }
@@ -190,6 +198,9 @@ export class PlatformCountryPackService {
       entityId: activated.id,
       after: { countryCode: code, version },
     });
+    // Phase 5.1 — which version is active just changed for every tenant
+    // resolving this country code.
+    await this.countryPackResolution.invalidateForCountryCode(code);
 
     return toSummary(activated);
   }

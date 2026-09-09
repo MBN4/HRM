@@ -3,10 +3,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ApiKeyAuthModule } from '../auth/api-key/api-key-auth.module';
+import { PermissionsCacheService } from '../auth/permissions-cache.service';
 import { PermissionFieldDemoController } from '../common/permissions/demo/permission-field-demo.controller';
 import { PermissionSerializerInterceptor } from '../common/permissions/permission-serializer.interceptor';
 import { PlatformAuthContextModule } from '../platform/auth/platform-auth-context.module';
 import { PlatformController } from '../platform/platform.controller';
+import { OrgStructureCacheService } from './org-structure-cache.service';
+import { ReplicaReadService } from './replica-read.service';
 import { TenancyController } from './tenancy.controller';
 import { TenantContextService } from './tenant-context.service';
 import { TenantResolutionService } from './tenant-resolution.service';
@@ -56,8 +59,17 @@ import { TenantScopeInterceptor } from './tenant-scope.interceptor';
     TenantContextService,
     TenantResolutionService,
     PermissionSerializerInterceptor,
+    ReplicaReadService,
+    OrgStructureCacheService,
+    PermissionsCacheService,
     { provide: APP_INTERCEPTOR, useClass: TenantScopeInterceptor },
   ],
-  exports: [TenantContextService, TenantResolutionService],
+  exports: [
+    TenantContextService,
+    TenantResolutionService,
+    ReplicaReadService,
+    OrgStructureCacheService,
+    PermissionsCacheService,
+  ],
 })
 export class TenancyModule {}

@@ -7,12 +7,98 @@ services:
       POSTGRES_USER: hrm
       POSTGRES_PASSWORD: hrm_dev_password
       POSTGRES_DB: hrm_dev
+    # Phase 5.1 (see docs/conventions/scaling-data-layer.md) — enables
+    # streaming replication for the `postgres-replica` service below.
+    # wal_level/max_wal_senders/max_replication_slots are NOT reloadable
+    # (they require a restart, which is why they're set here as launch
+    # flags rather than via `ALTER SYSTEM` + reload). hot_standby is a
+    # primary-side no-op (it only affects a server that's itself IN
+    # recovery) but is harmless to set everywhere so the same command list
+    # works for both services.
+    command:
+      - 'postgres'
+      - '-c'
+      - 'wal_level=replica'
+      - '-c'
+      - 'max_wal_senders=10'
+      - '-c'
+      - 'max_replication_slots=10'
+      - '-c'
+      - 'hot_standby=on'
     ports:
-      - "5433:5432"
+      - '5433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # Only executed by Postgres on a brand-new, empty data volume — see
+      # each script's own header comment. Idempotent no-ops on a restart
+      # of an already-initialized volume.
+      - ./docker/postgres-primary-init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hrm -d hrm_dev"]
+      test: ['CMD-SHELL', 'pg_isready -U hrm -d hrm_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Phase 5.1 — a real streaming (hot standby) READ REPLICA of `postgres`,
+  # not a simulation. Self-clones via `pg_basebackup -R` on first start
+  # (see docker/postgres-replica/replica-entrypoint.sh) using the
+  # `replicator` role provisioned by postgres-primary-init/. RLS holds on
+  # this connection EXACTLY as it does on the primary — `current_tenant` is
+  # set per-transaction via `set_config(..., true)`, which is orthogonal to
+  # replication (it's a client-session setting, not replicated data) — see
+  # docs/conventions/scaling-data-layer.md § Read replicas.
+  postgres-replica:
+    build:
+      context: ./docker/postgres-replica
+    container_name: hrm-postgres-replica
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      PRIMARY_HOST: postgres
+      PRIMARY_PORT: '5432'
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: hrm_replica_dev_password
+    ports:
+      - '5434:5432'
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+    healthcheck:
+      # A standby's `pg_isready` returns healthy once it's accepting
+      # read-only connections, regardless of replication lag.
+      test: ['CMD-SHELL', 'pg_isready -U hrm -d hrm_dev']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # Phase 5.1 — PgBouncer in TRANSACTION pooling mode, in front of
+  # `postgres`. See docs/conventions/scaling-data-layer.md § Connection
+  # pooling for the RLS-safety argument (`current_tenant` is set via
+  # `set_config(..., true)` inside the SAME transaction PgBouncer scopes a
+  # backend connection to, so it can never leak across a pooled
+  # connection's reuse). Fronts the SAME primary `postgres` — never the
+  # replica (read/write splitting is a separate, application-level
+  # decision — see the same doc's § Read replicas).
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: hrm-pgbouncer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://hrm_app:hrm_app_dev_password@postgres:5432/hrm_dev
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: '500'
+      DEFAULT_POOL_SIZE: '25'
+      AUTH_TYPE: scram-sha-256
+    ports:
+      - '6432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 5432 -U hrm_app -d hrm_dev']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -21,13 +107,13 @@ services:
     image: redis:7-alpine
     container_name: hrm-redis
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ['redis-server', '--appendonly', 'yes']
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -41,17 +127,18 @@ services:
       MINIO_ROOT_USER: hrm_minio
       MINIO_ROOT_PASSWORD: hrm_minio_password
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - '9000:9000'
+      - '9001:9001'
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ['CMD', 'mc', 'ready', 'local']
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
   postgres_data:
+  postgres_replica_data:
   redis_data:
   minio_data:

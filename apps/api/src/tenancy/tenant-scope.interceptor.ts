@@ -17,7 +17,7 @@ import { DEFAULT_REQUEST_PRIORITY, RequestPriority } from '@hrm/shared';
 import { ApiKeyAuthService } from '../auth/api-key/api-key-auth.service';
 import { ApiKeyRateLimitService } from '../auth/api-key/api-key-rate-limit.service';
 import { IS_ALLOW_ANONYMOUS_KEY } from '../auth/decorators/allow-anonymous.decorator';
-import { loadUserContext } from '../auth/load-user-context.util';
+import { PermissionsCacheService } from '../auth/permissions-cache.service';
 import { LoadSheddingService } from '../resilience/load-shedding/load-shedding.service';
 import { PRIORITY_KEY } from '../resilience/load-shedding/priority.decorator';
 import { TenantRateLimitService } from '../resilience/rate-limit/tenant-rate-limit.service';
@@ -155,6 +155,7 @@ export class TenantScopeInterceptor implements NestInterceptor {
     private readonly apiKeyAuth: ApiKeyAuthService,
     private readonly apiKeyRateLimit: ApiKeyRateLimitService,
     private readonly platformAuth: PlatformAuthContextService,
+    private readonly permissionsCache: PermissionsCacheService,
   ) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
@@ -402,7 +403,11 @@ export class TenantScopeInterceptor implements NestInterceptor {
       impersonatedByPlatformAdminId = payload.impersonatedBy;
     }
 
-    const { roles, permissions, branchIds } = await loadUserContext(tx, user.id);
+    // Phase 5.1 (see docs/conventions/scaling-data-layer.md) — cached: this
+    // runs on EVERY authenticated request, the hottest resolve-fresh read
+    // in the system. See PermissionsCacheService's own doc comment for the
+    // short-TTL/no-mutation-endpoint-yet honesty note.
+    const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, user.id);
 
     return {
       tenantId,

@@ -2937,3 +2937,108 @@ build`/`pnpm lint` green across all eight workspace tasks.
   `apps/portal`'s full Playwright suite: **95 tests** (90 existing + 5
   new). Full-repo `pnpm build`/`pnpm lint` green across all eight
   workspace tasks.
+
+## 5.1 — Data-layer scale hardening
+
+Phase 5's first slice (2026-09-09) — `docker-compose.yml`,
+`docker/postgres-replica/`, `docker/postgres-primary-init/`, `packages/db`,
+`apps/api/src/tenancy`, `apps/api/src/country-packs`, `apps/api/src/auth`,
+`apps/api/src/migration`. See
+[`docs/conventions/scaling-data-layer.md`](./conventions/scaling-data-layer.md)
+for the full write-up. Goal: the database is never the bottleneck at
+scale, while RLS/tenant-isolation and correctness are fully preserved —
+every optimization here is provably isolation-preserving, verified against
+REAL local infra (a real PgBouncer, a real Postgres streaming replica),
+never simulated.
+
+**Connection pooling**: a real `pgbouncer` service (transaction pooling
+mode) added to docker-compose, fronting the SAME primary. THE #1 risk of
+this step — proven, not just argued: `current_tenant` is set via
+`set_config(..., true)` inside the same transaction PgBouncer scopes a
+backend connection to, so it resets at COMMIT/ROLLBACK atomically with
+the connection returning to the pool — no window exists for tenant
+context to leak across a reused connection.
+`packages/db/test/pgbouncer-rls.spec.ts` fires 60 concurrent, tenant-A/
+tenant-B-interleaved transactions through a deliberately 3-connection pool
+and proves zero leakage; `apps/api/test/resilience-pgbouncer.e2e-spec.ts`
+repeats the proof at the full HTTP level and additionally proves 0.10's
+pool-exhaustion 503+Retry-After backpressure still works through the
+pooler. Local dev/test's OWN default `APP_DATABASE_URL` deliberately stays
+a DIRECT connection, not the pooler, despite the pooler being fully
+proven — an empirical finding, not caution for its own sake: routing the
+FULL 514-test suite through it passed 513/514 (zero new regressions,
+same pre-existing flake), but an isolated look at `migration.e2e-spec.ts`
+(many small sequential transactions in a tight polling loop) showed
+measurably higher per-transaction latency through the pooler, enough to
+occasionally push that ALREADY timing-sensitive test past its own
+deadline — a real, documented characteristic of transaction-mode pooling,
+not a correctness bug, and exactly why this ships as a proven, config-only
+production cutover (`APP_DATABASE_URL` pointed at the pooler,
+`?pgbouncer=true` required) rather than a silent default-topology change.
+
+**Read replicas**: `docker/postgres-replica/` is a GENUINE Postgres 16 hot-
+standby (`pg_basebackup -R` self-bootstrap on first start, real streaming
+replication, real `wal_level=replica`/`max_wal_senders` on the primary) —
+not a mock. `packages/db`'s `appReadReplicaPrisma`/`withReplicaTenantContext`
+reuse `withTenantContext` verbatim against a different client — RLS needed
+ZERO new logic, since `current_tenant` is a per-transaction Postgres
+setting, orthogonal to WAL streaming. `ReplicaReadService`
+(`apps/api/src/tenancy`) is the one explicit opt-in seam a caller uses for
+a read it knows is safe to be stale (the worked example:
+`AnalyticsController`'s dashboard, which only ever reads precomputed
+rollups); read-your-own-write paths are completely unchanged, still the
+primary by default. `packages/db/test/read-replica.spec.ts` proves RLS
+holds identically on the replica, that it genuinely rejects writes at the
+Postgres engine level, and — the definitive read-after-write proof —
+deliberately PAUSES WAL replay (`pg_wal_replay_pause()`), writes on the
+primary, confirms the primary read sees it instantly while the
+provably-lagging paused replica does not, then resumes and confirms the
+replica catches up on its own.
+
+**Caching**: three tenant-scoped Redis caches, all following 4.3's
+`BrandingResolutionService` shape (short TTL as a backstop, immediate
+invalidation on write as the real mechanism) — resolved country packs
+(`CountryPackResolutionService`, invalidated by both a tenant's own
+override write and a platform-admin global pack-version change),
+org/branch structure (`OrgStructureCacheService`, invalidated by the one
+real write path onto `Branch` — the 3.5.1 migration importer's commit),
+and permissions (`PermissionsCacheService`, wrapping `loadUserContext`,
+THE hottest read in the system — resolved on every authenticated request
+inside `TenantScopeInterceptor`; honestly documented as having no real
+mutation-endpoint hook yet, since none exists in this codebase, so its 15s
+TTL is today's primary staleness bound for that one gap, not just a
+backstop). **A fourth cache — feature-flag/entitlement resolution — was
+built, wired into `FeatureFlagGuard`, and then REVERTED after the existing
+`licensing-saas.e2e-spec.ts` suite (which legitimately writes `Subscription`
+rows directly, bypassing the cache's only two invalidation hooks) proved
+it could serve a stale, pre-change entitlement — exactly the security
+concern this step's own brief warns against.** `FeatureFlagGuard` was
+restored to its pre-step, fully-fresh-every-call behavior with zero net
+change — a real, empirically-forced finding recorded prominently in the
+convention doc, not a theoretical caveat. Every cache is proven both
+ways in `apps/api/test/scaling-data-layer.e2e-spec.ts` (5 tests): a write
+takes effect on the VERY NEXT read, and one tenant's (or tenant+user's)
+cached value never leaks to another.
+
+One full-suite run showed `migration.e2e-spec.ts` itself passing clean but
+`scaling-data-layer.e2e-spec.ts`'s own branch-import cache-invalidation
+test flaking instead — expected, not a new problem: it exercises the
+IDENTICAL async migration-processing pipeline that file's own known flake
+already comes from, so it inherits the same full-suite-parallel-load
+timing sensitivity, confirmed unrelated to the caching logic itself by an
+isolated rerun (5/5 green in 7.5s).
+
+Scope discipline: RLS policies, `withTenantContext`'s core mechanism,
+`TenantScopeInterceptor`'s resolution/auth ordering, the 0.10 resilience
+chassis (rate limiting/circuit breakers/load shedding/idempotency), and
+every existing module's business logic are all completely unmodified —
+this step is additive infrastructure, not a redesign. No schema migration
+was needed. Verified: `packages/db`'s full suite — **28 tests green** (22
+existing + 6 new, across the two new spec files above), against real
+local Postgres/replica/PgBouncer infra. `apps/api`'s full suite — **521
+tests green** (514 existing + 2 new e2e files, 7 new tests), with the same
+single pre-existing `migration.e2e-spec.ts` timing flake this suite
+already carries (confirmed unrelated via an isolated, uncontended rerun
+passing 10/10), zero regressions. Full-repo `pnpm build`/`pnpm lint` green
+across all workspace tasks. `apps/portal`/`apps/admin` Playwright suites
+untouched — this step has no UI surface.

@@ -1,0 +1,11 @@
+-- Phase 5.1 — runs once, automatically, ONLY when the `postgres` (primary)
+-- container initializes a brand-new, empty data volume (Postgres's own
+-- /docker-entrypoint-initdb.d convention). Creates the dedicated
+-- replication-only role the `postgres-replica` service clones from and
+-- streams via — see docs/conventions/scaling-data-layer.md.
+--
+-- A LOGIN + REPLICATION role, nothing else: it cannot read/write any
+-- tenant data (no GRANT on any table), only open a physical replication
+-- connection, which Postgres itself restricts to the `pg_hba.conf`
+-- `replication` pseudo-database regardless of any table-level grants.
+CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'hrm_replica_dev_password';

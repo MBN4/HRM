@@ -5,6 +5,7 @@ import { withTenantContext } from '@hrm/db';
 import type { ImportEntityTypeKey, ImportFileFormatKey } from '@hrm/shared';
 import { AuditRecordService } from '../audit/audit-record.service';
 import { StorageService } from '../storage/storage.service';
+import { OrgStructureCacheService } from '../tenancy/org-structure-cache.service';
 import { IMPORT_BATCH_ENTITY_TYPE } from './migration.constants';
 import { applyColumnMapping, parseImportFile } from './file-parsing/parse-import-file';
 import { ImporterRegistry } from './importers/importer-registry';
@@ -37,6 +38,7 @@ export class MigrationProcessingService {
     private readonly storage: StorageService,
     private readonly importers: ImporterRegistry,
     private readonly auditRecord: AuditRecordService,
+    private readonly orgStructureCache: OrgStructureCacheService,
   ) {}
 
   async runDryRun(tenantId: string, batchId: string): Promise<void> {
@@ -172,6 +174,18 @@ export class MigrationProcessingService {
           },
         }),
       );
+
+      // Phase 5.1 (see docs/conventions/scaling-data-layer.md § Caching) —
+      // BRANCH is one of only two real write paths onto `Branch` in this
+      // codebase (seeding, and this importer — see BranchImporter's own
+      // doc comment). A committed BRANCH batch may have created/updated
+      // branches, so the tenant's cached branch list (`GET
+      // /tenancy/branches`) must not keep serving the pre-import list —
+      // bust it now that every row's own transaction has genuinely
+      // committed (never during the dry run, which never reaches here).
+      if (batch.entityType === 'BRANCH') {
+        await this.orgStructureCache.invalidate(tenantId);
+      }
 
       // The "who imported what, when, counts" summary the brief calls for
       // — a domain-event-style write (fresh transaction, never throws),

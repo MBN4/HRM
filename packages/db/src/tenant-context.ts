@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { appPrisma } from './clients';
+import { appPrisma, appReadReplicaPrisma } from './clients';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -43,4 +43,28 @@ export async function withTenantContext<T>(
     await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
     return fn(tx);
   });
+}
+
+/**
+ * Phase 5.1 (see docs/conventions/scaling-data-layer.md) — the SAME
+ * `withTenantContext` mechanism, against `appReadReplicaPrisma` instead of
+ * `appPrisma`. Nothing about tenant-context binding changes: RLS is
+ * enforced identically (`current_tenant` is a per-transaction Postgres
+ * SETTING, orthogonal to WAL streaming — see `appReadReplicaPrisma`'s own
+ * doc comment), so this is a thin, deliberately-not-reimplemented wrapper,
+ * not a parallel RLS mechanism to keep in sync.
+ *
+ * **Callers must only use this for reads that are safe to be
+ * eventually-consistent** (dashboards, reports, list views, analytics
+ * rollups — see docs/conventions/scaling-data-layer.md § Read replicas for
+ * the exact rule). A read that must see the caller's own just-completed
+ * write (read-your-own-write) MUST use `withTenantContext` (the primary)
+ * instead — this function does not, and cannot, know which case a given
+ * call site is; that judgment call belongs to the caller, not this helper.
+ */
+export async function withReplicaTenantContext<T>(
+  tenantId: string,
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+): Promise<T> {
+  return withTenantContext(tenantId, fn, appReadReplicaPrisma);
 }

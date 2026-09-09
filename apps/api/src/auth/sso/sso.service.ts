@@ -7,7 +7,7 @@ import { REDIS_CLIENT } from '../../redis/redis.constants';
 import { EncryptionService } from '../../common/encryption/encryption.service';
 import { HashingService } from '../../common/hashing/hashing.service';
 import type { AuthenticatedSession } from '../auth.service';
-import { loadUserContext } from '../load-user-context.util';
+import { PermissionsCacheService } from '../permissions-cache.service';
 import { TokenService } from '../token.service';
 import { OIDC_AUTH_PROVIDER, SAML_AUTH_PROVIDER } from './sso-auth-provider.interface';
 import type { SsoAuthProvider } from './sso-auth-provider.interface';
@@ -34,6 +34,7 @@ export class SsoService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(OIDC_AUTH_PROVIDER) private readonly oidcProvider: SsoAuthProvider,
     @Inject(SAML_AUTH_PROVIDER) private readonly samlProvider: SsoAuthProvider,
+    private readonly permissionsCache: PermissionsCacheService,
   ) {}
 
   async getConfig(tx: Prisma.TransactionClient, tenantId: string): Promise<SsoConfig | null> {
@@ -105,7 +106,7 @@ export class SsoService {
       throw new UnauthorizedException('This account is not active.');
     }
 
-    const { roles, permissions, branchIds } = await loadUserContext(tx, user.id);
+    const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, user.id);
     const accessToken = this.tokens.signAccessToken(tenantId, user.id);
     const refreshToken = await this.tokens.issueRefreshToken(tenantId, user.id);
     return { accessToken, refreshToken, userId: user.id, roles, permissions, branchIds };
@@ -143,6 +144,10 @@ export class SsoService {
     const unusablePasswordHash = await this.hashing.hash(`${randomUUID()}${randomUUID()}`);
     const user = await tx.user.create({ data: { tenantId, email, hashedPassword: unusablePasswordHash, status: 'ACTIVE' } });
     await tx.userRole.create({ data: { tenantId, userId: user.id, roleId: role.id } });
+    // Defensive — see PermissionsCacheService's own doc comment. A brand-new
+    // user has no pre-existing cache entry, but this keeps every UserRole
+    // write in this codebase consistently paired with an invalidation.
+    await this.permissionsCache.invalidate(tenantId, user.id);
     return user;
   }
 

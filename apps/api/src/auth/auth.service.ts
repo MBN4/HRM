@@ -11,7 +11,7 @@ import type {
 } from '@hrm/shared';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { AUTH_EVENTS } from './auth-events';
-import { loadUserContext } from './load-user-context.util';
+import { PermissionsCacheService } from './permissions-cache.service';
 import { PasswordService } from './password.service';
 import { AUTH_PROVIDER } from './providers/auth-provider.token';
 import type { AuthProvider } from './providers/auth-provider.interface';
@@ -38,6 +38,7 @@ export class AuthService {
     private readonly rateLimiter: RateLimiterService,
     private readonly eventEmitter: EventEmitter2,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly permissionsCache: PermissionsCacheService,
   ) {}
 
   async login(tenantId: string, tx: Prisma.TransactionClient, input: LoginInput): Promise<AuthenticatedSession> {
@@ -57,7 +58,7 @@ export class AuthService {
     // user can log in.
     await this.rateLimiter.reset(rateLimitKey);
 
-    const { roles, permissions, branchIds } = await loadUserContext(tx, user.id);
+    const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, user.id);
     const accessToken = this.tokens.signAccessToken(tenantId, user.id);
     const refreshToken = await this.tokens.issueRefreshToken(tenantId, user.id);
 

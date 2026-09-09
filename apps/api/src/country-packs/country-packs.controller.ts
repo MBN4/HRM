@@ -119,6 +119,10 @@ export class CountryPacksController {
       update: { overrides: body },
       create: { tenantId, countryCode: validCountryCode, overrides: body },
     });
+    // Phase 5.1 — this tenant's cached effective config for this country is
+    // now stale; bust it immediately rather than waiting out the TTL (see
+    // CountryPackResolutionService's own doc comment).
+    await this.resolution.invalidateForTenant(tenantId, validCountryCode);
 
     return this.resolution.resolveEffectiveConfig(validCountryCode);
   }
