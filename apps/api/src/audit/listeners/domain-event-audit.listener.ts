@@ -23,6 +23,8 @@ const ENTITY_ID_FIELDS = [
   'ticketId',
   'enrollmentId',
   'certificationId',
+  'requestId',
+  'signerId',
 ] as const;
 
 /**
@@ -116,6 +118,17 @@ export class DomainEventAuditListener {
 
   @OnEvent('lms.*')
   handleLms(payload: DomainEventPayload): void {
+    this.record(payload);
+  }
+
+  // Step 3.5.3 — see docs/conventions/e-signatures.md. Belt-and-suspenders
+  // alongside `signature_events` (this module's own fine-grained,
+  // DB-immutable evidentiary trail): the two coarser lifecycle events this
+  // module actually emits (`esignature.request_sent`/`.completed`) also
+  // land in the GENERAL cross-cutting `audit_log`, exactly like every
+  // other domain-event namespace in this codebase.
+  @OnEvent('esignature.*')
+  handleEsignature(payload: DomainEventPayload): void {
     this.record(payload);
   }
 

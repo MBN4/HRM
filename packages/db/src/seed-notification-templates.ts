@@ -137,6 +137,59 @@ const TEMPLATES: TemplateSeed[] = [
     locale: 'ar',
     body: 'تم إلغاء ترخيص مؤسستك.',
   },
+  // Step 3.5.3 (e-signatures) — see docs/conventions/e-signatures.md.
+  {
+    eventType: 'esignature.request_sent',
+    channel: 'EMAIL',
+    locale: 'en',
+    subject: 'A document is waiting for your signature: {{requestTitle}}',
+    body: 'You have been asked to review and sign "{{requestTitle}}". Please sign in to your account to view and sign it.',
+  },
+  {
+    eventType: 'esignature.request_sent',
+    channel: 'EMAIL',
+    locale: 'ar',
+    subject: 'مستند بانتظار توقيعك: {{requestTitle}}',
+    body: 'طُلب منك مراجعة وتوقيع "{{requestTitle}}". يرجى تسجيل الدخول إلى حسابك لعرضه وتوقيعه.',
+  },
+  {
+    eventType: 'esignature.request_sent',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: 'A document is waiting for your signature: {{requestTitle}}.',
+  },
+  {
+    eventType: 'esignature.request_sent',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'مستند بانتظار توقيعك: {{requestTitle}}.',
+  },
+  {
+    eventType: 'esignature.completed',
+    channel: 'EMAIL',
+    locale: 'en',
+    subject: 'All signatures collected: {{requestTitle}}',
+    body: 'Every signer has now signed "{{requestTitle}}". The signed document and its certificate are ready to download.',
+  },
+  {
+    eventType: 'esignature.completed',
+    channel: 'EMAIL',
+    locale: 'ar',
+    subject: 'اكتمال جميع التوقيعات: {{requestTitle}}',
+    body: 'وقّع الجميع الآن على "{{requestTitle}}". المستند الموقّع وشهادته جاهزان للتنزيل.',
+  },
+  {
+    eventType: 'esignature.completed',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: 'Every signer has now signed "{{requestTitle}}".',
+  },
+  {
+    eventType: 'esignature.completed',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'وقّع الجميع الآن على "{{requestTitle}}".',
+  },
 ];
 
 /**

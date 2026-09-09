@@ -21,6 +21,13 @@ export const createPolicySchema = z
     title: z.string().min(1).max(200),
     body: z.string().min(1).max(20000),
     requiresAcknowledgment: z.boolean().default(true),
+    // Step 3.5.3 (e-signatures) — see docs/conventions/e-signatures.md.
+    // When true, `POST /policies/:id/acknowledge` (a plain click) is
+    // refused; acknowledgment must instead go through a real
+    // `SignatureRequest` (`POST /e-signatures/requests` with
+    // `generate.kind: 'POLICY'`), whose completion calls the SAME
+    // `PolicyService.acknowledge` internally.
+    requiresSignature: z.boolean().default(false),
     publish: z.boolean().default(false),
   })
   .strict();

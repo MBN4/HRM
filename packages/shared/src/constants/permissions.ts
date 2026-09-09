@@ -104,6 +104,26 @@ export const PERMISSIONS = {
   BENEFITS_READ: 'benefits.read',
   BENEFITS_ENROLL: 'benefits.enroll',
   BENEFITS_MANAGE: 'benefits.manage',
+  // Step 3.5.3 (e-signatures) — see docs/conventions/e-signatures.md.
+  // ESIGNATURE_REQUEST (create/send a signature request — TENANT_ADMIN/
+  // HR_MANAGER only, the same ownership-territory tier RECRUITMENT_MANAGE/
+  // ONBOARDING_MANAGE already occupy) vs. ESIGNATURE_MANAGE (cancel any
+  // request, view the full tenant-wide tracking list, download any
+  // certificate — also TENANT_ADMIN/HR_MANAGER) vs. ESIGNATURE_SIGN (sign a
+  // document YOU were named as an internal signer on — seeded broadly, onto
+  // every role including EMPLOYEE, the same self-service tier
+  // EXPENSE_READ/HELPDESK_READ already establish). A caller with only
+  // POLICY_READ may additionally self-request a signature for their OWN
+  // policy acknowledgment — a service-layer row check
+  // (`SignatureRequestService.create`), not a fourth permission, the same
+  // "gated at the row level, an explicit manage-tier permission widens who
+  // may act" shape InterviewScorecard submission already establishes (see
+  // docs/conventions/recruitment-lifecycle.md). External signers (no
+  // account) never hold any permission — they authenticate via a scoped
+  // signing token instead, never RBAC.
+  ESIGNATURE_REQUEST: 'esignature.request',
+  ESIGNATURE_MANAGE: 'esignature.manage',
+  ESIGNATURE_SIGN: 'esignature.sign',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -172,6 +192,9 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.BENEFITS_READ,
     PERMISSIONS.BENEFITS_ENROLL,
     PERMISSIONS.BENEFITS_MANAGE,
+    PERMISSIONS.ESIGNATURE_REQUEST,
+    PERMISSIONS.ESIGNATURE_MANAGE,
+    PERMISSIONS.ESIGNATURE_SIGN,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -202,6 +225,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.LMS_ASSIGN,
     PERMISSIONS.BENEFITS_READ,
     PERMISSIONS.BENEFITS_ENROLL,
+    PERMISSIONS.ESIGNATURE_SIGN,
   ],
   [SYSTEM_ROLES.EMPLOYEE]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -225,5 +249,6 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.LMS_ENROLL,
     PERMISSIONS.BENEFITS_READ,
     PERMISSIONS.BENEFITS_ENROLL,
+    PERMISSIONS.ESIGNATURE_SIGN,
   ],
 };

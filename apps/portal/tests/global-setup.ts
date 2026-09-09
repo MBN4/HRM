@@ -494,6 +494,11 @@ export default async function globalSetup(): Promise<void> {
     employeeAEmail: 'employee@portal-e2e-a.test',
     qaEmployeeAEmail: 'qa-employee@portal-e2e-a.test',
     employeeAId: employeeAEmployee.id,
+    // Step 3.5.3 (e-signatures) — an INTERNAL `SignatureSigner.userId` is a
+    // real User id, not an Employee id (see docs/conventions/e-signatures.md);
+    // this is the one existing fixture employee that already has a linked
+    // User, so it's reused here rather than provisioning a new one.
+    employeeAUserId: employeeAUser.id,
     employeeASalary,
     employeeBEmail: 'employee@portal-e2e-b.test',
     branchAUsId: branchAUs.id,

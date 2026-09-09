@@ -1,10 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Megaphone } from 'lucide-react';
 import { useI18n } from '../../../i18n/I18nProvider';
+import { useAuth } from '../../../lib/auth/AuthContext';
 import { useAsync } from '../../../lib/useAsync';
 import { acknowledgePolicy, listActivePolicies, listMyAnnouncements, myPolicyAcknowledgments } from '../../../lib/api/announcements';
+import { createSignatureRequest, sendSignatureRequest } from '../../../lib/api/esignature';
 import { ApiError } from '../../../lib/api/client';
 import { formatDate } from '../../../lib/format';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
@@ -21,6 +24,8 @@ import { PageSpinner } from '../../../components/ui/Spinner';
  */
 export default function AnnouncementsPage() {
   const { t, locale } = useI18n();
+  const { user } = useAuth();
+  const router = useRouter();
   const [ackingId, setAckingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +44,32 @@ export default function AnnouncementsPage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('error.generic'));
     } finally {
+      setAckingId(null);
+    }
+  }
+
+  /**
+   * A `requiresSignature` policy's acknowledgment is a real e-signature —
+   * see docs/conventions/e-signatures.md. Self-requests a `SignatureRequest`
+   * for THIS policy with the caller as its own (sole, internal) signer —
+   * the row-level carve-out `SignatureRequestService.create` grants a
+   * `POLICY_READ` holder for exactly this shape, no `esignature.request`
+   * needed — sends it immediately, then hands off to `/esignature/my`
+   * (ESS) to actually view + sign.
+   */
+  async function handleSignToAcknowledge(policyId: string) {
+    if (!user) return;
+    setAckingId(policyId);
+    setError(null);
+    try {
+      const req = await createSignatureRequest({
+        generate: { kind: 'POLICY', policyId },
+        signers: [{ signerType: 'INTERNAL', order: 0, userId: user.userId }],
+      });
+      await sendSignatureRequest(req.id);
+      router.push('/esignature/my');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : t('error.generic'));
       setAckingId(null);
     }
   }
@@ -97,6 +128,15 @@ export default function AnnouncementsPage() {
                   {p.requiresAcknowledgment &&
                     (ackedPolicyIds.has(p.id) ? (
                       <span className="shrink-0 text-xs font-medium text-brand-700">{t('policies.acknowledged')}</span>
+                    ) : p.requiresSignature ? (
+                      <Button
+                        size="sm"
+                        loading={ackingId === p.id}
+                        onClick={() => handleSignToAcknowledge(p.id)}
+                        data-testid="sign-policy-button"
+                      >
+                        {t('policies.signToAcknowledge')}
+                      </Button>
                     ) : (
                       <Button
                         size="sm"

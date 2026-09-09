@@ -76,6 +76,11 @@ export class NotificationDispatchListener {
     this.dispatch(payload);
   }
 
+  @OnEvent('esignature.*')
+  handleEsignature(payload: { type: string; [key: string]: unknown }): void {
+    this.dispatch(payload);
+  }
+
   private dispatch(payload: { type: string; [key: string]: unknown }): void {
     this.notifications.handleDomainEvent(payload.type, payload).catch((error: unknown) => {
       this.logger.error(`Failed to dispatch notifications for event "${payload.type}": ${String(error)}`);

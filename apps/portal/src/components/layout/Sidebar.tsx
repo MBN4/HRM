@@ -11,6 +11,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   CreditCard,
+  FileSignature,
   GraduationCap,
   HeartPulse,
   LayoutDashboard,
@@ -57,6 +58,7 @@ export function Sidebar() {
     { href: '/learning', label: t('nav.learning'), icon: GraduationCap },
     { href: '/notifications', label: t('nav.notifications'), icon: Bell },
     { href: '/announcements', label: t('nav.announcements'), icon: Megaphone },
+    { href: '/esignature/my', label: t('nav.myEsignatures'), icon: FileSignature },
   ];
 
   const mssItems: NavItem[] = [{ href: '/approvals', label: t('nav.approvals'), icon: ClipboardCheck }];
@@ -121,6 +123,10 @@ export function Sidebar() {
   // Benefits administration (step 3.5.2) — see docs/conventions/benefits.md.
   if (can(PERMISSIONS.BENEFITS_MANAGE)) {
     adminItems.push({ href: '/benefits/admin', label: t('nav.benefitsAdmin'), icon: HeartPulse });
+  }
+  // E-signatures (step 3.5.3) — see docs/conventions/e-signatures.md.
+  if (can(PERMISSIONS.ESIGNATURE_REQUEST) || can(PERMISSIONS.ESIGNATURE_MANAGE)) {
+    adminItems.push({ href: '/esignature', label: t('nav.esignature'), icon: FileSignature });
   }
 
   return (

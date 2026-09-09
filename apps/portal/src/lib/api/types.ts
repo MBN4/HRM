@@ -862,6 +862,8 @@ export interface Policy {
   version: number;
   isActive: boolean;
   requiresAcknowledgment: boolean;
+  /** Step 3.5.3 (e-signatures) — when true, `acknowledgePolicy()` 409s; use `createSignatureRequest({ generate: { kind: 'POLICY', policyId } })` instead. See docs/conventions/e-signatures.md. */
+  requiresSignature: boolean;
   attachmentStorageKey: string | null;
   publishedByUserId: string;
   publishedAt: string | null;
@@ -1277,4 +1279,83 @@ export interface BenefitCostReport {
   periodMonth: number;
   plans: BenefitCostReportLine[];
   statutory: BenefitCostReportLine[];
+}
+
+// --- E-signatures (step 3.5.3) — see docs/conventions/e-signatures.md. ---
+
+export type SignatureRequestStatus = 'DRAFT' | 'SENT' | 'PARTIALLY_SIGNED' | 'COMPLETED' | 'DECLINED' | 'CANCELED' | 'EXPIRED';
+export type SignerType = 'INTERNAL' | 'EXTERNAL';
+export type SignerStatus = 'PENDING' | 'SENT' | 'VIEWED' | 'SIGNED' | 'DECLINED';
+export type SigningMethod = 'TYPED_NAME' | 'DRAWN_SIGNATURE' | 'CLICK_TO_SIGN';
+export type SignatureEventType = 'CREATED' | 'SENT' | 'VIEWED' | 'SIGNED' | 'DECLINED' | 'EXPIRED' | 'CERTIFICATE_GENERATED';
+
+export interface SignatureSigner {
+  id: string;
+  signatureRequestId: string;
+  order: number;
+  signerType: SignerType;
+  userId: string | null;
+  externalName: string | null;
+  externalEmail: string | null;
+  status: SignerStatus;
+  sentAt: string | null;
+  viewedAt: string | null;
+  signedAt: string | null;
+  declinedAt: string | null;
+  signingMethod: SigningMethod | null;
+}
+
+export interface SignatureCertificate {
+  id: string;
+  documentHash: string;
+  storageKey: string;
+  generatedAt: string;
+}
+
+export interface SignatureRequest {
+  id: string;
+  title: string;
+  entityType: string | null;
+  entityId: string | null;
+  branchId: string | null;
+  documentSource: 'UPLOADED' | 'GENERATED';
+  documentStorageKey: string;
+  documentMimeType: string;
+  documentHash: string;
+  status: SignatureRequestStatus;
+  createdByUserId: string;
+  sentAt: string | null;
+  completedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  signers?: SignatureSigner[];
+  certificate?: SignatureCertificate | null;
+}
+
+export interface SignatureEvent {
+  id: string;
+  signatureRequestId: string;
+  signerId: string | null;
+  eventType: SignatureEventType;
+  occurredAt: string;
+  actorUserId: string | null;
+  actorExternalName: string | null;
+  actorExternalEmail: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  signingMethod: SigningMethod | null;
+  documentHash: string | null;
+}
+
+export interface DocumentIntegrityCheck {
+  valid: boolean;
+  expectedHash: string;
+  actualHash: string;
+}
+
+export interface ExternalSigningLinkView {
+  signerId: string;
+  status: SignerStatus;
+  requestTitle: string;
+  documentMimeType: string;
 }

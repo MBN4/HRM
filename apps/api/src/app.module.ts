@@ -19,6 +19,7 @@ import { LeaveModule } from './leave/leave.module';
 import { LicensingModule } from './licensing/licensing.module';
 import { MigrationModule } from './migration/migration.module';
 import { BenefitsModule } from './benefits/benefits.module';
+import { EsignatureModule } from './esignature/esignature.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { PerformanceModule } from './performance/performance.module';
@@ -109,6 +110,11 @@ import { WorkflowModule } from './workflow/workflow.module';
     // docs/conventions/data-migration.md.
     MigrationModule,
     BenefitsModule,
+    // Step 3.5.3 — e-signatures: a generic, polymorphic signature-request
+    // model (internal + external token-scoped signers, sequential/parallel
+    // via signer `order`), the tamper-evident evidentiary trail, and the
+    // Offer/Policy integrations. See docs/conventions/e-signatures.md.
+    EsignatureModule,
   ],
   controllers: [AppController],
   providers: [AppService],

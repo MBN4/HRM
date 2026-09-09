@@ -102,6 +102,13 @@ const STATUS_TONE: Record<string, Tone> = {
   // already covered above (PENDING_APPROVAL/ACTIVE/CANCELLED are reused
   // as-is) — additive only.
   EXPIRED: 'neutral',
+  // E-signatures (step 3.5.3) — SignatureRequestStatus/SignerStatus not
+  // already covered above (DRAFT/COMPLETED/CANCELED/DECLINED/EXPIRED are
+  // reused as-is) — additive only.
+  SENT: 'info',
+  PARTIALLY_SIGNED: 'warning',
+  VIEWED: 'info',
+  SIGNED: 'success',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

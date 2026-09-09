@@ -33,6 +33,8 @@ export interface CreatePolicyInput {
   title: string;
   body: string;
   requiresAcknowledgment?: boolean;
+  /** Step 3.5.3 (e-signatures) — see docs/conventions/e-signatures.md. */
+  requiresSignature?: boolean;
   publish?: boolean;
 }
 

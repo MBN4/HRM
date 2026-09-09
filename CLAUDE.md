@@ -103,6 +103,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/white-label.md`](./docs/conventions/white-label.md)                         | Per-tenant branding model + hot-path caching, theme tokens across portal/mobile/email, the branded-custom-domain + TLS-provisioning seam extending 0.3's resolution, the gated full-rebrand capability (live-re-checked), and vendor oversight + dual audit. (4.3)                                             |
 | [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md)                   | Data migration & onboarding toolkit: dry-run-via-rollback safety model, importers routed through the real Employee/Leave services, natural-key idempotency, manager-by-code linking, column-mapping templates, uploaded-file purge, tenant self-serve vs. platform-on-behalf-of. (3.5.1)                       |
 | [`docs/conventions/benefits.md`](./docs/conventions/benefits.md)                               | Benefits administration: plan config mirroring `PayrollComponentDefinition`, statutory schemes needing zero payroll-engine change, enrollment + optional workflow approval, the benefits→payroll input hand-off, cost reporting. (3.5.2)                                                                       |
+| [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md)                       | E-signatures: the tamper-evident evidentiary trail (document hashing, DB-immutable events, a certificate), external token-scoped signing links, sequential/parallel signer sequencing, the Offer/Policy integrations, the compliance boundary, and the future e-sign-provider seam. (3.5.3)                    |
 
 ## 5. Build log summary
 
@@ -501,8 +502,41 @@ Phase 0–3's foundation.
   deliberately not authorable through the form, the same gap
   `payroll.ts`'s own `UpsertPayrollComponentInput` already carries). See
   [`docs/conventions/benefits.md`](./docs/conventions/benefits.md).
-  Phase 3.5 remaining: **3.5.3** (e-signatures) is not yet built; **3.5.4**
-  (statutory reporting) is deferred.
+
+- **3.5.3** — E-signatures (Phase 3.5's third slice): a generic,
+  polymorphic `SignatureRequest`/`SignatureSigner` model (internal
+  `User`-linked signers via ESS, or external no-account signers via a
+  scoped, expiring, single-document capability token — the SAME indexed-
+  prefix + argon2id-hash pattern 3.3's `ApiKeyService` already establishes,
+  never a JWT/RBAC credential), sequential/parallel signing via the
+  signer's own `order` column — a small, purpose-built mechanism
+  deliberately NOT the 0.7 workflow engine, mirroring exactly the
+  reasoning 2.3's checklist mini-engine already gives for itself. THE
+  EVIDENTIARY TRAIL is the real core: a SHA-256 document hash captured at
+  creation and re-verified at every signing, an append-only
+  `SignatureEvent` table made DB-immutable via the identical
+  `audit_log`-style `REVOKE UPDATE/DELETE` migration (proven directly
+  against Postgres), a generated signature CERTIFICATE PDF (via the same
+  `pdfkit`/DejaVu-font approach 2.1's payslips established) as a SEPARATE
+  downloadable artifact, and a live tamper-evidence re-verification route.
+  Two real integrations, both additive: an Offer's acceptance IS its
+  signature — the completion listener calls the REAL, unmodified
+  `OfferService.accept`, which already cascades into the existing 2.3
+  onboarding trigger with zero Recruitment/Onboarding changes; a Policy
+  gains one additive `requiresSignature` column and
+  `PolicyService.acknowledge` gains one additive bypass parameter, so a
+  signed acknowledgment produces the SAME `PolicyAcknowledgment` row the old
+  click-based flow always did, plus the full trail. External-signer email
+  delivery calls the 0.8 notification hub's `EMAIL_PROVIDER` DIRECTLY
+  (one additive export from `NotificationsModule`) since that hub's
+  recipient model is inherently `User`-keyed and an external signer has no
+  `User` row. Honestly scoped: this is a strong tamper-evident MECHANISM,
+  not a legal determination of sufficiency under any specific
+  e-signature law (eIDAS/ESIGN/UETA/etc.) — that boundary is stated
+  directly in the UI, the same compliance-boundary framing payroll.md/
+  benefits.md already take for their own domains. See
+  [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md).
+  Phase 3.5 remaining: **3.5.4** (statutory reporting) is deferred.
 
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
@@ -510,7 +544,12 @@ Phase 0–3's foundation.
       (zero engine change), enrollment + optional workflow approval, the
       benefits→payroll input hand-off, cost reporting. See
       [`docs/conventions/benefits.md`](./docs/conventions/benefits.md).
-- [ ] **3.5.3** E-signatures — not yet built.
+- [x] **3.5.3** E-signatures — polymorphic signature requests, internal +
+      external (token-scoped, no-account) signers, sequential/parallel
+      signing, a tamper-evident/DB-immutable evidentiary trail + generated
+      certificate, the Offer-acceptance and Policy-acknowledgment
+      integrations, and the documented compliance boundary. See
+      [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md).
 - [ ] **3.5.4** Statutory reporting — deferred.
 
 - [ ] **Phase 5** — _scope not yet defined_ (5.2 is already known to

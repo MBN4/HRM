@@ -134,6 +134,18 @@ export class NotificationRecipientResolverService {
         return admins.map((row) => row.userId);
       }
 
+      // Step 3.5.3 — see docs/conventions/e-signatures.md. Both are
+      // direct payload fields, no DB query needed — the SAME shape
+      // `workflow.escalated`'s `escalatedToUserId` already uses. An
+      // EXTERNAL signer never reaches this resolver at all (see
+      // `ExternalSignerNotifierService` — a non-`User` recipient is
+      // delivered to directly, bypassing this hub entirely).
+      case 'esignature.request_sent':
+        return typeof payload.signerUserId === 'string' ? [payload.signerUserId] : [];
+
+      case 'esignature.completed':
+        return typeof payload.createdByUserId === 'string' ? [payload.createdByUserId] : [];
+
       default:
         return [];
     }

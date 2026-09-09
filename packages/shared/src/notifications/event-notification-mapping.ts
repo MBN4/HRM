@@ -44,6 +44,15 @@ export const NOTIFICATION_EVENT_TYPES = [
   'billing.invoice_paid',
   'billing.invoice_payment_failed',
   'billing.amc_invoice_created',
+  // Step 3.5.3 (e-signatures) — emitted by SigningService, see
+  // docs/conventions/e-signatures.md. Both resolve to an INTERNAL signer's
+  // (a real User) own id, direct in the payload — an EXTERNAL signer (no
+  // User at all) is deliberately NOT routed through this hub at all;
+  // `ExternalSignerNotifierService` calls the SAME `EMAIL_PROVIDER` DI
+  // token directly instead, since the hub's recipient model is inherently
+  // User-keyed and an external candidate/signer has no User row to key on.
+  'esignature.request_sent',
+  'esignature.completed',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -75,4 +84,6 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'billing.invoice_paid': ['IN_APP'],
   'billing.invoice_payment_failed': ['IN_APP', 'EMAIL'],
   'billing.amc_invoice_created': ['IN_APP', 'EMAIL'],
+  'esignature.request_sent': ['IN_APP', 'EMAIL'],
+  'esignature.completed': ['IN_APP', 'EMAIL'],
 };

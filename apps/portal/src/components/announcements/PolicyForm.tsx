@@ -13,6 +13,7 @@ export function PolicyForm({ onSubmitted, onCancel }: { onSubmitted: () => void;
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [requiresAcknowledgment, setRequiresAcknowledgment] = useState(true);
+  const [requiresSignature, setRequiresSignature] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +22,7 @@ export function PolicyForm({ onSubmitted, onCancel }: { onSubmitted: () => void;
     setSubmitting(true);
     setError(null);
     try {
-      await createPolicy({ title, body, requiresAcknowledgment, publish: true });
+      await createPolicy({ title, body, requiresAcknowledgment, requiresSignature, publish: true });
       onSubmitted();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('error.generic'));
@@ -43,6 +44,15 @@ export function PolicyForm({ onSubmitted, onCancel }: { onSubmitted: () => void;
       <label className="flex items-center gap-2 text-sm text-ink-700">
         <input type="checkbox" checked={requiresAcknowledgment} onChange={(e) => setRequiresAcknowledgment(e.target.checked)} />
         {t('policies.acknowledge')}
+      </label>
+      <label className="flex items-center gap-2 text-sm text-ink-700">
+        <input
+          type="checkbox"
+          checked={requiresSignature}
+          onChange={(e) => setRequiresSignature(e.target.checked)}
+          data-testid="policy-requires-signature-checkbox"
+        />
+        {t('policies.requiresSignature')}
       </label>
 
       {error && <Alert tone="error">{error}</Alert>}

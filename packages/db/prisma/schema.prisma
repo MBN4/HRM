@@ -226,6 +226,12 @@ model Tenant {
   benefitEnrollmentDependents BenefitEnrollmentDependent[]
   benefitContributionRecords  BenefitContributionRecord[]
 
+  // Step 3.5.3 — e-signatures (see docs/conventions/e-signatures.md).
+  signatureRequests    SignatureRequest[]
+  signatureSigners     SignatureSigner[]
+  signatureEvents      SignatureEvent[]
+  signatureCertificates SignatureCertificate[]
+
   @@map("tenants")
 }
 
@@ -3801,6 +3807,14 @@ model Policy {
   version                Int       @default(1)
   isActive               Boolean   @default(true) @map("is_active")
   requiresAcknowledgment Boolean   @default(true) @map("requires_acknowledgment")
+  // Step 3.5.3 (e-signatures) — see docs/conventions/e-signatures.md. When
+  // true, a plain click via `POST /policies/:id/acknowledge` is refused
+  // (PolicyService.acknowledge's own `bypassSignatureRequirement` guard) —
+  // acknowledgment must instead go through a real SignatureRequest, whose
+  // completion calls this SAME `acknowledge` method (with the bypass flag
+  // set) so the ordinary PolicyAcknowledgment row still exists, PLUS the
+  // full evidentiary signing trail.
+  requiresSignature      Boolean   @default(false) @map("requires_signature")
   attachmentStorageKey   String?   @map("attachment_storage_key")
   publishedByUserId      String    @map("published_by_user_id") @db.Uuid
   publishedAt            DateTime? @map("published_at")
@@ -4877,4 +4891,227 @@ model BenefitContributionRecord {
   @@index([tenantId, payrollRunId])
   @@index([tenantId, employeeId, periodYear, periodMonth])
   @@map("benefit_contribution_records")
+}
+
+// --- E-Signatures ------------------------------------------------------
+//
+// Step 3.5.3 — see docs/conventions/e-signatures.md. A generic, POLYMORPHIC
+// signature-request model (same `entityType`/`entityId`-with-no-FK shape as
+// `WorkflowInstance`/`CustomFieldValueSet` — a signature request usually
+// concerns a module row that may not exist at all for a bare uploaded
+// contract) that ANY document (generated PDF or uploaded via 1.1
+// `StorageService`) can be sent through, to one or more signers, sequential
+// or parallel via the signer's own `order` column — the SAME "shares an
+// `order` = parallel group, different `order` = sequential" shape
+// `WorkflowStep.order` established, deliberately NOT the workflow engine
+// itself: signing is an action (sign/decline), never a multi-step
+// approve/reject/delegate/escalate decision, so reusing the whole engine
+// here would be reuse in name only — the identical justification
+// checklists.md already gives for its own small mini-engine relative to
+// `ApproverRule`. A genuine multi-party APPROVAL need (e.g. "legal must
+// approve this contract before it's sent out") is a SEPARATE, optional real
+// 0.7 `WorkflowInstance` a consuming module may start on its own before
+// ever creating a `SignatureRequest` — this module has no opinion on that.
+
+enum SignatureRequestStatus {
+  DRAFT
+  SENT
+  PARTIALLY_SIGNED
+  COMPLETED
+  DECLINED
+  CANCELED
+  EXPIRED
+}
+
+enum SignatureDocumentSource {
+  UPLOADED
+  GENERATED
+}
+
+enum SignerType {
+  INTERNAL
+  EXTERNAL
+}
+
+enum SignerStatus {
+  PENDING
+  SENT
+  VIEWED
+  SIGNED
+  DECLINED
+}
+
+enum SigningMethod {
+  TYPED_NAME
+  DRAWN_SIGNATURE
+  CLICK_TO_SIGN
+}
+
+enum SignatureEventType {
+  CREATED
+  SENT
+  VIEWED
+  SIGNED
+  DECLINED
+  EXPIRED
+  CERTIFICATE_GENERATED
+}
+
+model SignatureRequest {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  title    String
+  // Polymorphic link to the module row this signature concerns (e.g.
+  // `"Offer"`/`"Policy"`) — nullable, since a bare uploaded HR contract has
+  // no owning module row at all. No FK, same reasoning as
+  // `WorkflowInstance.entityType`/`.entityId`.
+  entityType String? @map("entity_type")
+  entityId   String? @map("entity_id") @db.Uuid
+  // Nullable — see docs/conventions/e-signatures.md → Branch scoping. Set
+  // from the linked entity's own branch when one exists (e.g. an Offer's
+  // `branchId`); left null for a tenant-wide document, the same "no scope
+  // to widen into, but never out of scope either" posture Announcements'
+  // untargeted rows already take.
+  branchId String? @map("branch_id") @db.Uuid
+
+  documentSource     SignatureDocumentSource @map("document_source")
+  documentStorageKey String                  @map("document_storage_key")
+  documentMimeType   String                  @default("application/pdf") @map("document_mime_type")
+  // SHA-256 hex of the EXACT bytes at `documentStorageKey`, computed once at
+  // creation and NEVER recomputed — this is what a later tamper-evidence
+  // check (`GET /e-signatures/requests/:id/verify`) compares the object's
+  // CURRENT bytes against.
+  documentHash String @map("document_hash")
+
+  status          SignatureRequestStatus @default(DRAFT)
+  createdByUserId String                 @map("created_by_user_id") @db.Uuid
+  sentAt          DateTime?              @map("sent_at")
+  completedAt     DateTime?              @map("completed_at")
+  // Every signer's own access (external token expiry / internal deadline)
+  // is bounded by this — set at `send()` time, not editable afterward.
+  expiresAt       DateTime?              @map("expires_at")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  signers     SignatureSigner[]
+  events      SignatureEvent[]
+  certificate SignatureCertificate?
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@index([tenantId, entityType, entityId])
+  @@map("signature_requests")
+}
+
+model SignatureSigner {
+  id                 String @id @default(uuid()) @db.Uuid
+  tenantId           String @map("tenant_id") @db.Uuid
+  signatureRequestId String @map("signature_request_id") @db.Uuid
+  // Shares an `order` value with another signer = a PARALLEL group (both
+  // must sign before the next group activates); a different value =
+  // SEQUENTIAL. See `SigningProgressService`.
+  order              Int    @default(0)
+
+  signerType SignerType @map("signer_type")
+  // INTERNAL — a real User (ESS self-service, `GET /e-signatures/my-pending`).
+  userId     String?    @map("user_id") @db.Uuid
+  // EXTERNAL — no account at all (e.g. a candidate signing an offer letter
+  // before joining); identified only by name/email, reached via a scoped
+  // single-purpose signing link, never RBAC/JWT.
+  externalName  String? @map("external_name")
+  externalEmail String? @map("external_email")
+
+  status SignerStatus @default(PENDING)
+
+  // EXTERNAL signers only — the SAME keyPrefix(indexed)+argon2id-hash
+  // pattern `ApiKeyService`/`ApiKeyAuthService` already establish for a
+  // presented-secret lookup (see docs/conventions/e-signatures.md). The raw
+  // token is returned to the CALLER exactly once (at send-time, to build
+  // the emailed link) and never stored — only this hash can verify a later
+  // presentation.
+  accessTokenPrefix    String?   @map("access_token_prefix") @db.VarChar(16)
+  accessTokenHash      String?   @map("access_token_hash")
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at")
+
+  sentAt      DateTime? @map("sent_at")
+  viewedAt    DateTime? @map("viewed_at")
+  signedAt    DateTime? @map("signed_at")
+  declinedAt  DateTime? @map("declined_at")
+
+  signingMethod            SigningMethod? @map("signing_method")
+  // Exactly one of these two is set once `status = SIGNED`, per
+  // `signingMethod`.
+  typedSignatureText       String?        @map("typed_signature_text")
+  signatureImageStorageKey String?        @map("signature_image_storage_key")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  signatureRequest SignatureRequest @relation(fields: [tenantId, signatureRequestId], references: [tenantId, id], onDelete: Cascade)
+  events           SignatureEvent[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, accessTokenPrefix])
+  @@index([tenantId, signatureRequestId])
+  @@index([tenantId, userId])
+  @@map("signature_signers")
+}
+
+// THE EVIDENTIARY TRAIL — append-only, and immutable at the DATABASE
+// layer (see the `enable_rls_for_esignature_module` migration's REVOKE
+// UPDATE/DELETE, the identical mechanism `audit_log` already uses — see
+// docs/conventions/audit-custom-fields.md). One row per meaningful
+// lifecycle moment (created/sent/viewed/signed/declined/expired/
+// certificate-generated); a SIGNED row is this module's core legal record
+// — signer identity, UTC timestamp, IP/user-agent, signing method, and the
+// document-hash actually presented/signed at that instant, so tampering
+// with the stored document afterward is detectable by recomputing its hash
+// and comparing against what was recorded here.
+model SignatureEvent {
+  id                 String             @id @default(uuid()) @db.Uuid
+  tenantId           String             @map("tenant_id") @db.Uuid
+  signatureRequestId String             @map("signature_request_id") @db.Uuid
+  signerId           String?            @map("signer_id") @db.Uuid
+  eventType          SignatureEventType @map("event_type")
+  occurredAt         DateTime           @default(now()) @map("occurred_at")
+
+  actorUserId        String? @map("actor_user_id") @db.Uuid
+  actorExternalName  String? @map("actor_external_name")
+  actorExternalEmail String? @map("actor_external_email")
+  ipAddress          String? @map("ip_address")
+  userAgent          String? @map("user_agent")
+
+  signingMethod SigningMethod? @map("signing_method")
+  documentHash  String?        @map("document_hash")
+  metadata      Json?
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  signatureRequest SignatureRequest @relation(fields: [tenantId, signatureRequestId], references: [tenantId, id], onDelete: Cascade)
+  signer           SignatureSigner? @relation(fields: [tenantId, signerId], references: [tenantId, id], onDelete: SetNull)
+
+  @@index([tenantId, signatureRequestId])
+  @@index([tenantId, signerId])
+  @@map("signature_events")
+}
+
+// One per COMPLETED SignatureRequest — the signature CERTIFICATE / audit
+// page (who signed what, when, hashes), rendered as its own PDF via the
+// SAME pdfkit approach `PayslipPdfService` established, stored via 1.1's
+// `StorageService`/MinIO. Deliberately a SEPARATE artifact from the signed
+// document itself (never merged/re-embedded into it) — both are
+// independently downloadable; see docs/conventions/e-signatures.md for why.
+model SignatureCertificate {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  signatureRequestId String   @map("signature_request_id") @db.Uuid
+  documentHash       String   @map("document_hash")
+  storageKey         String   @map("storage_key")
+  generatedAt        DateTime @default(now()) @map("generated_at")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  signatureRequest SignatureRequest @relation(fields: [tenantId, signatureRequestId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, signatureRequestId])
+  @@map("signature_certificates")
 }

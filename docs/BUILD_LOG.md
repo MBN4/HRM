@@ -2815,3 +2815,125 @@ COMMITTED`/`COMMITTED_WITH_ERRORS`/`FAILED`. `POST /migration/batches/:id/commit
     SAME class of test-parallelism flakiness this log already documents for
     itself in 3.5.1/4.3, nothing to do with this step. Full-repo `pnpm
 build`/`pnpm lint` green across all eight workspace tasks.
+- **3.5.3 E-signatures — done — 2026-09-09.** See
+  [`docs/conventions/e-signatures.md`](./conventions/e-signatures.md) for
+  the full write-up. Backend (`packages/db`, `packages/shared`,
+  `apps/api/src/esignature`) + portal UI (`apps/portal`) together, the
+  SAME "thin module, consumer of systems that already exist" posture every
+  prior 3.x slice has established — storage (1.1), PDF generation
+  (2.1's `pdfkit`/bundled-DejaVu-font approach, reused byte-for-byte),
+  audit (0.9's `audit_log` DB-immutability pattern, applied a second time),
+  notifications (0.8, plus one direct-provider-call exception for
+  non-`User` recipients), and the two real integrations (Offer/Policy).
+  THE CORE CLAIM this step actually builds toward: `SignatureRequest`
+  (polymorphic `entityType`/`entityId`, no FK — same shape
+  `WorkflowInstance` already establishes) + `SignatureSigner` (`INTERNAL` —
+  a real `User`, ESS-reachable; `EXTERNAL` — no account at all, reached
+  only via a scoped, expiring, single-document capability token, the SAME
+  indexed-prefix + argon2id-hash pattern 3.3's `ApiKeyService` already
+  establishes, never a JWT/RBAC credential) + an append-only
+  `SignatureEvent` trail made DB-IMMUTABLE via the identical `audit_log`-
+  style `REVOKE UPDATE/DELETE` migration (proven directly against Postgres
+  by a new `packages/db/test/signature-event-immutability.spec.ts`, the
+  same proof shape `audit-log-immutability.spec.ts` already established) +
+  a generated `SignatureCertificate` PDF as a SEPARATE downloadable
+  artifact. A `SIGNED` event captures identity, UTC timestamp, IP/
+  user-agent, signing method, AND a FRESH SHA-256 re-hash of the document's
+  current bytes at that exact instant — never just copied from the
+  request's own creation-time hash — which is what makes a later
+  `GET /e-signatures/requests/:id/verify` tamper-evidence re-check
+  meaningful rather than circular. Sequencing (parallel-by-shared-`order`,
+  sequential-by-differing-`order`) is its OWN small mechanism
+  (`SigningProgressService`), deliberately NOT the 0.7 workflow engine —
+  signing is an action, never a multi-step approve/reject/delegate/
+  escalate DECISION, the identical justification 2.3's checklist
+  mini-engine already gives relative to `ApproverRule`. Two real
+  integrations, both additive: an Offer's acceptance IS its signature —
+  `EsignatureCompletionSideEffectsListener` (reacting to
+  `esignature.completed`, the same fire-and-forget cross-module event-
+  listener shape this codebase always uses) calls the REAL, UNMODIFIED
+  `OfferService.accept`, which already cascades into 2.3's EXISTING
+  onboarding trigger (`recruitment.offer_accepted` →
+  `OnboardingOfferAcceptedListener`) with ZERO changes to
+  `apps/api/src/recruitment`/`apps/api/src/onboarding`; `Policy` gains one
+  additive `requiresSignature` column and `PolicyService.acknowledge` gains
+  one additive `bypassSignatureRequirement` parameter, so a signed
+  acknowledgment produces the IDENTICAL `PolicyAcknowledgment` row the old
+  click-based flow always did (existing admin tracking needs zero
+  changes), plus the full trail — an employee self-requesting their OWN
+  policy signature is a row-level carve-out on `esignature.request`'s
+  permission check (a `POLICY_READ` holder naming themselves as the sole
+  signer), the SAME "gated at the row level, an explicit manage-tier
+  permission widens who may act" shape `InterviewScorecard` submission
+  already establishes. External-signer email delivery calls the 0.8 hub's
+  `EMAIL_PROVIDER` DIRECTLY (one additive `NotificationsModule` export)
+  since that hub's whole recipient/preference/locale model is `User`-keyed
+  and an external signer has none. THE HONEST COMPLIANCE BOUNDARY, stated
+  directly in the portal UI: this is a strong, tamper-evident evidentiary
+  MECHANISM, not a legal determination of sufficiency under any specific
+  e-signature law (eIDAS/ESIGN/UETA/etc.) — that determination is for the
+  contracting parties and their counsel, the SAME framing payroll.md/
+  benefits.md already take for their own domains. A documented, deliberate
+  seam for a future real e-sign vendor (DocuSign/Adobe Sign/etc.) — the
+  SAME "swap one DI binding" shape every other adapter in this codebase
+  takes — is written up but not built. Portal: `/esignature` (admin
+  tracking + create, gated `esignature.manage`/`.request`), `/esignature/[id]`
+  (signer list, evidentiary-trail timeline, document/certificate downloads,
+  a live verify-integrity button), `/esignature/my` (ESS pending-signature
+  inbox + a shared `SignaturePad` component — typed name or a drawn
+  canvas signature), and `/esign/[token]` (the PUBLIC external-signer
+  page, deliberately outside the `(app)` route group — no session, no
+  sidebar, the SAME shape `/login` already establishes — storing the
+  emailed link's `?tenant=` query param via the existing
+  `setStoredTenantSlug()` before making any API call). The ESS
+  announcements page's policy-acknowledge button now reads "Sign to
+  acknowledge" and routes into this flow whenever a policy requires it.
+  New RBAC: `esignature.request`/`.manage` (`TENANT_ADMIN`/`HR_MANAGER`)
+  and `esignature.sign` (seeded onto every role including `EMPLOYEE`).
+  Deferred, documented gaps (per this step's own scope line): no real
+  e-sign PROVIDER adapter; generated documents (offer letters, policy
+  text, CUSTOM) always render in English regardless of the resolved
+  branch locale (unlike `PayslipPdfService`'s own pack-driven-language
+  precedent); no reminder/escalation sweep for a signer who never acts; no
+  picker abstraction for offer/policy ids in the admin create form (type
+  the id, the same documented posture interviewer/manager pickers already
+  carry); no qualified/certificate-based (PKI) signing method. Verified
+  end-to-end over real HTTP by `apps/api/test/esignature.e2e-spec.ts` (21
+  tests: an internal signer's full evidentiary trail captured on signing
+  with a certificate generated on completion and a live tamper-evidence
+  check correctly flipping to invalid after the stored document is
+  overwritten out-of-band; an external candidate signing a generated offer
+  letter via a token-only link with NO account, flowing into the REAL
+  `OfferService.accept` → `recruitment.offer_accepted` →
+  `OnboardingOfferAcceptedListener` chain with zero Recruitment/Onboarding
+  changes; the external token proven NOT a general credential (rejected as
+  a Bearer JWT), NOT cross-tenant (RLS — the identical token 404s under a
+  different tenant Host), and expiring (410 Gone); a `requiresSignature`
+  policy refusing a plain click and accepting a real signed acknowledgment
+  via the row-level `POLICY_READ` self-service carve-out, with that
+  carve-out correctly forbidden on someone else's behalf; RBAC deny-by-
+  default on both creation and tenant-wide listing; cross-tenant isolation
+  via RLS) plus `packages/db/test/signature-event-immutability.spec.ts` (5
+  tests: the identical `audit_log`-style DB-level REVOKE UPDATE/DELETE
+  proof, applied to `signature_events`). `apps/api`'s full suite: **514
+  tests green** (493 existing + 21 new). `apps/portal/tests/esignature.spec.ts`
+  (5 Playwright tests over the real browser/API/Postgres/Redis/MinIO
+  stack: an admin creating and sending a request through the real UI, the
+  employee signing it from `/esignature/my` with a typed signature, the
+  admin seeing it COMPLETED with the live verify check reporting valid,
+  RBAC-gated nav visibility, and a QA-branch employee rendering the
+  signing page RTL) — a real bug this step's own test-writing caught and
+  fixed, worth recording: polling a detail page's status by repeatedly
+  `page.goto()`-ing the SAME URL in a loop is itself a bug, not a
+  reasonable wait strategy — each is a FULL browser navigation, re-running
+  `AuthProvider`'s bootstrap/refresh-token exchange every single time,
+  which can trip 0.4's refresh-token reuse detection — the exact "one
+  login/navigation burst per test" lesson operations-modules.md /
+  frontend-admin-console.md already document for a related flakiness
+  class; fixed by asserting once after a single navigation, since the
+  prior test's `sign()` call had already awaited full completion
+  (including certificate generation) synchronously server-side before its
+  own response returned — there was nothing left to poll for.
+  `apps/portal`'s full Playwright suite: **95 tests** (90 existing + 5
+  new). Full-repo `pnpm build`/`pnpm lint` green across all eight
+  workspace tasks.

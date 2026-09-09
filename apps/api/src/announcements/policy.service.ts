@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Policy, PolicyAcknowledgment, Prisma } from '@hrm/db';
 import { CreatePolicyInput } from '@hrm/shared';
 
@@ -25,6 +25,7 @@ export class PolicyService {
         body: input.body,
         version,
         requiresAcknowledgment: input.requiresAcknowledgment,
+        requiresSignature: input.requiresSignature,
         publishedByUserId: callerUserId,
         publishedAt: input.publish ? new Date() : null,
       },
@@ -48,8 +49,32 @@ export class PolicyService {
     return tx.policy.findMany({ where: { tenantId, isActive: true, publishedAt: { not: null } }, orderBy: { title: 'asc' } });
   }
 
-  async acknowledge(tx: Prisma.TransactionClient, tenantId: string, policyId: string, userId: string): Promise<PolicyAcknowledgment> {
+  /**
+   * `bypassSignatureRequirement` — step 3.5.3 (e-signatures, see
+   * docs/conventions/e-signatures.md) — is `false` (enforced) for the
+   * ordinary click-to-acknowledge HTTP route, and `true` ONLY when called
+   * from the e-signature module's own completion listener, AFTER a real
+   * `SignatureRequest` for this exact policy has genuinely reached
+   * `COMPLETED` — that listener is the one place in this codebase this
+   * flag is ever set. This method is otherwise byte-identical to its
+   * pre-3.5.3 self: the SAME upsert still creates the SAME
+   * `PolicyAcknowledgment` row either way, so existing admin tracking
+   * (`listAcknowledgments`) needs no changes to pick up a signed
+   * acknowledgment too.
+   */
+  async acknowledge(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    policyId: string,
+    userId: string,
+    bypassSignatureRequirement = false,
+  ): Promise<PolicyAcknowledgment> {
     const policy = await this.requireById(tx, tenantId, policyId);
+    if (policy.requiresSignature && !bypassSignatureRequirement) {
+      throw new ConflictException(
+        `Policy "${policyId}" requires a signed acknowledgment — create a signature request for it instead of acknowledging directly.`,
+      );
+    }
     return tx.policyAcknowledgment.upsert({
       where: { tenantId_policyId_userId: { tenantId, policyId: policy.id, userId } },
       update: {},

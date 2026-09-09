@@ -61,6 +61,11 @@ import { SlackNotificationProvider } from './providers/slack.provider';
     // rather than a dev-only Log*Provider; see SlackNotificationProvider.
     { provide: SLACK_PROVIDER, useClass: SlackNotificationProvider },
   ],
-  exports: [NotificationsService],
+  // `EMAIL_PROVIDER` is additionally exported (step 3.5.3) so the
+  // e-signature module can inject it DIRECTLY for its external-signer
+  // notifier — see docs/conventions/e-signatures.md → Notifications. The
+  // same swappable seam this token already is: a real deployment still
+  // only ever swaps ONE binding here, in `notifications.module.ts`.
+  exports: [NotificationsService, EMAIL_PROVIDER],
 })
 export class NotificationsModule {}
