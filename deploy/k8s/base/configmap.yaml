@@ -1,0 +1,70 @@
+# Phase 5.3 — non-secret runtime configuration, shared by the api and
+# worker Deployments (both run the SAME AppModule — see
+# docs/conventions/deployment-scaling.md). Region overlays
+# (deploy/k8s/overlays/<region>/) patch the handful of values that must
+# differ per region (TENANT_BASE_DOMAIN, S3_REGION, ...) — see that
+# doc's § Regional deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hrm-api-config
+  namespace: hrm
+data:
+  NODE_ENV: 'production'
+  PORT: '3001'
+  WORKER_HEALTH_PORT: '3002'
+
+  # --- Connection pooling (0.10 / 5.1) ---
+  DB_POOL_SIZE: '10'
+  DB_ADMIN_POOL_SIZE: '5'
+  DB_POOL_TIMEOUT_SECONDS: '5'
+  DB_REPLICA_POOL_SIZE: '10'
+
+  # --- Tenant resolution (0.3) — base value; overlays patch this per region ---
+  TENANT_RESOLUTION_STRATEGIES: 'subdomain,custom_domain,header'
+  TENANT_BASE_DOMAIN: 'yourhrms.com'
+  TENANT_HEADER_NAME: 'x-tenant-id'
+  PORTAL_BASE_URL: 'https://portal.yourhrms.com'
+
+  # --- Platform / vendor console (4.1) ---
+  PLATFORM_MODE_ENABLED: 'true'
+  PLATFORM_JWT_EXPIRES_IN: '30m'
+  PLATFORM_JWT_REFRESH_EXPIRES_IN: '12h'
+
+  # --- Auth (0.4) ---
+  JWT_EXPIRES_IN: '15m'
+  JWT_REFRESH_EXPIRES_IN: '7d'
+
+  # --- Licensing (0.6) — the PUBLIC key only; mounted from
+  # `hrm-license-public-key` below. Every deployment (SaaS or on-prem) needs
+  # this to verify a lifetime license file; only the platform's own signing
+  # infrastructure ever holds the private key, which never ships here. ---
+  LICENSE_MODE: 'saas'
+  LICENSE_PUBLIC_KEY_PATH: '/etc/hrm/license/license-public.pem'
+
+  # --- Resilience chassis (0.10) ---
+  REQUEST_TIMEOUT_MS: '30000'
+  LOAD_SHED_LOW_THRESHOLD: '20'
+  LOAD_SHED_NORMAL_THRESHOLD: '100'
+  # Kept comfortably under terminationGracePeriodSeconds (see
+  # api-deployment.yaml/worker-deployment.yaml) so the app's own drain
+  # always finishes before the kubelet would SIGKILL.
+  SHUTDOWN_GRACE_PERIOD_MS: '20000'
+
+  # --- Object storage (S3-compatible; MinIO locally, real S3/managed
+  # equivalent in prod) — endpoint/region/bucket are not secret; access
+  # keys are (see secret.example.yaml) ---
+  S3_ENDPOINT: 'https://s3.us-east-1.amazonaws.com'
+  S3_REGION: 'us-east-1'
+  S3_BUCKET: 'hrm-prod-us-east-1'
+  S3_FORCE_PATH_STYLE: 'false'
+
+  # --- Data migration toolkit (3.5.1) ---
+  IMPORT_FILE_RETENTION_HOURS: '72'
+
+  # --- White-label / branding (4.3) — ACME is a documented seam, off by
+  # default in every environment until a real ACME client integration
+  # lands (see docs/conventions/white-label.md) ---
+  ACME_ENABLED: 'false'
+  ACME_DIRECTORY_URL: ''
+  ACME_ACCOUNT_EMAIL: ''

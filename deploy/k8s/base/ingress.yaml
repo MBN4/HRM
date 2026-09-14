@@ -1,0 +1,101 @@
+# Phase 5.3 — ingress topology (nginx ingress controller assumed; any
+# controller supporting path rewriting + wildcard hosts works equally).
+#
+# PRODUCTION CONVENTION CHOSEN HERE, distinct from local dev's raw-port
+# setup (portal on :3003, api on :3001 — see each app's own .env.example):
+# behind a real ingress, portal and api share ONE host per tenant
+# (`<slug>.yourhrms.com` — 0.3's subdomain tenant-resolution strategy,
+# unmodified) split by PATH instead of port — `/api/*` (rewritten to
+# strip the prefix) routes to the api Service, everything else to portal.
+# This is what apps/portal's `NEXT_PUBLIC_API_URL`/`NEXT_PUBLIC_TENANT_BASE_DOMAIN`
+# would be BUILT with for a real deployment (same-origin `/api` path, no
+# separate port exposed through the ingress) — a deployment-time env-var
+# choice for that Next.js build, not a code change. `admin.yourhrms.com`
+# is a separate, FIXED hostname (the vendor console has no tenant/
+# subdomain concept at all — see docs/conventions/vendor-console.md).
+#
+# TLS: `cert-manager.io/cluster-issuer` assumes cert-manager is installed
+# with a ClusterIssuer named `letsencrypt-prod` already configured — an
+# ADD-ON dependency, not something this repo provisions (the same
+# "documented seam, not provisioned here" posture 4.3's own ACME
+# integration takes — see docs/conventions/white-label.md). A tenant's
+# BRANDED custom domain (verified, per 4.3) is a SEPARATE Ingress/
+# certificate this manifest does not cover — see
+# docs/conventions/deployment-scaling.md § Regional deployment for how
+# that extends this topology.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hrm-app
+  namespace: hrm
+  annotations:
+    kubernetes.io/ingress.class: 'nginx'
+    cert-manager.io/cluster-issuer: 'letsencrypt-prod'
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/proxy-body-size: '10m'
+spec:
+  tls:
+    - hosts:
+        - 'yourhrms.com'
+        - '*.yourhrms.com'
+      secretName: hrm-app-tls
+  rules:
+    - host: 'yourhrms.com'
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: hrm-api
+                port:
+                  number: 3001
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: hrm-portal
+                port:
+                  number: 3003
+    - host: '*.yourhrms.com'
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: hrm-api
+                port:
+                  number: 3001
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: hrm-portal
+                port:
+                  number: 3003
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hrm-admin
+  namespace: hrm
+  annotations:
+    kubernetes.io/ingress.class: 'nginx'
+    cert-manager.io/cluster-issuer: 'letsencrypt-prod'
+spec:
+  tls:
+    - hosts:
+        - 'admin.yourhrms.com'
+      secretName: hrm-admin-tls
+  rules:
+    - host: 'admin.yourhrms.com'
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hrm-admin
+                port:
+                  number: 3002

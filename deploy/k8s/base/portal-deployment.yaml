@@ -1,0 +1,131 @@
+# Phase 5.3 — the tenant portal (apps/portal, Next.js standalone build —
+# see apps/portal/Dockerfile). Stateless (no server-side session store of
+# its own; NEXTAUTH_SECRET only signs/verifies a client-held JWT-based
+# session cookie), so it scales exactly like the API — no sticky sessions
+# needed at the ingress either.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hrm-portal
+  namespace: hrm
+  labels:
+    app.kubernetes.io/name: hrm-portal
+    app.kubernetes.io/part-of: hrm
+    app.kubernetes.io/component: portal
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-portal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hrm-portal
+        app.kubernetes.io/part-of: hrm
+        app.kubernetes.io/component: portal
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: portal
+          image: hrm/portal:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3003
+          envFrom:
+            - configMapRef:
+                name: hrm-portal-config
+            - secretRef:
+                name: hrm-portal-secrets
+          lifecycle:
+            preStop:
+              exec:
+                command: ['sh', '-c', 'sleep 5']
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3003
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3003
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '256Mi'
+            limits:
+              cpu: '500m'
+              memory: '512Mi'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hrm-portal
+  namespace: hrm
+spec:
+  selector:
+    app.kubernetes.io/name: hrm-portal
+  ports:
+    - name: http
+      port: 3003
+      targetPort: 3003
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hrm-portal
+  namespace: hrm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hrm-portal
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hrm-portal-config
+  namespace: hrm
+data:
+  NODE_ENV: 'production'
+  PORT: '3003'
+  NEXT_PUBLIC_API_URL: 'https://app.yourhrms.com/api'
+  NEXT_PUBLIC_APP_ENV: 'production'
+  NEXT_PUBLIC_TENANT_HOST_MODE: 'subdomain'
+  NEXT_PUBLIC_TENANT_BASE_DOMAIN: 'yourhrms.com'
+  NEXT_PUBLIC_API_PORT: '443'
+  NEXTAUTH_URL: 'https://app.yourhrms.com'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hrm-portal-secrets
+  namespace: hrm
+type: Opaque
+stringData:
+  NEXTAUTH_SECRET: 'CHANGE_ME'

@@ -1,0 +1,94 @@
+# Phase 5.3 — the BullMQ worker workload: `command: ['node', 'dist/worker.js']`
+# (src/worker.ts, `NestFactory.createApplicationContext` — no HTTP
+# listener, every `@Processor(...)` in AppModule registers and consumes
+# its queue) instead of the api Deployment's `dist/main.js`. SAME image,
+# genuinely different deployable — see
+# docs/conventions/deployment-scaling.md § Separate scalable workloads.
+# No `PROCESS_ROLE` env var here at all (the default — unset means "run
+# workers", see queue-worker.util.ts) — this is the ONE process role that
+# actually consumes queues in a deployment that also runs the api
+# Deployment (which sets `PROCESS_ROLE=api` to opt out).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hrm-worker
+  namespace: hrm
+  labels:
+    app.kubernetes.io/name: hrm-worker
+    app.kubernetes.io/part-of: hrm
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hrm-worker
+        app.kubernetes.io/part-of: hrm
+        app.kubernetes.io/component: worker
+    spec:
+      # Longer than the api Deployment's: a payroll-run/import/report job
+      # already in progress should be allowed to actually finish, not just
+      # drain an HTTP connection. BullMQ's own Worker.close() (invoked by
+      # `context.close()` in worker.ts's SIGTERM handler, after this
+      # process's own SHUTDOWN_GRACE_PERIOD_MS wait) waits for the
+      # currently-active job(s) to complete before returning.
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: worker
+          image: hrm/api:latest # the SAME image as hrm-api — see api-deployment.yaml
+          imagePullPolicy: IfNotPresent
+          command: ['node', 'dist/worker.js']
+          ports:
+            - name: health
+              containerPort: 3002
+          envFrom:
+            - configMapRef:
+                name: hrm-api-config
+            - secretRef:
+                name: hrm-api-secrets
+          volumeMounts:
+            - name: license-public-key
+              mountPath: /etc/hrm/license
+              readOnly: true
+          # No traffic to drain (this pod is never behind a Service a
+          # client calls), so no preStop sleep is needed here — only the
+          # BullMQ-job-drain concern above.
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3002
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: '250m'
+              memory: '384Mi'
+            limits:
+              cpu: '1'
+              memory: '1Gi'
+      volumes:
+        - name: license-public-key
+          configMap:
+            name: hrm-license-public-key

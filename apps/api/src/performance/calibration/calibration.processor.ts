@@ -4,6 +4,7 @@ import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { ratingLevelSchema } from '@hrm/shared';
 import { PERFORMANCE_CALIBRATION_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import type { CalibrationRecomputeJobData } from './calibration-queue.service';
 import { computeCalibrationRows } from './calibration-rollup.util';
 
@@ -18,7 +19,7 @@ import { computeCalibrationRows } from './calibration-rollup.util';
  * uses, for the identical reason (nullable `departmentId` breaks
  * unique-key upsert matching — see analytics-dashboard.md).
  */
-@Processor(PERFORMANCE_CALIBRATION_QUEUE)
+@Processor(PERFORMANCE_CALIBRATION_QUEUE, { autorun: shouldAutorunWorkers() })
 export class CalibrationProcessor extends WorkerHost {
   async process(job: Job<CalibrationRecomputeJobData>): Promise<void> {
     const { tenantId, cycleId } = job.data;

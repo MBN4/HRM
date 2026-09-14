@@ -1,0 +1,29 @@
+# Phase 5.3 — mounts the RS256 PUBLIC key `LicenseVerificationService`
+# needs to verify a lifetime/on-prem license file (0.6) — see
+# docs/conventions/licensing-feature-flags.md. Public data (never the
+# private signing key, which stays on vendor-controlled issuing
+# infrastructure and is never packaged into any deployment artifact here)
+# — a ConfigMap is the right primitive, not a Secret.
+#
+# DEV KEY CHECKED IN ON PURPOSE, same posture apps/api/keys/README.md
+# already documents for local dev: this is the repo's existing
+# `license-public-dev.pem`. A real production deployment (SaaS or a real
+# on-prem customer) replaces `data.license-public.pem` with that
+# deployment's own real public key — this file is a working, deployable
+# default, not a placeholder that needs inventing values for.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hrm-license-public-key
+  namespace: hrm
+data:
+  license-public.pem: |
+    -----BEGIN PUBLIC KEY-----
+    MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAkmUbqqIXzfgSBdenDwFJ
+    uVOmHSF6BCIOEA2qcpiIdlgdxoicoepZwzgMDh2X2n/0Xel0zYztohNLoEm1m9F9
+    TaN1hZbeD5d3KGH+oaO2Gn3QnbLkdV39X2UpkRVt4YdtsoCvQCJpUleAdNsRmaB5
+    a+5Sf1R+AKGuC2zEY3zfkss0WbySs4qmB/uZ1LZSy84LELlE1n9tzJMgr72ZeWXp
+    bbim5UFEYNhYJdfgZKYlQJzTFedY7Nju2tWERSAwRkP9h8lw/c8Z1lmeaGa9in+8
+    MpOnwaXpS1HRoEkEchEsXoIze4Svt8iyP4Bvm1ThMzMqYSzQam13AJvbPgbS8DEH
+    lQIDAQAB
+    -----END PUBLIC KEY-----

@@ -1,0 +1,76 @@
+# Phase 5.3 — QUEUE-DEPTH autoscaling for the worker Deployment, via KEDA
+# (https://keda.sh) — the standard add-on for scaling on a Redis/BullMQ
+# list length, since vanilla Kubernetes HPA only understands
+# resource (CPU/memory) or custom/external metrics wired through a
+# separate metrics-adapter. REQUIRES the KEDA operator installed in the
+# cluster (`helm install keda kedacore/keda -n keda-system --create-namespace`)
+# — this is an ADD-ON dependency, not something this repo installs.
+#
+# One `ScaledObject`, multiple `redis` triggers — KEDA scales to satisfy
+# the trigger asking for the MOST replicas, so one worker Deployment
+# handling several queues (see apps/api/src/queue/queue.constants.ts) is
+# still covered by a single object. Each trigger watches one queue's own
+# BullMQ "wait" list (`bull:<queueName>:wait` — BullMQ's own documented
+# Redis key layout) and targets `listLength` jobs waiting per replica.
+#
+# Shown here for a representative subset of the highest-volume/most
+# latency-sensitive queues (payroll runs, notifications, statutory
+# reports); ADD A TRIGGER for any other queue the SAME way — copy a
+# `- type: redis` block, change `listName`, pick a `listLength` threshold
+# for that queue's own job size/urgency. Nothing else (the Deployment,
+# the worker process, `shouldAutorunWorkers()`) needs to change.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: hrm-redis-auth
+  namespace: hrm
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: hrm-api-secrets
+      key: REDIS_PASSWORD # a plain password value alongside REDIS_URL — KEDA's redis scaler takes discrete connection params, not a connection string
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: hrm-worker
+  namespace: hrm
+spec:
+  scaleTargetRef:
+    name: hrm-worker
+  minReplicaCount: 2
+  maxReplicaCount: 30
+  cooldownPeriod: 120
+  triggers:
+    - type: redis
+      metadata:
+        address: 'redis:6379'
+        listName: 'bull:payroll-run:wait'
+        listLength: '5'
+        activationListLength: '1'
+      authenticationRef:
+        name: hrm-redis-auth
+    - type: redis
+      metadata:
+        address: 'redis:6379'
+        listName: 'bull:notifications:wait'
+        listLength: '20'
+        activationListLength: '1'
+      authenticationRef:
+        name: hrm-redis-auth
+    - type: redis
+      metadata:
+        address: 'redis:6379'
+        listName: 'bull:statutory-report:wait'
+        listLength: '5'
+        activationListLength: '1'
+      authenticationRef:
+        name: hrm-redis-auth
+    - type: redis
+      metadata:
+        address: 'redis:6379'
+        listName: 'bull:employee-import:wait'
+        listLength: '3'
+        activationListLength: '1'
+      authenticationRef:
+        name: hrm-redis-auth

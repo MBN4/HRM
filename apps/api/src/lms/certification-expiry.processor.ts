@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Job } from 'bullmq';
 import { withTenantContext } from '@hrm/db';
 import { LMS_CERTIFICATION_EXPIRY_QUEUE } from '../queue/queue.constants';
+import { shouldAutorunWorkers } from '../queue/queue-worker.util';
 import { determineComplianceBucket } from './lms-compliance.util';
 import { CertificationExpiryService, LmsExpiryJobData } from './certification-expiry.service';
 
@@ -19,7 +20,7 @@ import { CertificationExpiryService, LmsExpiryJobData } from './certification-ex
  * docs/conventions/attendance.md), applied per-row here instead of via
  * delete+recreate.
  */
-@Processor(LMS_CERTIFICATION_EXPIRY_QUEUE)
+@Processor(LMS_CERTIFICATION_EXPIRY_QUEUE, { autorun: shouldAutorunWorkers() })
 export class CertificationExpiryProcessor extends WorkerHost {
   constructor(
     private readonly expiryService: CertificationExpiryService,

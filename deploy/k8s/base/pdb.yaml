@@ -1,0 +1,48 @@
+# Phase 5.3 — PodDisruptionBudgets: protect BOTH workloads against a
+# VOLUNTARY disruption (a node drain during cluster maintenance/upgrade,
+# or `kubectl evict`) taking down too many replicas at once. Does not
+# apply to an involuntary disruption (a node crashing) — nothing can
+# prevent that.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hrm-api
+  namespace: hrm
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hrm-worker
+  namespace: hrm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-worker
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hrm-portal
+  namespace: hrm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-portal
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hrm-admin
+  namespace: hrm
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-admin

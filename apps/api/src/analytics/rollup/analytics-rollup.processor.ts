@@ -3,6 +3,7 @@ import type { Job } from 'bullmq';
 import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { ANALYTICS_ROLLUP_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import type { AnalyticsRollupJobData } from './analytics-rollup.service';
 import { AnalyticsRollupService } from './analytics-rollup.service';
 import {
@@ -29,7 +30,7 @@ import {
  *   the schema doc comment on why this is delete+recreate, not upsert
  *   (nullable `departmentId` breaks unique-key upsert matching).
  */
-@Processor(ANALYTICS_ROLLUP_QUEUE)
+@Processor(ANALYTICS_ROLLUP_QUEUE, { autorun: shouldAutorunWorkers() })
 export class AnalyticsRollupProcessor extends WorkerHost {
   constructor(private readonly rollupService: AnalyticsRollupService) {
     super();

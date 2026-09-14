@@ -108,6 +108,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/statutory-reporting.md`](./docs/conventions/statutory-reporting.md)         | A country-extensible framework generating periodic government filing forms/exports FROM already-finalized payroll data (never recomputing), a report catalog + pluggable generator registry, Pakistan's four concrete reports (income tax withholding, EOBI, Provident Fund, annual statement), and the "verify current form specifics before filing" compliance boundary. (3.5.4) |
 | [`docs/conventions/scaling-data-layer.md`](./docs/conventions/scaling-data-layer.md)           | Data-layer scale hardening: PgBouncer + the transaction-pooling/RLS safety proof, a real streaming read replica (RLS-identical + read-after-write), and tenant-scoped Redis caching (country packs, org structure, permissions) with immediate invalidation — plus the entitlement-caching attempt that was empirically reverted. (5.1)                                            |
 | [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md)     | Native `PARTITION BY RANGE` for `attendance_records`/`audit_log`/`platform_audit_log` (additive conversion, RLS+immutability proven identical on partitions, partition pruning proven), the automated ahead-of-time partition-creation job, and the archival/retention mechanism + its Phase 6.1 GDPR seam. (5.2)                                                                  |
+| [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md)           | The statelessness audit + its multi-instance proof, the `worker.ts`/`PROCESS_ROLE` API-worker split (proven against real BullMQ), Docker images, `deploy/k8s/` manifests (HPA/KEDA, probes, graceful rollout, migration-job safety), and the regional-deployment seam. (5.3)                                                                                                       |
 
 ## 5. Build log summary
 
@@ -660,6 +661,45 @@ Phase 0–3's foundation.
   readable, dual-audited) — not yet a completed per-tenant purge, since a
   single partition holds every tenant's rows for its date range. See
   [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md).
+- **5.3** — Horizontal scaling, Kubernetes, and regional deployment (Phase
+  5's third slice, deployment-oriented — make the app provably
+  horizontally scalable and produce production-ready orchestration,
+  rewrite zero business logic): a systematic in-process-state audit found
+  only already-documented, harmless exceptions (0.10's own
+  `SystemLoadService` counter; a memoized read of an immutable,
+  identically-mounted license-key file) — **proven, not argued**, by a new
+  `deployment-scaling.e2e-spec.ts` that compiles TWO separate `AppModule`
+  instances and shows rate-limit/idempotency/circuit-breaker state and JWT
+  auth all behave identically across them via Redis. A genuine second
+  entrypoint (`worker.ts`, `NestFactory.createApplicationContext` — no
+  HTTP listener, no controllers, every BullMQ processor still registers)
+  plus one new env-driven switch (`PROCESS_ROLE=api` -> `autorun: false`
+  on every `@Processor`, via `shouldAutorunWorkers()`) makes the api
+  Deployment stop consuming queues once a dedicated worker Deployment
+  exists — proven against the real BullMQ library, not just asserted.
+  Multi-stage Dockerfiles for `apps/api` (one image serves the API, the
+  worker, AND the migration Job, via `command:` alone), `apps/portal`, and
+  `apps/admin` (`output: 'standalone'`) — all actually built/run locally,
+  not just written. Production-ready `deploy/k8s/` manifests (plain YAML +
+  Kustomize regional overlays, no Helm chart introduced this step):
+  liveness/readiness wired to 0.10's real health checks, zero-downtime
+  rolling updates, a `preStop` sleep complementing the app's own
+  SIGTERM-driven drain, an HPA for the API (CPU/memory) and TWO options
+  for the worker (a KEDA queue-depth `ScaledObject` reading BullMQ's own
+  Redis lists directly, or a CPU-based fallback), PodDisruptionBudgets,
+  one ingress convention (tenant subdomain + `/api` path split, reusing
+  0.3's resolution unmodified), and a single per-release migration `Job`
+  that the deploy pipeline waits on before any rollout — never a per-pod
+  initContainer. Regional deployment is honestly scoped as the SEAM (a
+  fully separate, shared-nothing stack per region, tenant->region pinning
+  falling out of 0.3's existing subdomain resolution for free), explicitly
+  NOT automatic cross-region enforcement — that is Phase 6.1, the same
+  boundary 5.2 already drew for `TenantRetentionOverride`. Every claim is
+  marked verified-locally (kustomize renders, Docker images actually
+  built, the multi-instance e2e proof) vs. verified-at-deploy (a live
+  HPA/KEDA scale event, DNS/cert-manager behavior — no cluster exists in
+  this environment) rather than blurring the two. See
+  [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md).
 
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
@@ -718,10 +758,21 @@ reporting (3.5.4) — the go-live/compliance layer for a real first client.
       (`TenantRetentionOverride`). `signature_events` assessed and
       deliberately not partitioned (documented why). See
       [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md).
-- [ ] **5.3** Kubernetes / horizontal autoscaling — the 0.10 resilience
-      chassis's stateless-by-design posture (see
-      [`docs/conventions/resilience.md`](./docs/conventions/resilience.md))
-      already prepares for this; deferred.
+- [x] **5.3** Horizontal scaling, Kubernetes, and regional deployment —
+      an audited-not-assumed statelessness proof (two independent
+      `AppModule` instances sharing rate-limit/idempotency/circuit-breaker
+      state and JWT auth via Redis), a genuine `worker.ts` entrypoint +
+      `PROCESS_ROLE`-gated `autorun` split from the api process (proven
+      against real BullMQ), Docker images for api/worker/portal/admin,
+      production-ready `deploy/k8s/` manifests (probes wired to 0.10's
+      real health checks, zero-downtime rollout, HPA/KEDA autoscaling,
+      PodDisruptionBudgets, a single waited-on migration `Job`), and the
+      regional-deployment SEAM (a fully separate stack per region,
+      tenant->region pinning via 0.3's existing subdomain resolution) —
+      explicitly not Phase 6.1's cross-region enforcement. See
+      [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md).
 - [ ] **5.4** Observability + load testing — deferred.
+
+**Phase 5 remaining: 5.4 (observability + load testing), deferred.**
 
 - [ ] **Phase 6** — _scope not yet defined_

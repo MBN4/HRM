@@ -1,0 +1,55 @@
+# Phase 5.3 — the API scales on request-load signals: CPU utilization
+# (works out of the box with just metrics-server, no extra add-on) as the
+# primary signal, since this codebase has none of its own custom
+# request-latency metric exported yet (a real p95-latency-based trigger is
+# a documented, standard follow-up — see the commented `Pods` metric
+# below — that needs a Prometheus Adapter or equivalent custom/external
+# metrics API wired into the cluster; deferred to 5.4 observability,
+# consistent with CLAUDE.md's own "5.4 deferred" note).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hrm-api
+  namespace: hrm
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hrm-api
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    # --- Latency-based scaling (OPTIONAL, requires a Prometheus Adapter
+    # or equivalent custom-metrics API server registered in the cluster —
+    # NOT exercisable in this environment, so left commented rather than
+    # shipped as a silently-non-functional metric type) ---
+    # - type: Pods
+    #   pods:
+    #     metric:
+    #       name: http_request_duration_seconds_p95
+    #     target:
+    #       type: AverageValue
+    #       averageValue: '500m'
+  behavior:
+    scaleDown:
+      # Avoid flapping under bursty load — wait 5 minutes of sustained
+      # lower load before removing a replica.
+      stabilizationWindowSeconds: 300
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60

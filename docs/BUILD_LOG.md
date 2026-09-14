@@ -3400,3 +3400,165 @@ E-signatures (3.5.3) + Pakistan country pack (3.5.5) + Statutory reporting
 (3.5.4). Remaining across the whole codebase: Phase 5's 5.3 (Kubernetes/
 horizontal autoscaling) and 5.4 (observability + load testing), both
 deferred, plus Phase 6 (scope not yet defined).
+
+## 5.3 — Horizontal scaling, Kubernetes, and regional deployment
+
+(2026-09-14) — `apps/api/src/worker.ts` (new), `apps/api/src/queue/queue-worker.util.ts`
+(new) + its `.spec.ts`, 15 existing `@Processor(...)` call sites (one added
+`WorkerOptions` argument each, no processing-logic change), `apps/api/Dockerfile`/
+`apps/portal/Dockerfile`/`apps/admin/Dockerfile` (new), `apps/portal/next.config.js`/
+`apps/admin/next.config.js` (`output: 'standalone'`, additive), `deploy/k8s/`
+(new — base manifests + `overlays/{us-east-1,me-south-1}`),
+`docker-compose.scale.yml` + `docker/lb/nginx.conf` (new, manual local demo),
+`apps/api/test/deployment-scaling.e2e-spec.ts` (new). See
+[`docs/conventions/deployment-scaling.md`](./conventions/deployment-scaling.md)
+for the full write-up. Phase 5's third slice — deployment-oriented per this
+step's own brief: make the app provably horizontally scalable (real,
+testable) and produce production-ready orchestration, never rewrite
+business logic to get there.
+
+**Statelessness audited, not assumed**: a systematic grep across
+`apps/api/src` for in-process state (`new Map(`, `private.*cache`,
+`setInterval`, every `onModuleInit`) found exactly two already-reviewed,
+harmless exceptions (`SystemLoadService`'s in-flight counter — 0.10's own
+documented per-instance-by-design exception; `LicenseVerificationService`'s
+memoized public-key file read — safe because every instance mounts the
+IDENTICAL immutable file, not because it went unnoticed) plus one demo-only
+in-memory `Map` (`ResilienceDemoController.idempotentCounters`) that never
+actually causes a bug because a REPLAYED idempotency key never reaches the
+handler at all — `IdempotencyInterceptor` returns the Redis-cached response
+first. Every repeatable BullMQ job's existing fixed-`jobId` registration
+was confirmed to already make multi-replica `onModuleInit` re-registration
+a no-op, not a duplicate-schedule bug. **Proven, not just argued**: a NEW
+`apps/api/test/deployment-scaling.e2e-spec.ts` compiles TWO fully separate
+`AppModule` instances (two distinct DI containers, no shared JS memory) and
+shows a JWT issued for instance A authenticates on instance B, a per-tenant
+rate-limit quota consumed via instance A is enforced on instance B, an
+idempotency key claimed on instance A replays its cached result on
+instance B, and a circuit breaker tripped via instance A is already `OPEN`
+on instance B's first call — all against REAL Redis.
+
+**API/worker split, for real**: `apps/api/src/worker.ts` is a genuinely
+separate entrypoint — `NestFactory.createApplicationContext(AppModule)`
+(same DI graph, every `@Processor` registers) with NO HTTP listener and
+none of `AppModule`'s ~30 controllers mounted, plus a minimal hand-rolled
+health server (NOT `HealthController`, which needs the full HTTP app's
+interceptor stack) reusing `ReadinessService`/`ShutdownService` directly.
+The NEW `shouldAutorunWorkers()` (reads `PROCESS_ROLE`) is what stops the
+`api` Deployment from ALSO consuming queues once a dedicated `worker`
+Deployment exists: every one of the 15 existing `@Processor(QUEUE)` sites
+now passes `{ autorun: shouldAutorunWorkers() }` — `PROCESS_ROLE=api` (set
+only on the api Deployment) makes `autorun: false` (the Worker is still
+constructed, DI untouched; it just never pulls jobs off Redis); unset (the
+worker Deployment, and every pre-existing dev/test/e2e invocation) keeps
+today's exact behavior. **Proven against the real BullMQ library**: the
+e2e file's second suite constructs a raw `autorun:false` `Worker`
+(exactly what `PROCESS_ROLE=api` produces), enqueues a job, confirms it
+stays `waiting`, then brings up a second plain `Worker` (`autorun` at its
+default `true`) on the same queue/Redis and confirms it completes the job
+— the dedicated-worker-process claim tested against the actual library,
+not asserted from reading the code. `apps/api/src/queue/queue-worker.util.spec.ts`
+unit-tests the env-var gate itself (3 tests).
+
+**Docker**: `apps/api/Dockerfile` — one image for API, worker, AND the
+migration Job (different `command:`/`CMD` only), `turbo prune`-based
+multi-stage build, `node:20-bookworm-slim` (not Alpine — `@node-rs/argon2`
+and Prisma's query engine both ship glibc-keyed prebuilt binaries;
+Alpine's musl is a real, documented source of container-only breakage for
+exactly these two deps), `prisma generate` run INSIDE the build stage (its
+engine binary must match the container's own OS). `apps/portal/Dockerfile`/
+`apps/admin/Dockerfile` — the same `turbo prune` shape, `node:20-alpine`
+(no native deps in either app), Next.js's own `output: 'standalone'` (new,
+additive config in both `next.config.js` files) traced into a minimal
+runtime image. **A real bug this step's own smoke test caught**: the
+first working build crashed on `docker run` with `Prisma cannot find
+libssl.so.1.1` — `node:20-bookworm-slim` ships OpenSSL 3.0 by default, and
+with no `openssl` package installed anywhere in the image, Prisma's OS/
+libc auto-detection (both at `prisma generate` time and again at actual
+engine runtime) falls back to guessing the wrong `debian-openssl-1.1.x`
+target. Fixed by installing `openssl`/`ca-certificates` in the Dockerfile's
+shared `base` stage, so generate-time detection and runtime library
+presence agree. **Verified locally, end to end**: `docker build -f
+apps/api/Dockerfile .` was run against this repo — the built image
+contains both `dist/main.js` and `dist/worker.js` — and BOTH entrypoints
+were then actually started as running containers against this
+environment's real docker-compose Postgres/Redis, with `/health/live` AND
+`/health/ready` answering fully healthy for each (not just "the build
+succeeded"). `next build` was actually run for both Next.js apps and
+produced exactly the `.next/standalone/apps/<app>/server.js` layout each
+Dockerfile's `COPY` steps assume (inspected directly, not assumed).
+
+**Kubernetes** (`deploy/k8s/`, plain manifests + Kustomize overlays for
+regions — no Helm chart introduced this step, a deliberate scope call, see
+the convention doc's own reasoning): `api-deployment.yaml`
+(`PROCESS_ROLE=api`, readiness/liveness wired to 0.10's real endpoints,
+`maxUnavailable: 0` rolling updates, a `preStop: sleep 5` complementing —
+not replacing — the app's own SIGTERM-driven drain,
+`terminationGracePeriodSeconds` sized to exceed both); `worker-deployment.yaml`
+(no `PROCESS_ROLE`, no Service/ports exposed, a longer grace period so an
+in-flight job can actually finish); `api-hpa.yaml` (CPU+memory, works with
+bare `metrics-server`; a commented-out latency-based `Pods` metric
+documents the Prometheus-Adapter-dependent alternative, correctly deferred
+to 5.4); `worker-hpa-keda.yaml` (the PREFERRED signal — KEDA `redis`
+triggers reading BullMQ's own `bull:<queue>:wait` list length directly,
+one `ScaledObject` covering several representative queues, a documented
+copy-paste pattern for the rest; requires the KEDA add-on, so deliberately
+NOT in the base kustomization's default resource list) plus
+`worker-hpa-fallback.yaml` (plain CPU HPA for a cluster without KEDA);
+`pdb.yaml` (`PodDisruptionBudget`s, all four workloads); `ingress.yaml`
+(one chosen, documented production convention: portal+api share a
+per-tenant subdomain host split by `/api` path prefix rather than by port,
+`admin.yourhrms.com` as its own fixed host — reusing 0.3's subdomain
+resolution completely unmodified); `migration-job.yaml` (a single,
+per-release-named `Job` running `prisma migrate deploy` via the OWNER
+role, applied and WAITED ON before any Deployment rolls, never a per-pod
+initContainer). **Verified locally**: `kustomize build` (fetched via
+`npx`) renders `base/`, `overlays/us-east-1/`, and `overlays/me-south-1/`
+successfully; every rendered document has a valid `apiVersion`/`kind`
+(confirmed via a Python YAML-parse pass over all 18 manifest files).
+**Verified at deploy time only** (no live cluster in this environment):
+`kubectl apply --dry-run=server` against a real API server, an actual HPA
+scale event, KEDA/cert-manager/DNS behavior — the convention doc and
+`deploy/k8s/README.md` both state this split plainly rather than
+implying more was exercised than actually was.
+
+**Regional deployment — the seam, not enforcement** (the SAME "seam now,
+enforcement later" boundary 5.2 already drew for `TenantRetentionOverride`):
+`Tenant.hostingRegion`/`CountryPack.hostingRegionHint` both already
+existed (since 4.1/0.5) with no actual routing/placement behind them until
+now. This step adds the DEPLOYMENT mechanism — a fully separate,
+shared-nothing stack per region (`overlays/us-east-1/`, `overlays/me-south-1/`,
+each patching `TENANT_BASE_DOMAIN`/`S3_REGION`/ingress hosts/an optional
+`nodeSelector`), with tenant→region pinning falling out of 0.3's EXISTING
+subdomain-resolution mechanism for free (each region's own
+`TENANT_BASE_DOMAIN` makes a tenant's subdomain URL region-specific by
+construction the moment it's provisioned there) — and it explicitly does
+NOT add a global control plane that automatically routes a tenant-create
+call to the correct region's database; that enforcement layer is Phase
+6.1, stated plainly rather than glossed over. **Verified locally**: both
+region overlays' `kustomize build` output was inspected directly and
+confirmed to carry the expected per-region `TENANT_BASE_DOMAIN`/ingress-host/
+`nodeSelector` values. **Verified at deploy time only**: real cross-region
+isolation, DNS resolution of a region's wildcard subdomain, a real
+custom-domain CNAME pointed at a specific region's ingress.
+
+**Scope discipline**: RLS policies, `withTenantContext`, `TenantScopeInterceptor`'s
+resolution/auth/rate-limit ordering, every existing business-logic
+service, and every existing route's HTTP contract are completely
+unmodified — the 15 processor files' only change is one added
+constructor-option argument on their existing `@Processor(...)` decorator.
+`packages/db` gained no schema/migration change at all.
+
+Verified: `apps/api`'s full suite — **549 tests total (548 passing + the
+SAME single pre-existing `migration.e2e-spec.ts` timing flake this suite
+has carried since 5.1**, confirmed unrelated to this step by an isolated
+rerun passing 10/10 cleanly — zero regressions), including 5 new tests in
+`deployment-scaling.e2e-spec.ts` and 3 new in `queue-worker.util.spec.ts`.
+Full-repo `pnpm build`/`pnpm lint` green across all 8 workspace tasks,
+including the newly-enabled `output: 'standalone'` builds for
+`apps/portal`/`apps/admin`. `docker compose -f docker-compose.yml -f
+docker-compose.scale.yml config -q` validates the optional local
+multi-instance demo overlay. `apps/portal`/`apps/admin` Playwright suites:
+untouched (no UI/behavior surface, only build-output shape changed).
+
+**Phase 5 remaining: 5.4 (observability + load testing), deferred.**

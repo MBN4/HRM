@@ -1,0 +1,84 @@
+# Phase 5.3 — the us-east-1 REGIONAL deployment. See
+# docs/conventions/deployment-scaling.md § Regional deployment for the
+# full tenant->region placement model this overlay is one half of (the
+# other half is an operational/DNS convention, not YAML). Each region is
+# deployed to its OWN cluster (the common, simplest way to get genuine
+# data-residency isolation — a shared-nothing Postgres/Redis/S3 per
+# region, never a single global database split by row) — this overlay's
+# `labels`/`nodeSelector` patches are additionally useful for the LESS
+# common case of one cluster spanning multiple regions' node pools, but
+# are not load-bearing for isolation either way; the separate cluster (or
+# at minimum separate `hrm-api-secrets`/`hrm-api-config` pointed at that
+# region's own Postgres/Redis/S3) is what actually isolates the data.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+labels:
+  - includeSelectors: false
+    pairs:
+      topology.hrm/region: us-east-1
+patches:
+  - target:
+      kind: ConfigMap
+      name: hrm-api-config
+    patch: |-
+      - op: replace
+        path: /data/TENANT_BASE_DOMAIN
+        value: us.yourhrms.com
+      - op: replace
+        path: /data/PORTAL_BASE_URL
+        value: https://app.us.yourhrms.com
+      - op: replace
+        path: /data/S3_REGION
+        value: us-east-1
+      - op: replace
+        path: /data/S3_ENDPOINT
+        value: https://s3.us-east-1.amazonaws.com
+      - op: replace
+        path: /data/S3_BUCKET
+        value: hrm-prod-us-east-1
+  - target:
+      kind: ConfigMap
+      name: hrm-portal-config
+    patch: |-
+      - op: replace
+        path: /data/NEXT_PUBLIC_API_URL
+        value: https://app.us.yourhrms.com/api
+      - op: replace
+        path: /data/NEXT_PUBLIC_TENANT_BASE_DOMAIN
+        value: us.yourhrms.com
+      - op: replace
+        path: /data/NEXTAUTH_URL
+        value: https://app.us.yourhrms.com
+  - target:
+      kind: Ingress
+      name: hrm-app
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts
+        value: ['us.yourhrms.com', '*.us.yourhrms.com']
+      - op: replace
+        path: /spec/rules/0/host
+        value: us.yourhrms.com
+      - op: replace
+        path: /spec/rules/1/host
+        value: '*.us.yourhrms.com'
+  - target:
+      kind: Ingress
+      name: hrm-admin
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts
+        value: ['admin.us.yourhrms.com']
+      - op: replace
+        path: /spec/rules/0/host
+        value: admin.us.yourhrms.com
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/part-of=hrm
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          topology.kubernetes.io/region: us-east-1

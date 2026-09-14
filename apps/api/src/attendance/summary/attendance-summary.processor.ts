@@ -3,6 +3,7 @@ import type { Job } from 'bullmq';
 import type { AttendanceDayStatus, Employee, Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { ATTENDANCE_SUMMARY_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import { resolveAttendancePackConfig } from '../attendance-country-pack.util';
 import type { AttendanceSummaryJobData } from './attendance-summary.service';
 import { isPublicHoliday, isWeekend } from './attendance-day-status.util';
@@ -22,7 +23,7 @@ import { isPublicHoliday, isWeekend } from './attendance-day-status.util';
  * re-running it for the same period is naturally idempotent (same inputs,
  * same output), never a double-count risk.
  */
-@Processor(ATTENDANCE_SUMMARY_QUEUE)
+@Processor(ATTENDANCE_SUMMARY_QUEUE, { autorun: shouldAutorunWorkers() })
 export class AttendanceSummaryProcessor extends WorkerHost {
   async process(job: Job<AttendanceSummaryJobData>): Promise<void> {
     const { tenantId, branchId, employeeId } = job.data;

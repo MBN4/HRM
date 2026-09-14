@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hrm
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.example.yaml
+  - license-public-key-configmap.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - api-hpa.yaml
+  - worker-deployment.yaml
+  - worker-hpa-fallback.yaml
+  - pdb.yaml
+  - portal-deployment.yaml
+  - admin-deployment.yaml
+  - ingress.yaml
+images:
+  - name: hrm/api
+    newName: hrm/api
+    newTag: latest
+  - name: hrm/portal
+    newName: hrm/portal
+    newTag: latest
+  - name: hrm/admin
+    newName: hrm/admin
+    newTag: latest

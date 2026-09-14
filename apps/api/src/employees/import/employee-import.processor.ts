@@ -4,6 +4,7 @@ import type { Job } from 'bullmq';
 import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { EMPLOYEE_IMPORT_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import { EmployeeService } from '../employee.service';
 import { parseEmployeeImportCsv } from './csv-row.util';
 import type { EmployeeImportJobData } from './employee-import.service';
@@ -30,7 +31,7 @@ interface RowError {
  * leaves the successfully-imported rows intact rather than losing the
  * entire batch.
  */
-@Processor(EMPLOYEE_IMPORT_QUEUE)
+@Processor(EMPLOYEE_IMPORT_QUEUE, { autorun: shouldAutorunWorkers() })
 export class EmployeeImportProcessor extends WorkerHost {
   constructor(private readonly employees: EmployeeService) {
     super();

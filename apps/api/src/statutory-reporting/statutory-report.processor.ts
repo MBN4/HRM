@@ -4,6 +4,7 @@ import type { Job } from 'bullmq';
 import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { STATUTORY_REPORT_QUEUE } from '../queue/queue.constants';
+import { shouldAutorunWorkers } from '../queue/queue-worker.util';
 import { resolvePayrollPackConfig } from '../payroll/payroll-pack.util';
 import { StorageService } from '../storage/storage.service';
 import { StatutoryReportPdfService } from './statutory-report-pdf.service';
@@ -22,7 +23,7 @@ import type { StatutoryReportJobData } from './statutory-report-queue.service';
  * either fully replaces `GeneratedReport`'s own row or is a fresh idempotent
  * storage upload keyed by this report's own id).
  */
-@Processor(STATUTORY_REPORT_QUEUE)
+@Processor(STATUTORY_REPORT_QUEUE, { autorun: shouldAutorunWorkers() })
 export class StatutoryReportProcessor extends WorkerHost {
   constructor(
     @Inject(STATUTORY_REPORT_GENERATOR_REGISTRY) private readonly registry: StatutoryReportGeneratorRegistry,

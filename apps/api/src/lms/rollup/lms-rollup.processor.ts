@@ -3,6 +3,7 @@ import type { Job } from 'bullmq';
 import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { LMS_ROLLUP_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import { determineComplianceBucket, resolveRequiredCourseIdsByEmployee } from '../lms-compliance.util';
 import type { LmsRollupJobData } from './lms-rollup.service';
 import { LmsRollupService } from './lms-rollup.service';
@@ -18,7 +19,7 @@ import type { ComplianceEmployeeCoursePair } from './lms-rollup.util';
  * tables — see analytics-dashboard.md for why delete+recreate rather than
  * upsert: nullable `departmentId` breaks unique-key upsert matching).
  */
-@Processor(LMS_ROLLUP_QUEUE)
+@Processor(LMS_ROLLUP_QUEUE, { autorun: shouldAutorunWorkers() })
 export class LmsRollupProcessor extends WorkerHost {
   constructor(private readonly rollupService: LmsRollupService) {
     super();

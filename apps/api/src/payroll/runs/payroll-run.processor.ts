@@ -4,6 +4,7 @@ import type { Job } from 'bullmq';
 import type { Employee, Prisma } from '@hrm/db';
 import { Prisma as PrismaNS, withTenantContext } from '@hrm/db';
 import { PAYROLL_RUN_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import { IdempotencyService } from '../../resilience/idempotency/idempotency.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
 import { resolveActiveBenefitContributions } from '../../benefits/benefits-payroll-input.util';
@@ -35,7 +36,7 @@ const IDEMPOTENCY_SCOPE = 'payroll-run';
  * gets processed, and a later `calculate` call retries only the failed
  * one(s), never reprocessing anyone already `COMPUTED`.
  */
-@Processor(PAYROLL_RUN_QUEUE)
+@Processor(PAYROLL_RUN_QUEUE, { autorun: shouldAutorunWorkers() })
 export class PayrollRunProcessor extends WorkerHost {
   constructor(
     private readonly idempotency: IdempotencyService,

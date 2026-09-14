@@ -1,0 +1,117 @@
+# Phase 5.3 — the HTTP API workload. `PROCESS_ROLE=api` (see
+# apps/api/src/queue/queue-worker.util.ts) is the one thing that
+# distinguishes this from worker-deployment.yaml at the environment-variable
+# level beyond `command:` itself: it stops every `@Processor(...)` in this
+# process from actually consuming BullMQ jobs (the Worker is still
+# constructed, just never started — `autorun: false`), so scaling THIS
+# Deployment for request load never also scales queue consumption. See
+# docs/conventions/deployment-scaling.md § Separate scalable workloads.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hrm-api
+  namespace: hrm
+  labels:
+    app.kubernetes.io/name: hrm-api
+    app.kubernetes.io/part-of: hrm
+    app.kubernetes.io/component: api
+spec:
+  replicas: 3
+  # Zero-downtime rolling deploys: never drop below `replicas` capacity
+  # (maxUnavailable: 0), and the readinessProbe below is what actually
+  # gates a new pod receiving traffic — a pod that hasn't yet passed
+  # /health/ready never enters the Service's endpoint list.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hrm-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hrm-api
+        app.kubernetes.io/part-of: hrm
+        app.kubernetes.io/component: api
+    spec:
+      # Give the app's own SIGTERM-driven drain (main.ts, up to
+      # SHUTDOWN_GRACE_PERIOD_MS) room to finish before the kubelet SIGKILLs:
+      # preStop sleep (below) + SHUTDOWN_GRACE_PERIOD_MS (20s, configmap) +
+      # a buffer for app.close() itself to finish draining/closing DB pools.
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      containers:
+        - name: api
+          image: hrm/api:latest # replaced by the deploy pipeline — see deploy/k8s/README.md
+          imagePullPolicy: IfNotPresent
+          command: ['node', 'dist/main.js']
+          ports:
+            - name: http
+              containerPort: 3001
+          env:
+            - name: PROCESS_ROLE
+              value: 'api'
+          envFrom:
+            - configMapRef:
+                name: hrm-api-config
+            - secretRef:
+                name: hrm-api-secrets
+          volumeMounts:
+            - name: license-public-key
+              mountPath: /etc/hrm/license
+              readOnly: true
+          # Readiness-driven graceful shutdown (0.10, main.ts): on SIGTERM,
+          # /health/ready fails IMMEDIATELY so the Service's endpoints
+          # controller stops routing new traffic here, while the process
+          # keeps draining in-flight requests for SHUTDOWN_GRACE_PERIOD_MS.
+          # The preStop sleep below covers the SEPARATE, well-known gap
+          # between "pod marked Terminating" and "kube-proxy/ingress has
+          # actually removed it from load-balancing" — the two mechanisms
+          # are complementary, not redundant: preStop buys time for
+          # endpoint-removal to propagate BEFORE SIGTERM is even sent;
+          # the app's own drain then buys time for requests already
+          # in-flight once SIGTERM does arrive.
+          lifecycle:
+            preStop:
+              exec:
+                command: ['sh', '-c', 'sleep 5']
+          # Liveness: bare process-is-up (0.10's `/health/live`, no
+          # dependency checks) — never restarts a pod just because a
+          # downstream dependency (DB/Redis) is unhealthy; that's what
+          # readiness is for.
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Readiness: the REAL check (0.10's `ReadinessService`) — DB
+          # reachable, Redis reachable, not mid-shutdown. Gates both
+          # initial traffic admission and (via failureThreshold) removal
+          # from the Service during a transient dependency outage.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: '250m'
+              memory: '384Mi'
+            limits:
+              cpu: '1'
+              memory: '768Mi'
+      volumes:
+        - name: license-public-key
+          configMap:
+            name: hrm-license-public-key

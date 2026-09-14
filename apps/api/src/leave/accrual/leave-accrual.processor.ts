@@ -4,6 +4,7 @@ import type { Employee, LeaveType, Prisma } from '@hrm/db';
 import { Prisma as PrismaNS, withTenantContext } from '@hrm/db';
 import { IdempotencyService } from '../../resilience/idempotency/idempotency.service';
 import { LEAVE_ACCRUAL_QUEUE } from '../../queue/queue.constants';
+import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import { ACCRUED_LEAVE_TYPES } from '../leave.constants';
 import { entitlementForType } from '../leave-entitlement.util';
 import { resolveLeavePackConfig } from '../leave-country-pack.util';
@@ -35,7 +36,7 @@ const IDEMPOTENCY_SCOPE = 'leave-accrual';
  * `P2002` on that `create()` is treated as "already accrued, no-op" rather
  * than an error.
  */
-@Processor(LEAVE_ACCRUAL_QUEUE)
+@Processor(LEAVE_ACCRUAL_QUEUE, { autorun: shouldAutorunWorkers() })
 export class LeaveAccrualProcessor extends WorkerHost {
   constructor(
     private readonly idempotency: IdempotencyService,

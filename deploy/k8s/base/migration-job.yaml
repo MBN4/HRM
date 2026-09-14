@@ -1,0 +1,62 @@
+# Phase 5.3 — DB migration safety: migrations run ONCE, from a single Job,
+# never per-pod. This is templated as a `Job` (not a Helm/Kustomize
+# pre-upgrade hook, since this repo ships plain manifests, not Helm) that
+# the deploy pipeline applies and waits on BEFORE rolling out new
+# api/worker images — see deploy/k8s/README.md § Deploy pipeline for the
+# exact sequencing and why (Prisma migrations are not safe to run
+# concurrently from many pods racing each other).
+#
+# `metadata.name` MUST be unique per release (the pipeline templates
+# `${IMAGE_TAG}` in) — Jobs are immutable once created, so re-applying the
+# same name for a new release fails; a fresh name per release is what
+# makes "run exactly once per release, safely" hold even under CI retries.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hrm-api-migrate-${IMAGE_TAG}
+  namespace: hrm
+  labels:
+    app.kubernetes.io/name: hrm-api-migrate
+    app.kubernetes.io/part-of: hrm
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hrm-api-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+      containers:
+        - name: migrate
+          image: hrm/api:latest # the deploy pipeline sets this to the SAME tag being rolled out
+          imagePullPolicy: IfNotPresent
+          # The OWNER role (DATABASE_URL) — never APP_DATABASE_URL/hrm_app,
+          # which has no DDL privilege at all (see
+          # docs/conventions/tenancy-rls.md's two-DB-role design). Runs
+          # from packages/db, which ships inside this same image (see
+          # apps/api/Dockerfile's `COPY --from=installer /app/packages`).
+          command:
+            [
+              'node',
+              '../../packages/db/node_modules/.bin/prisma',
+              'migrate',
+              'deploy',
+              '--schema=../../packages/db/prisma/schema.prisma',
+            ]
+          workingDir: /app/apps/api
+          envFrom:
+            - configMapRef:
+                name: hrm-api-config
+            - secretRef:
+                name: hrm-api-secrets
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '256Mi'
+            limits:
+              cpu: '500m'
+              memory: '512Mi'

@@ -1,0 +1,78 @@
+# Phase 5.3 — the me-south-1 regional deployment (the region Qatar's and
+# Pakistan's own CountryPack.hostingRegionHint already advise — see
+# packages/db/src/seed-country-packs.ts and
+# docs/conventions/pakistan-pack.md). Mirrors overlays/us-east-1/ exactly
+# — see that file's own header comment for the topology this is one half
+# of.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+labels:
+  - includeSelectors: false
+    pairs:
+      topology.hrm/region: me-south-1
+patches:
+  - target:
+      kind: ConfigMap
+      name: hrm-api-config
+    patch: |-
+      - op: replace
+        path: /data/TENANT_BASE_DOMAIN
+        value: me.yourhrms.com
+      - op: replace
+        path: /data/PORTAL_BASE_URL
+        value: https://app.me.yourhrms.com
+      - op: replace
+        path: /data/S3_REGION
+        value: me-south-1
+      - op: replace
+        path: /data/S3_ENDPOINT
+        value: https://s3.me-south-1.amazonaws.com
+      - op: replace
+        path: /data/S3_BUCKET
+        value: hrm-prod-me-south-1
+  - target:
+      kind: ConfigMap
+      name: hrm-portal-config
+    patch: |-
+      - op: replace
+        path: /data/NEXT_PUBLIC_API_URL
+        value: https://app.me.yourhrms.com/api
+      - op: replace
+        path: /data/NEXT_PUBLIC_TENANT_BASE_DOMAIN
+        value: me.yourhrms.com
+      - op: replace
+        path: /data/NEXTAUTH_URL
+        value: https://app.me.yourhrms.com
+  - target:
+      kind: Ingress
+      name: hrm-app
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts
+        value: ['me.yourhrms.com', '*.me.yourhrms.com']
+      - op: replace
+        path: /spec/rules/0/host
+        value: me.yourhrms.com
+      - op: replace
+        path: /spec/rules/1/host
+        value: '*.me.yourhrms.com'
+  - target:
+      kind: Ingress
+      name: hrm-admin
+    patch: |-
+      - op: replace
+        path: /spec/tls/0/hosts
+        value: ['admin.me.yourhrms.com']
+      - op: replace
+        path: /spec/rules/0/host
+        value: admin.me.yourhrms.com
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/part-of=hrm
+    patch: |-
+      - op: add
+        path: /spec/template/spec/nodeSelector
+        value:
+          topology.kubernetes.io/region: me-south-1

@@ -1,6 +1,7 @@
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { MIGRATION_QUEUE } from '../queue/queue.constants';
+import { shouldAutorunWorkers } from '../queue/queue-worker.util';
 import type { MigrationJobData } from './import-batch.service';
 import { MigrationProcessingService } from './migration-processing.service';
 
@@ -13,7 +14,7 @@ import { MigrationProcessingService } from './migration-processing.service';
  * `MigrationProcessingService`; splitting them into two queues would just
  * be two `@Processor()` classes forwarding to the same service.
  */
-@Processor(MIGRATION_QUEUE)
+@Processor(MIGRATION_QUEUE, { autorun: shouldAutorunWorkers() })
 export class MigrationProcessor extends WorkerHost {
   constructor(private readonly processing: MigrationProcessingService) {
     super();
