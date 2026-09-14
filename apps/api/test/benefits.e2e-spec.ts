@@ -30,7 +30,7 @@ const PK_COUNTRY_CODE = 'PK';
 
 const jwt = new JwtService({ secret: process.env.JWT_SECRET });
 
-// Pakistan is now a REAL, seeded reference pack (step 3.5.4 — see
+// Pakistan is now a REAL, seeded reference pack (step 3.5.5 — see
 // docs/conventions/pakistan-pack.md) — `seedCountryPacks()` below seeds it
 // exactly like US/QA, replacing the ad-hoc pack this suite used to create
 // directly (3.5.2). No local PK_PACK_CONFIG needed anymore; `branchPkId`

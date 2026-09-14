@@ -124,6 +124,17 @@ export const PERMISSIONS = {
   ESIGNATURE_REQUEST: 'esignature.request',
   ESIGNATURE_MANAGE: 'esignature.manage',
   ESIGNATURE_SIGN: 'esignature.sign',
+  // Step 3.5.4 (statutory/government reporting) — see
+  // docs/conventions/statutory-reporting.md. A generated report carries the
+  // same class of legally-sensitive, per-employee data (CNIC/NTN, tax
+  // withheld, statutory contributions) PAYSLIP_VIEW/SALARY_VIEW already
+  // gate — TENANT_ADMIN/HR_MANAGER only, deliberately NOT copied onto
+  // MANAGER/EMPLOYEE. STATUTORY_REPORT_GENERATE (trigger a new report run)
+  // vs. STATUTORY_REPORT_READ (list the register, view status, download an
+  // already-generated report) — the same generate-vs-read split
+  // PAYROLL_RUN/PAYSLIP_VIEW already establish for an adjacent concern.
+  STATUTORY_REPORT_GENERATE: 'statutory_report.generate',
+  STATUTORY_REPORT_READ: 'statutory_report.read',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -195,6 +206,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.ESIGNATURE_REQUEST,
     PERMISSIONS.ESIGNATURE_MANAGE,
     PERMISSIONS.ESIGNATURE_SIGN,
+    PERMISSIONS.STATUTORY_REPORT_GENERATE,
+    PERMISSIONS.STATUTORY_REPORT_READ,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

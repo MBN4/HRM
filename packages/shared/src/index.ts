@@ -52,3 +52,4 @@ export * from './validators/branding.validator';
 export * from './validators/migration.validator';
 export * from './validators/benefits.validator';
 export * from './validators/esignature.validator';
+export * from './validators/statutory-reporting.validator';

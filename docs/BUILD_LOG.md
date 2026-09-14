@@ -3265,3 +3265,138 @@ files passes completely unmodified, proving this step changed nothing
 about how the two existing reference packs behave. Full-repo `pnpm build`/
 `pnpm lint` green across all 8 workspace tasks. `apps/portal`/`apps/admin`
 untouched — this step is backend/data-only, no UI surface.
+
+## 3.5.4 — Statutory / government reporting
+
+(2026-09-14) — `packages/db` (new `StatutoryReportDefinition`/
+`GeneratedReport` models + two migrations, `seed-statutory-report-definitions.ts`),
+`packages/shared` (`statutory-reporting.validator.ts`, two new permissions),
+`apps/api/src/statutory-reporting` (a NEW module), `apps/portal` (a new
+`/statutory-reports` admin-console page). See
+[`docs/conventions/statutory-reporting.md`](./conventions/statutory-reporting.md)
+for the full write-up. Phase 3.5's FINAL slice — closes the "3.5.4 deferred"
+gap 3.5.5's own BUILD_LOG entry (and CLAUDE.md's checklist) explicitly
+flagged.
+
+**THE BOUNDARY**: this module GENERATES periodic government filing forms
+from already-FINALIZED `PayrollRun` data (2.1) — it never calculates a
+figure itself. A report reads `PayrollRunLine.grossPay`/`componentBreakdown`
+and `Employee.statutoryFields` for runs whose `status` is `FINALIZED` or
+`PAID` — the SAME gate `PayrollBankExportService` already enforces for bank
+export — and re-derives nothing; a branch/period with no finalized run
+fails the generation job loudly (a `FAILED` row with a clear error message)
+rather than silently reporting zero employees, proven directly by a test
+that runs payroll only to `CALCULATED` and confirms generation fails.
+
+**THE COMPLIANCE BOUNDARY**: report STRUCTURES and the generation pipeline
+are production-ready; the EXACT current form layout/field requirements/
+submission format for each filing is NOT certified and must be verified
+against FBR/EOBI/the relevant provincial authority before real filing.
+Every `StatutoryReportDefinition` carries its own `complianceNote` stating
+this for that specific report, shown on the generation UI AND printed
+directly on the generated PDF itself (not only the surrounding portal
+page) — the SAME "VERIFY, don't guess" discipline 3.5.5's Pakistan pack
+already holds every legally-sensitive PACK FIGURE to, extended here to
+FORM SPECIFICS rather than tax/statutory numbers.
+
+**The country-extensible framework** — three pieces: `StatutoryReportDefinition`
+(a global, RLS-exempt CATALOG row per country+report code — `hrm_app`
+granted `SELECT` only, the same posture `CountryPack` already takes,
+written today only via `seed-statutory-report-definitions.ts`);
+`StatutoryReportGeneratorRegistry` (`apps/api/src/statutory-reporting/statutory-report-generator.interface.ts`,
+a plain `reportCode -> StatutoryReportGenerator` lookup, the SAME shape
+`BankExportAdapterRegistry` — payroll's own bank-export seam, step 3.3 —
+already establishes for a near-identical problem); `GeneratedReport` (the
+tenant-scoped REGISTER, ordinary RLS, `periodKey` — `"2026-06"`/`"2026-Q2"`/
+`"2026"` — as the SINGLE uniqueness anchor, a deliberately simpler solution
+than `PayrollRun`'s own hand-written partial-unique-index seam for the same
+class of "NULL is distinct" problem). Adding a new country's reports is
+exactly: seed new definition rows + implement/register one small generator
+per report code — nothing else (controller/service/queue/processor/PDF/
+CSV/RBAC) changes. Proven directly: a QA branch (no seeded QA report
+definitions) resolves an EMPTY catalog through the identical
+`GET /statutory-reports/definitions` endpoint a future country would use,
+not an error.
+
+**Pakistan, the first concrete country — four report definitions**:
+`PK_INCOME_TAX_WITHHOLDING` (MONTHLY, per-employee CNIC/NTN/gross/the
+`income_tax`-keyed breakdown amount — FBR's periodic withholding
+statement); `PK_EOBI_CONTRIBUTION` (MONTHLY, employer+employee EOBI
+contributions, already wage-ceiling-capped by the unmodified rules engine
+at calculation time); `PK_PROVIDENT_FUND_CONTRIBUTION` (MONTHLY, an
+internal/trustee-facing report, not a direct government filing);
+`PK_ANNUAL_SALARY_TAX_STATEMENT` (ANNUAL — the one report that GROUPS BY
+employee across every finalized month in the year rather than one row per
+run line, since a leaver's `FINAL_SETTLEMENT` run means an employee can
+have more than one finalized line in a single year). Every PK generator
+hard-codes the Pakistan pack's OWN `componentBreakdown` key names
+(`income_tax`, `eobi_employee`, ...) — an honest, first-concrete-country
+choice mirroring how the pack's own payslip template already hard-codes
+those same keys.
+
+**Generation lifecycle**: `POST /statutory-reports/generate` resolves the
+branch's country/report/period, upserts a `PENDING` `GeneratedReport` row,
+and enqueues a `STATUTORY_REPORT_QUEUE` BullMQ job (report generation is
+explicitly "a job for larger orgs" per this step's own brief) — the SAME
+producer/`WorkerHost` shape `PayrollRunQueueService`/`PayrollRunProcessor`
+already establish. `StatutoryReportProcessor` flips the row through
+`GENERATING` to `COMPLETED` (with `summary: {employeeCount, totals}`) or
+`FAILED` (with `errorMessage`) — unlike `PayrollRunProcessor`'s per-employee
+resumability, a whole report is one atomic unit, so a retried job just
+regenerates it safely. PDF rendering (`StatutoryReportPdfService`) reuses
+the SAME `pdfkit` + bundled-DejaVu-font approach `PayslipPdfService`
+established, laid out as this codebase's first genuine per-employee PDF
+TABLE, with the report's own `complianceNote` printed at the bottom and RTL
+alignment following the resolved pack's `payslipTemplate.language` via the
+SAME `isRtlLanguage` mechanism payslips already use. CSV rendering
+(`StatutoryReportCsvService`) reuses the SAME plain hand-escaped approach
+`GenericCsvBankExportAdapter` already establishes.
+
+**Security/RBAC/audit**: two new permissions, TENANT_ADMIN/HR_MANAGER only
+— `statutory_report.generate` vs. `statutory_report.read`, the same
+generate-vs-read split `payroll.run`/`payslip.view` already establish.
+`GeneratedReportResponseDto.summary` is field-level gated behind
+`salary.view` (defense-in-depth, the existing `@RequiresPermission()`
+mechanism). `POST /statutory-reports/generate` is `@AuditLog`'d;
+`GET /statutory-reports/:id/download` deliberately is NOT — the SAME reason
+`PayrollController.bankExport`/`.payslip` aren't (a `StreamableFile`
+response overflows `AuditInterceptor`'s redaction walk). `GeneratedReport`
+carries the identical `tenant_isolation` RLS policy every tenant-owned
+table in this schema already carries.
+
+**Portal UI**: `/statutory-reports` (gated on `statutory_report.read`/
+`.generate`) — pick a branch, see its own resolved report catalog with each
+report's `complianceNote` inline plus a prominent compliance banner,
+generate, and a history list with status badges and PDF/CSV downloads once
+`COMPLETED`, following every other admin-console page's established shape
+(`useAsync`, a `Refresh` button for async-status polling, the SAME pattern
+the Payroll run detail page already uses for its own async status flip).
+Deliberately admin-console-only — no ESS variant exists, so no RTL proof
+applies to this specific page (every admin-console page in this codebase
+renders LTR regardless of branch country); the Pakistan pack's Urdu/RTL
+rendering is instead exercised inside the downloaded PDF itself, reusing
+payslips' already-proven `isRtlLanguage` mechanism.
+
+Verified end-to-end over real HTTP by `apps/api/test/statutory-reporting.e2e-spec.ts`
+(12 tests: the report catalog resolving generically from a branch's own
+country including an empty catalog for a country with none seeded; a
+draft/calculated-only run correctly failing generation; all four PK
+reports generating correct per-employee/aggregate figures from a real
+finalized payroll run, including the annual statement's cross-month
+grouping; idempotent re-generation; audit capture; deny-by-default RBAC;
+cross-tenant RLS isolation) plus `apps/portal/tests/statutory-reports.spec.ts`
+(3 Playwright tests: generate, poll to `COMPLETED`, download, the
+compliance notice's visibility, and nav/RBAC visibility). Full `apps/api`
+suite — 541 tests total (529 existing + 12 new), all green, zero flakes on
+this run (including the previously-documented, unrelated
+`migration.e2e-spec.ts` timing flake, which did not reproduce this run).
+`packages/db` suite — 37/37, unaffected by the schema addition. Full portal
+Playwright suite — 98/98 green (extended `global-setup.ts`/`fixtures.ts`
+with one new PK branch + employee; every pre-existing spec unaffected).
+Full-repo `pnpm build`/`pnpm lint` green across all 8 workspace tasks.
+
+**Phase 3.5 is now COMPLETE** — Data migration (3.5.1) + Benefits (3.5.2) +
+E-signatures (3.5.3) + Pakistan country pack (3.5.5) + Statutory reporting
+(3.5.4). Remaining across the whole codebase: Phase 5's 5.3 (Kubernetes/
+horizontal autoscaling) and 5.4 (observability + load testing), both
+deferred, plus Phase 6 (scope not yet defined).

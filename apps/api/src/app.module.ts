@@ -34,6 +34,7 @@ import { LmsModule } from './lms/lms.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PartitioningModule } from './partitioning/partitioning.module';
 import { PlatformModule } from './platform/platform.module';
+import { StatutoryReportingModule } from './statutory-reporting/statutory-reporting.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
@@ -123,6 +124,13 @@ import { WorkflowModule } from './workflow/workflow.module';
     // partition_high_growth_tables migration). See
     // docs/conventions/partitioning-archival.md.
     PartitioningModule,
+    // Step 3.5.4 (Phase 3.5's final slice) — statutory/government reporting:
+    // generates periodic government filing forms/exports FROM already-
+    // FINALIZED PayrollRun data (2.1) via a country-extensible report
+    // catalog + a pluggable per-report-code generator registry, Pakistan
+    // being the first concrete country. See
+    // docs/conventions/statutory-reporting.md.
+    StatutoryReportingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

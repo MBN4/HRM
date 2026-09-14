@@ -12,3 +12,4 @@ export const BILLING_SEAT_SYNC_QUEUE = 'billing-seat-sync';
 export const MIGRATION_QUEUE = 'migration';
 export const PARTITION_MAINTENANCE_QUEUE = 'partition-maintenance';
 export const PARTITION_ARCHIVAL_QUEUE = 'partition-archival';
+export const STATUTORY_REPORT_QUEUE = 'statutory-report';

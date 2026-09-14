@@ -185,7 +185,7 @@ describe('country packs (e2e)', () => {
     });
 
     it('a PK branch resolves PKR / Sat-Sun weekend / RTL Urdu / PK income tax + EOBI + Provident Fund / CNIC+NTN required', async () => {
-      // The real, production-shaped Pakistan pack (step 3.5.4) — see
+      // The real, production-shaped Pakistan pack (step 3.5.5) — see
       // docs/conventions/pakistan-pack.md — replacing the ad-hoc PK test
       // pack 3.5.2's benefits e2e suite used to create directly. Same
       // engine, THIRD country, proving the divergence claim generically —

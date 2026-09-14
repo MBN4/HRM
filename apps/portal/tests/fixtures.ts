@@ -14,6 +14,9 @@ export interface PortalTestFixtures {
   employeeBEmail: string;
   branchAUsId: string;
   branchAQaId: string;
+  branchAPkId: string;
+  pkEmployeeAEmail: string;
+  pkEmployeeAEmployeeId: string;
   analyticsDate: string;
   payrollNoSalaryEmail: string;
   managerAEmployeeId: string;

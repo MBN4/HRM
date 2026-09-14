@@ -1,6 +1,6 @@
 import { writeFileSync } from 'fs';
 import { hash } from '@node-rs/argon2';
-import { prisma, seedCountryPacks, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '@hrm/db';
+import { prisma, seedCountryPacks, seedStatutoryReportDefinitions, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '@hrm/db';
 import { FIXTURES_PATH, TEST_PASSWORD } from './fixtures';
 
 const ARGON2ID = 2;
@@ -44,6 +44,10 @@ export default async function globalSetup(): Promise<void> {
   });
 
   await seedCountryPacks(prisma);
+  // Step 3.5.4 (statutory/government reporting) — see
+  // docs/conventions/statutory-reporting.md; seeds the PK report catalog
+  // `statutory-reports.spec.ts` reads through `/statutory-reports/definitions`.
+  await seedStatutoryReportDefinitions(prisma);
   await seedSystemRolesAndPermissions(prisma, tenantA.id);
   await seedSystemRolesAndPermissions(prisma, tenantB.id);
 
@@ -52,6 +56,12 @@ export default async function globalSetup(): Promise<void> {
   });
   const branchAQa = await prisma.branch.create({
     data: { tenantId: tenantA.id, name: 'Portal E2E Doha Office', countryCode: 'QA', timezone: 'Asia/Qatar' },
+  });
+  // Step 3.5.4 — a PK branch for `statutory-reports.spec.ts`'s own
+  // generate+download+RTL proof (the Pakistan pack's own compliance
+  // boundary — see docs/conventions/pakistan-pack.md).
+  const branchAPk = await prisma.branch.create({
+    data: { tenantId: tenantA.id, name: 'Portal E2E Karachi Office', countryCode: 'PK', timezone: 'Asia/Karachi' },
   });
   const branchB = await prisma.branch.create({
     data: { tenantId: tenantB.id, name: 'Portal E2E Tenant B HQ', countryCode: 'US', timezone: 'America/New_York' },
@@ -129,6 +139,27 @@ export default async function globalSetup(): Promise<void> {
       employmentType: 'FULL_TIME',
       joinDate: new Date('2022-06-01'),
       statutoryFields: { QATAR_ID: 'QID-000001', VISA_SPONSORSHIP: 'yes' },
+    },
+  });
+
+  // Step 3.5.4 — a PK employee `statutory-reports.spec.ts` runs a real,
+  // finalized payroll period against (via direct API calls in its own
+  // setup, mirroring payroll.spec.ts's own "arrange via API, act via UI"
+  // shape) so a report generated through the UI has real per-employee
+  // CNIC/NTN/gross/tax-withheld data to show, not an empty run.
+  const pkEmployeeAUser = await makeUser(tenantA.id, 'pk-employee@portal-e2e-a.test', employeeRoleA.id);
+  const pkEmployeeAEmployee = await prisma.employee.create({
+    data: {
+      tenantId: tenantA.id,
+      userId: pkEmployeeAUser.id,
+      employeeCode: 'PE-PK-1',
+      firstName: 'Bilal',
+      lastName: 'Ahmed',
+      branchId: branchAPk.id,
+      managerId: managerAEmployee.id,
+      employmentType: 'FULL_TIME',
+      joinDate: new Date('2022-06-01'),
+      statutoryFields: { CNIC: '42101-7654321-0', NTN: '1234567-8' },
     },
   });
 
@@ -503,6 +534,9 @@ export default async function globalSetup(): Promise<void> {
     employeeBEmail: 'employee@portal-e2e-b.test',
     branchAUsId: branchAUs.id,
     branchAQaId: branchAQa.id,
+    branchAPkId: branchAPk.id,
+    pkEmployeeAEmail: 'pk-employee@portal-e2e-a.test',
+    pkEmployeeAEmployeeId: pkEmployeeAEmployee.id,
     analyticsDate: analyticsDate.toISOString().slice(0, 10),
     payrollNoSalaryEmail: 'payroll-no-salary@portal-e2e-a.test',
     managerAEmployeeId: managerAEmployee.id,

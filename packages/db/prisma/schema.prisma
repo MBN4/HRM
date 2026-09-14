@@ -246,6 +246,10 @@ model Tenant {
   signatureEvents      SignatureEvent[]
   signatureCertificates SignatureCertificate[]
 
+  // Step 3.5.4 — statutory / government reporting (see
+  // docs/conventions/statutory-reporting.md).
+  generatedReports GeneratedReport[]
+
   @@map("tenants")
 }
 
@@ -390,6 +394,7 @@ model Branch {
   leaveUtilizationDailySnapshots LeaveUtilizationDailySnapshot[]
   payrollRuns                    PayrollRun[]
   payrollRunLines                PayrollRunLine[]
+  generatedReports               GeneratedReport[]
   appraisalRatingDistributions   AppraisalRatingDistributionSnapshot[]
   jobRequisitions                JobRequisition[]
   offers                         Offer[]
@@ -2695,6 +2700,103 @@ model PayrollBankExport {
 
   @@index([tenantId, payrollRunId])
   @@map("payroll_bank_exports")
+}
+
+// ---------------------------------------------------------------------------
+// Statutory / government reporting (step 3.5.4, Phase 3.5's final slice) —
+// see docs/conventions/statutory-reporting.md. GENERATES periodic government
+// filing forms from FINALIZED PayrollRun data — distinct from CALCULATING the
+// figures (PayrollEngineService/CountryPack's job, untouched by this step).
+//
+// `StatutoryReportDefinition` is global, RLS-EXEMPT reference data — the
+// SAME posture `CountryPack` already establishes (see that model's own doc
+// comment): no `tenant_id` column, `hrm_app` granted SELECT only, writable
+// today only via the owner role (`packages/db/src/seed-statutory-report-definitions.ts`).
+// It is a CATALOG, not an engine — "adding a country" means seeding new rows
+// here PLUS registering that country's report generator(s) under
+// `STATUTORY_REPORT_GENERATORS` (apps/api/src/statutory-reporting), never
+// touching the register/queue/PDF/CSV/RBAC framework those generators run
+// inside. `outputFormats` (e.g. `["PDF","CSV"]`) and `complianceNote` (this
+// report's own "verify the current form layout/submission channel with the
+// authority before filing" caveat) are both just descriptive catalog data,
+// read by the UI/generation service, never branched on by country code.
+enum StatutoryReportPeriodType {
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+}
+
+model StatutoryReportDefinition {
+  id             String                    @id @default(uuid()) @db.Uuid
+  countryCode    String                    @map("country_code") @db.VarChar(2)
+  reportCode     String                    @map("report_code") @db.VarChar(64)
+  name           String
+  description    String
+  periodType     StatutoryReportPeriodType @map("period_type")
+  outputFormats  String[]                  @map("output_formats")
+  complianceNote String                    @map("compliance_note")
+  isActive       Boolean                   @default(true) @map("is_active")
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
+
+  generatedReports GeneratedReport[]
+
+  @@unique([countryCode, reportCode])
+  @@index([countryCode, isActive])
+  @@map("statutory_report_definitions")
+}
+
+enum GeneratedReportStatus {
+  PENDING
+  GENERATING
+  COMPLETED
+  FAILED
+}
+
+// One row per generated report — the tenant-scoped REGISTER
+// (`GET /statutory-reports`), ordinary RLS (tenant-owned). `periodKey`
+// ("2026-06" monthly / "2026-Q2" quarterly / "2026" annual, computed by
+// `StatutoryReportService` before every write) is the SINGLE uniqueness
+// anchor — sidesteps the Postgres "NULL is distinct" trap a nullable
+// `(periodMonth, periodQuarter)` compound unique would otherwise hit for
+// ANNUAL rows (the same class of problem `PayrollRun`'s own
+// FINAL_SETTLEMENT seam documents solving with hand-written partial
+// indexes — this table solves it more simply, with a derived string,
+// since a report register has no need for PayrollRun's own two-run-types-
+// in-one-table shape). `periodYear`/`periodMonth`/`periodQuarter` are kept
+// alongside it purely for filtering/display — never used for uniqueness.
+model GeneratedReport {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  tenantId           String                    @map("tenant_id") @db.Uuid
+  branchId           String                    @map("branch_id") @db.Uuid
+  reportDefinitionId String                    @map("report_definition_id") @db.Uuid
+  reportCode         String                    @map("report_code") @db.VarChar(64)
+  countryCode        String                    @map("country_code") @db.VarChar(2)
+  periodType         StatutoryReportPeriodType @map("period_type")
+  periodYear         Int                       @map("period_year")
+  periodMonth        Int?                      @map("period_month")
+  periodQuarter      Int?                      @map("period_quarter")
+  periodKey          String                    @map("period_key") @db.VarChar(16)
+  status             GeneratedReportStatus     @default(PENDING)
+  pdfStorageKey      String?                   @map("pdf_storage_key")
+  csvStorageKey      String?                   @map("csv_storage_key")
+  // A small, non-sensitive-on-its-own summary (e.g. employeeCount,
+  // totalTaxWithheld) shown in the register list without opening the PDF —
+  // still passes through the audit sink's redaction like everything else.
+  summary            Json?
+  errorMessage       String?                   @map("error_message")
+  requestedByUserId  String?                   @map("requested_by_user_id") @db.Uuid
+  generatedAt        DateTime?                 @map("generated_at")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+
+  tenant           Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch           Branch                    @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  reportDefinition StatutoryReportDefinition @relation(fields: [reportDefinitionId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, branchId, reportDefinitionId, periodKey])
+  @@index([tenantId, branchId, status])
+  @@map("generated_reports")
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   CreditCard,
   FileSignature,
+  FileText,
   GraduationCap,
   HeartPulse,
   LayoutDashboard,
@@ -127,6 +128,10 @@ export function Sidebar() {
   // E-signatures (step 3.5.3) — see docs/conventions/e-signatures.md.
   if (can(PERMISSIONS.ESIGNATURE_REQUEST) || can(PERMISSIONS.ESIGNATURE_MANAGE)) {
     adminItems.push({ href: '/esignature', label: t('nav.esignature'), icon: FileSignature });
+  }
+  // Statutory / government reporting (step 3.5.4) — see docs/conventions/statutory-reporting.md.
+  if (can(PERMISSIONS.STATUTORY_REPORT_READ) || can(PERMISSIONS.STATUTORY_REPORT_GENERATE)) {
+    adminItems.push({ href: '/statutory-reports', label: t('nav.statutoryReports'), icon: FileText });
   }
 
   return (

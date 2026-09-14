@@ -11,6 +11,7 @@
 import { PrismaClient } from '@prisma/client';
 import { seedSystemRolesAndPermissions } from '../src/seed-rbac';
 import { seedCountryPacks } from '../src/seed-country-packs';
+import { seedStatutoryReportDefinitions } from '../src/seed-statutory-report-definitions';
 import { seedDemoSubscription } from '../src/seed-licensing';
 import { seedNotificationTemplates } from '../src/seed-notification-templates';
 import { seedExchangeRates } from '../src/seed-exchange-rates';
@@ -56,6 +57,7 @@ async function main() {
 
   await seedSystemRolesAndPermissions(prisma, tenant.id);
   await seedCountryPacks(prisma);
+  await seedStatutoryReportDefinitions(prisma);
   await seedDemoSubscription(prisma, tenant.id);
   await seedNotificationTemplates(prisma);
   await seedExchangeRates(prisma);
@@ -67,7 +69,8 @@ async function main() {
     { id: qaBranch.id, name: qaBranch.name, countryCode: qaBranch.countryCode },
   ]);
   console.log('Seeded system roles + permission catalog for tenant', tenant.slug);
-  console.log('Seeded country packs: US, QA');
+  console.log('Seeded country packs: US, QA, PK');
+  console.log('Seeded statutory report definitions: PK (income tax withholding, EOBI, provident fund, annual statement)');
   console.log('Seeded demo subscription: PROFESSIONAL / ACTIVE');
   console.log('Seeded notification templates (en, ar)');
   console.log('Seeded reference exchange rates: USD<->QAR');

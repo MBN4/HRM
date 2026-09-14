@@ -5,6 +5,7 @@ export * from './pool-config';
 export * from './replica-config';
 export * from './seed-rbac';
 export * from './seed-country-packs';
+export * from './seed-statutory-report-definitions';
 export * from './seed-licensing';
 export * from './seed-notification-templates';
 export * from './seed-exchange-rates';

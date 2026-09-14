@@ -109,6 +109,10 @@ const STATUS_TONE: Record<string, Tone> = {
   PARTIALLY_SIGNED: 'warning',
   VIEWED: 'info',
   SIGNED: 'success',
+  // Statutory / government reporting (step 3.5.4) — GeneratedReportStatus
+  // not already covered above (PENDING/COMPLETED/FAILED are reused as-is)
+  // — additive only.
+  GENERATING: 'info',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

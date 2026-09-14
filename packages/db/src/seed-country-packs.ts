@@ -7,7 +7,7 @@ type Client = PrismaClient | Prisma.TransactionClient;
  * The reference Country Packs: USA (the hardest case — multi-layer tax, no
  * income-tax-free statutory contribution), Qatar (no income tax,
  * end-of-service gratuity instead of a pension withholding, RTL Arabic), and
- * Pakistan (added in step 3.5.4 — see docs/conventions/pakistan-pack.md —
+ * Pakistan (added in step 3.5.5 — see docs/conventions/pakistan-pack.md —
  * PKR/Sat-Sun weekend/RTL Urdu/a real progressive income tax + EOBI +
  * Provident Fund, replacing the ad-hoc PK test pack 3.5.2's benefits e2e
  * suite created directly and never seeded here). They exist to prove the
