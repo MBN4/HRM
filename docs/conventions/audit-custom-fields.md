@@ -81,15 +81,18 @@ third 0.9 subsystem (i18n/timezone/RTL), see
   deletes from a `Tenant` row being deleted are unaffected — `ON DELETE
 CASCADE` is enforced by the FK constraint itself, not by the deleting
   session's own privilege on the child table.
-- **PARTITION-READY, not yet partitioned** — the gap flagged back in 0.2
-  (see [tenancy-rls.md](./tenancy-rls.md) and the comment block above the
-  `Tenant` model in `schema.prisma`) is closed for the shape, not the
-  partitioning itself: `AuditLog`'s primary key is the COMPOSITE
-  `(id, occurredAt)`, since Postgres requires the partition key to be
-  part of every unique constraint/PK on a partitioned table. Phase 5.2 is
-  expected to add the actual `PARTITION BY RANGE (occurred_at)`
-  migration; this step's schema is designed so that lands without an
-  incompatible PK change.
+- **Partitioned since Phase 5.2** — the gap flagged back in 0.2 (see
+  [tenancy-rls.md](./tenancy-rls.md) and the comment block above the
+  `Tenant` model in `schema.prisma`) was closed for the shape back then:
+  `AuditLog`'s primary key is the COMPOSITE `(id, occurredAt)`, since
+  Postgres requires the partition key to be part of every unique
+  constraint/PK on a partitioned table. Phase 5.2 added the actual
+  `PARTITION BY RANGE (occurred_at)` migration, landing additively with
+  zero PK/column change exactly as planned — see
+  [partitioning-archival.md](./partitioning-archival.md) for the full
+  write-up (RLS + this table's own DB-level immutability proven identical
+  on the resulting partitions, automated ahead-of-time partition creation,
+  and archival/retention).
 - **Query API**: `GET /audit` (`apps/api/src/audit/audit.controller.ts`),
   deny-by-default behind a new `audit.read` permission — granted to
   `TENANT_ADMIN` only (via `ALL_PERMISSIONS`), deliberately NOT

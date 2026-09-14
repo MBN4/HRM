@@ -21,28 +21,41 @@ datasource db {
 }
 
 // ---------------------------------------------------------------------------
-// Future partitioned tables:
+// Partitioned tables (Phase 5.2 — see docs/conventions/partitioning-archival.md):
 //
-//   - attendance_records — one row per clock-in/out shift; extremely high
-//     volume. Created in step 1.3 (see AttendanceRecord below) as
-//     PARTITION-READY (composite primary key) but NOT actually partitioned
-//     yet — the `PARTITION BY RANGE` migration itself is Phase 5.2.
-//   - audit_log   — one row per mutating action across the whole system.
-//     Created in step 0.9 (see AuditLog below) as PARTITION-READY (composite
-//     primary key) but NOT actually partitioned yet — the `PARTITION BY
-//     RANGE` migration itself is Phase 5.2.
+//   - attendance_records  — one row per clock-in/out shift; extremely high
+//     volume. Created in step 1.3 (see AttendanceRecord below) PARTITION-READY
+//     (composite primary key); actually `PARTITION BY RANGE (work_date)`
+//     since Phase 5.2 (`partition_high_growth_tables` migration).
+//   - audit_log           — one row per mutating action across the whole
+//     system. Created in step 0.9 (see AuditLog below) PARTITION-READY
+//     (composite primary key); actually `PARTITION BY RANGE (occurred_at)`
+//     since Phase 5.2.
+//   - platform_audit_log  — the cross-tenant platform trail (step 4.1, see
+//     PlatformAuditLog below), same composite-PK shape; actually
+//     `PARTITION BY RANGE (occurred_at)` since Phase 5.2 too.
 //
-// Both MUST be created as PARTITIONED tables from day one — retrofitting
-// partitioning onto a live, non-partitioned table at scale is a painful
-// migration, not a config change. Plan:
-//   - PARTITION BY RANGE on a timestamp column (e.g. occurred_at/created_at),
-//     optionally sub-partitioned BY LIST on tenant_id for very large tenants.
-//   - Postgres requires the partition key to be part of every unique
-//     constraint/PK on a partitioned table, so their primary keys must be
-//     composite from the start, e.g. PRIMARY KEY (id, occurred_at) rather
-//     than PRIMARY KEY (id) alone. Any FK that will point at them (and any
-//     `id` values handed to clients) must be designed compatibly now so
-//     adding the tables later isn't a breaking change to callers.
+// All three were deliberately built with a COMPOSITE primary key from day
+// one — Postgres requires the partition key to be part of every unique
+// constraint/PK on a partitioned table — so the Phase 5.2 migration that
+// actually declares `PARTITION BY RANGE` is additive (rename old table,
+// recreate as a native partitioned table with the SAME columns/PK/indexes/
+// FKs/RLS policy/grants, copy every existing row into the correct partition,
+// drop the old table), never a breaking change to this schema or to any
+// caller. Partitions themselves are managed entirely at the Postgres/
+// migration layer (raw SQL, a `hrm_ensure_range_partitions` helper function,
+// and a scheduled BullMQ job that keeps upcoming partitions created ahead of
+// time) — nothing about these three Prisma models changes: they are still
+// queried/written exactly as any other model, through the SAME table name,
+// via `withTenantContext`/`appPrisma` for the tenant-scoped two. See
+// docs/conventions/partitioning-archival.md for the full write-up (RLS +
+// immutability on partitions, partition pruning, and the archival/retention
+// mechanism).
+//
+// `signature_events` (see SignatureEvent below) was assessed for the same
+// treatment and deliberately NOT partitioned — see that model's own doc
+// comment and docs/conventions/partitioning-archival.md § "Assessed, not
+// partitioned" for why.
 //   - Both need RLS enabled + FORCE ROW LEVEL SECURITY + the same
 //     tenant_isolation policy pattern used below for every other
 //     tenant-scoped table.
@@ -130,6 +143,7 @@ model Tenant {
   notificationDeliveries         NotificationDelivery[]
   notificationPreferences        NotificationPreference[]
   auditLogs                      AuditLog[]
+  tenantRetentionOverrides       TenantRetentionOverride[]
   customFieldDefinitions         CustomFieldDefinition[]
   customFieldValueSets           CustomFieldValueSet[]
   employees                      Employee[]
@@ -1056,8 +1070,9 @@ model ImpersonationSession {
 // doesn't require iterating every tenant's audit_log to reconstruct "what
 // did platform admin X do." PARTITION-READY shape (composite `(id,
 // occurredAt)` PK), same reasoning as `AuditLog` — this table is
-// append-only and unbounded — though the actual `PARTITION BY RANGE`
-// migration remains Phase 5.2 for both. `platformAdminId` is nullable for
+// append-only and unbounded — and actually `PARTITION BY RANGE (occurred_at)`
+// since Phase 5.2, same as `AuditLog`/`AttendanceRecord` — see
+// docs/conventions/partitioning-archival.md. `platformAdminId` is nullable for
 // the one system-initiated case (the impersonation-expiry sweep has no
 // human actor), the same nullable-system-actor convention
 // `WorkflowAction.actorUserId` already uses for ESCALATE/AUTO_APPROVE.
@@ -1470,12 +1485,14 @@ model NotificationTemplate {
 // is enforced at the database layer, not just by this table having no
 // update/delete application code path.
 //
-// PARTITION-READY, not yet partitioned: primary key is the COMPOSITE
-// `(id, occurredAt)`, per the note above the `Tenant` model — Postgres
-// requires the partition key to be part of every unique constraint/PK on a
-// partitioned table, so this shape is chosen now so Phase 5.2's
-// `PARTITION BY RANGE (occurred_at)` migration is not a breaking PK change
-// later. `action`/`entityType` are free-form strings, not enums — same
+// PARTITIONED since Phase 5.2 (`PARTITION BY RANGE (occurred_at)`, monthly —
+// see docs/conventions/partitioning-archival.md): primary key is the
+// COMPOSITE `(id, occurredAt)`, per the note above the `Tenant` model —
+// Postgres requires the partition key to be part of every unique
+// constraint/PK on a partitioned table, which is exactly why this shape was
+// chosen back in 0.9 so the Phase 5.2 `PARTITION BY RANGE` migration landed
+// additively, not as a breaking PK change. `action`/`entityType` are
+// free-form strings, not enums — same
 // reasoning as `WorkflowInstance.entityType`/`Notification.eventType`: a
 // closed catalog here would mean a migration for every new audited action.
 model AuditLog {
@@ -1999,9 +2016,11 @@ model LeaveAccrualRun {
 // ---------------------------------------------------------------------------
 // Attendance & time-tracking (step 1.3, Phase 1). The first HIGH-VOLUME
 // module — every employee generates a row here daily, so `AttendanceRecord`
-// is built PARTITION-READY from day one, exactly the shape flagged since 0.2
-// (see the comment block above the `Tenant` model, and
-// docs/conventions/tenancy-rls.md). Consumes, rather than reimplements:
+// was built PARTITION-READY from day one, exactly the shape flagged since 0.2
+// (see the comment block above the `Tenant` model), and is actually
+// `PARTITION BY RANGE (work_date)` since Phase 5.2 — see
+// docs/conventions/tenancy-rls.md and
+// docs/conventions/partitioning-archival.md. Consumes, rather than reimplements:
 // Country Packs (0.5) for weekend/holiday/overtime rules, the Employee/
 // manager relation (1.1) for approver resolution, the workflow engine (0.7)
 // for regularization approval, and the 0.8 BullMQ pattern for the
@@ -2088,14 +2107,14 @@ model RosterAssignment {
 // attendance-timezone.util.ts) and never recomputed at clock-out; this is
 // what makes a shift crossing midnight attribute correctly to a single
 // working day regardless of what local calendar date the clock-out happens
-// on. It is also THE PARTITION KEY: PARTITION-READY, not yet partitioned,
-// the SAME shape `AuditLog` already established in 0.9 (composite PK
-// `(id, workDate)`, since Postgres requires the partition key to be part of
-// every unique constraint/PK on a partitioned table) — see the comment
-// block above the `Tenant` model and docs/conventions/tenancy-rls.md.
-// Phase 5.2 is expected to add the actual `PARTITION BY RANGE (work_date)`
-// migration; this shape is chosen now so that migration is additive, not
-// breaking.
+// on. It is also THE PARTITION KEY: the SAME shape `AuditLog` already
+// established in 0.9 (composite PK `(id, workDate)`, since Postgres requires
+// the partition key to be part of every unique constraint/PK on a
+// partitioned table) — see the comment block above the `Tenant` model and
+// docs/conventions/tenancy-rls.md. Actually `PARTITION BY RANGE (work_date)`
+// since Phase 5.2 (`partition_high_growth_tables` migration) — landed
+// additively, exactly as planned, with zero PK/column change. See
+// docs/conventions/partitioning-archival.md.
 //
 // Deliberately has NO `@@unique([tenantId, id])` (unlike almost every other
 // table in this schema) — adding one would violate the same Postgres
@@ -5068,6 +5087,19 @@ model SignatureSigner {
 // document-hash actually presented/signed at that instant, so tampering
 // with the stored document afterward is detectable by recomputing its hash
 // and comparing against what was recorded here.
+//
+// Assessed for Phase 5.2 native partitioning (see
+// docs/conventions/partitioning-archival.md) and deliberately NOT
+// partitioned: unlike `AuditLog`/`AttendanceRecord`/`PlatformAuditLog`, this
+// table was never built with a composite (partition-key-inclusive) primary
+// key — it's a plain `@id` on `id` alone — so converting it would be a real
+// PK-shape change, not the additive migration this phase is scoped to. Its
+// growth is also structurally bounded very differently: one row per
+// lifecycle moment of a SIGNATURE REQUEST (a handful of events per document
+// signed), not one row per employee per day (`AttendanceRecord`) or per
+// mutating action system-wide (`AuditLog`/`PlatformAuditLog`) — orders of
+// magnitude lower volume. DB-level immutability (REVOKE UPDATE/DELETE) and
+// RLS are unaffected either way; this is a scale decision, not a safety one.
 model SignatureEvent {
   id                 String             @id @default(uuid()) @db.Uuid
   tenantId           String             @map("tenant_id") @db.Uuid
@@ -5114,4 +5146,103 @@ model SignatureCertificate {
 
   @@unique([tenantId, signatureRequestId])
   @@map("signature_certificates")
+}
+
+// ---------------------------------------------------------------------------
+// Table partitioning + archival (step 5.2, Phase 5). See
+// docs/conventions/partitioning-archival.md for the full write-up — this
+// section only covers the CONFIG/METADATA models; the actual
+// `PARTITION BY RANGE` conversion of attendance_records/audit_log/
+// platform_audit_log lives entirely in the `partition_high_growth_tables`
+// hand-written SQL migration (Prisma has no partitioning DSL, same reason
+// RLS is hand-written SQL — see docs/conventions/tenancy-rls.md), not here.
+// ---------------------------------------------------------------------------
+
+enum PartitionedTableName {
+  ATTENDANCE_RECORDS
+  AUDIT_LOG
+  PLATFORM_AUDIT_LOG
+}
+
+// Platform-wide default partition/retention config, one row per managed
+// table — NOT tenant-scoped, NOT subject to RLS, the SAME "platform
+// catalog, no tenant_id to filter on" exemption `CountryPack` already
+// establishes. Writable only through the owner `prisma` client via
+// `@PlatformRoute()` (`PARTITIONING_MANAGE`), seeded with sane defaults by
+// the migration that creates this table.
+model PartitionedTableConfig {
+  tableName PartitionedTableName @id @map("table_name")
+  // How many months of hot partitions the scheduled partition-creation job
+  // keeps created AHEAD of "now" — see PartitionMaintenanceService. Chosen
+  // generously (default 3) so a slow/failed job run still leaves a comfortable
+  // buffer before any write could ever hit a missing partition.
+  lookaheadMonths Int @default(3) @map("lookahead_months")
+  // A partition whose range END is older than (now - retentionMonths) is
+  // eligible for archival (detach + export + drop) — see
+  // PartitionArchivalService. This is the PLATFORM DEFAULT only.
+  // `TenantRetentionOverride` below is a documented Phase 6.1 GDPR seam: a
+  // partition holds many tenants' rows for the same date range, so a
+  // tenant-specific override does not (yet) drive per-tenant purging within
+  // a shared partition — see docs/conventions/partitioning-archival.md.
+  retentionMonths Int     @default(24) @map("retention_months")
+  archiveEnabled  Boolean @default(true) @map("archive_enabled")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("partitioned_table_configs")
+}
+
+// A tenant's own retention preference for one partitioned table — the
+// documented Phase 6.1 GDPR/data-residency SEAM this step is asked to
+// provide, not a fully realized per-tenant purge mechanism (see the honest
+// scope note on `PartitionedTableConfig.retentionMonths` and
+// docs/conventions/partitioning-archival.md). Ordinary tenant-scoped table,
+// RLS applies exactly like every other tenant-owned table in this schema —
+// written today only via `@PlatformRoute()` (`PARTITIONING_MANAGE`, on a
+// tenant's behalf, the same "platform acts for a tenant" shape
+// `TENANT_MIGRATION_MANAGE` already establishes), through the owner
+// `prisma` client (a platform route opens no tenant transaction — see
+// docs/conventions/tenant-resolution.md § Platform context) — RLS/grants
+// are still declared here for the same defense-in-depth reason every
+// tenant-scoped table in this schema gets them regardless of which caller
+// exercises the write path today, and to leave the door open for a future
+// tenant-portal self-service surface.
+model TenantRetentionOverride {
+  id              String               @id @default(uuid()) @db.Uuid
+  tenantId        String               @map("tenant_id") @db.Uuid
+  tableName       PartitionedTableName @map("table_name")
+  retentionMonths Int                  @map("retention_months")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, tableName])
+  @@index([tenantId])
+  @@map("tenant_retention_overrides")
+}
+
+// One row per archived (detached + exported + dropped) partition — platform-
+// wide infra metadata, NOT tenant-scoped (an archived partition's export
+// holds every tenant's rows for that date range), the SAME "no RLS,
+// cross-tenant infra" exemption `PlatformAuditLog` already establishes.
+// `storageKey` + `checksumSha256` are the documented retrieval path: the
+// gzip-compressed JSONL export lives in the SAME S3/MinIO bucket
+// `StorageService` already manages, downloadable via
+// `GET /platform/partitioning/archives/:id/download`
+// (`PARTITIONING_READ`), with the checksum letting an operator verify a
+// downloaded export's integrity independently of Postgres.
+model ArchivedPartition {
+  id             String               @id @default(uuid()) @db.Uuid
+  tableName      PartitionedTableName @map("table_name")
+  partitionName  String               @map("partition_name")
+  rangeStart     DateTime             @map("range_start")
+  rangeEnd       DateTime             @map("range_end")
+  rowCount       Int                  @map("row_count")
+  storageKey     String               @map("storage_key")
+  checksumSha256 String               @map("checksum_sha256")
+  archivedAt     DateTime             @default(now()) @map("archived_at")
+
+  @@unique([tableName, partitionName])
+  @@index([tableName, rangeStart])
+  @@map("archived_partitions")
 }

@@ -4,6 +4,7 @@ export * from './constants/feature-flags';
 export * from './constants/platform-permissions';
 export * from './constants/billing-plans';
 export * from './constants/branding';
+export * from './constants/partitioning';
 export * from './types/tenant';
 export * from './dto/tenant.dto';
 export * from './validators/tenant.validator';

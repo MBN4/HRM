@@ -3042,3 +3042,134 @@ already carries (confirmed unrelated via an isolated, uncontended rerun
 passing 10/10), zero regressions. Full-repo `pnpm build`/`pnpm lint` green
 across all workspace tasks. `apps/portal`/`apps/admin` Playwright suites
 untouched — this step has no UI surface.
+
+## 5.2 — Table partitioning + archival
+
+Phase 5's second slice (2026-09-14) — `packages/db`,
+`apps/api/src/partitioning`, `apps/api/src/platform/partitioning`,
+`packages/shared`. See
+[`docs/conventions/partitioning-archival.md`](./conventions/partitioning-archival.md)
+for the full write-up. Turns ON the native Postgres partitioning
+`attendance_records` (1.3) and `audit_log` (0.9) were deliberately built
+PARTITION-READY for since their own original steps (composite
+`(id, <partition column>)` primary keys, chosen back then for exactly this
+migration) — and additionally partitions `platform_audit_log` (4.1), which
+its own doc comment had explicitly flagged for the same Phase 5.2 treatment.
+
+**The conversion is additive, not a rebuild.** One hand-written migration,
+`partition_high_growth_tables`: rename the existing table aside (plus its
+PK/FK/index names, a real gotcha caught before committing to this design —
+Postgres does not auto-rename a table's own constraints/indexes when the
+table itself is renamed, so the new partitioned table would otherwise
+collide with the old ones' still-existing names), recreate it as a native
+`PARTITION BY RANGE` table with IDENTICAL columns/PK/FKs/indexes/RLS
+policy/grants, bootstrap monthly partitions covering both the existing
+data's own date range and a lookahead, copy every row across, drop the
+renamed-aside original. Nothing about how any caller queries/writes these
+tables changes — Prisma still addresses one unchanged table name per
+model. Actually run against this environment's own `audit_log` (50
+pre-existing rows) and `platform_audit_log` (1,616 pre-existing rows)
+during development, both counts confirmed unchanged afterward; the
+mechanism itself is additionally proven, repeatably, by replaying the exact
+recipe against a disposable scratch table in
+`packages/db/test/partitioning.spec.ts`.
+
+**`signature_events` (3.5.3) was assessed and deliberately NOT
+partitioned** — it was never built with a composite, partition-key-
+inclusive PK (unlike the three tables above), and its growth is
+structurally bounded very differently (a handful of events per signed
+document, not one row per employee per day or per mutating action
+system-wide) — a scale decision, not a safety one, documented directly on
+the model.
+
+**RLS + immutability hold identically on partitions — verified empirically
+against real Postgres BEFORE committing to the design**, not assumed: a
+policy declared on the partitioned PARENT applies transparently to every
+partition when queried through it (the only way Prisma ever addresses
+these tables); a GRANT on the parent does NOT propagate to a partition
+addressed directly by name (so a partition is, if anything, MORE locked
+down by default — there's no code path that would ever reach for one
+directly); `audit_log`'s DB-level `REVOKE UPDATE, DELETE FROM hrm_app`
+needs to be issued only ONCE, on the parent, and blocks mutation for every
+row regardless of which month's partition it lives in — proven for both an
+existing OLD partition and a freshly-bootstrapped FUTURE one.
+
+**Automated partition management — no manual partition creation, ever.**
+`hrm_ensure_range_partitions`, a reusable, idempotent `plpgsql` function
+(the ONE place partition-creation DDL is expressed, called by both the
+migration's own bootstrap and the runtime job below), explicitly
+`REVOKE`d from `PUBLIC` on top of `hrm_app` structurally holding no
+`CREATE` privilege at all. `PartitionMaintenanceService`
+(`apps/api/src/partitioning`) is the SAME scheduled-BullMQ-orchestrator
+shape every prior scheduled job in this codebase establishes — a daily job
+keeps each managed table's partitions created from (current month - 1)
+through (current month + that table's own configured `lookaheadMonths`),
+plus a manual `POST /platform/partitioning/ensure` trigger. Proven
+end to end: raising a table's lookahead and triggering `/ensure` creates a
+partition 11 months out, and a REAL write to that far-future date
+immediately succeeds afterward.
+
+**Partition pruning proven, not assumed** — a real `EXPLAIN` on a
+one-month time-range query, against `audit_log` seeded across several
+months, mentions ONLY that month's partition in the plan, nothing else.
+
+**Archival/retention** — `PartitionArchivalService`, the same scheduled-job
+shape (monthly), plus a manual `POST /platform/partitioning/archive`
+trigger: for each table with `archiveEnabled` (config in the new
+`PartitionedTableConfig`, platform-wide, no RLS — same "platform catalog"
+exemption `CountryPack` already establishes), finds partitions aged past
+that table's `retentionMonths` and not yet archived, exports every row
+FIRST (gzip JSONL, SHA-256 checksummed, uploaded via the SAME
+`StorageService`/MinIO seam 1.1 established) and ONLY once that upload
+durably succeeds does it detach + drop the partition + record an
+`ArchivedPartition` row, all three atomically in one transaction — a failed
+export never touches the hot table, and a mid-way failure after upload
+rolls the detach/drop/record back together, never leaving a partition
+"detached but unrecorded." Retrieval is a documented path: `GET
+/platform/partitioning/archives` + `GET .../:id/download` (the same
+`StreamableFile` pattern `payroll.controller.ts`'s bank-export/payslip
+downloads already use). Proven that archiving one partition never disturbs
+RLS/immutability for the data that remains in a DIFFERENT, non-aged
+partition.
+
+**The Phase 6.1 GDPR/data-residency seam, honestly scoped.**
+`TenantRetentionOverride` (ordinary tenant-scoped table, RLS applies) lets
+a tenant-specific retention preference be set/read/removed today via
+`@PlatformRoute()` (`PARTITIONING_MANAGE`, dual-audited into both the
+target tenant's own `audit_log` and `PlatformAuditLog` — the SAME shape
+`PlatformTenantService.recordTenantAudit` already establishes) — but this
+is stated plainly as SEAM PLUMBING, not a completed per-tenant purge:
+`PartitionArchivalService`'s actual archival-eligibility decision reads
+only the PLATFORM-WIDE default, because a single partition physically
+holds every tenant's rows for that date range — there is no "archive this
+partition for tenant A but not tenant B" without a genuinely different,
+row-level purge mechanism, explicitly deferred to Phase 6.1.
+
+Two new platform permissions (`PARTITIONING_READ`/`PARTITIONING_MANAGE`,
+the SAME "READ broad (both roles), MANAGE narrow (owner-only)" split
+`BILLING_READ`/`_MANAGE` and `BRANDING_READ`/`_MANAGE` already establish).
+
+Scope discipline: RLS policies' own `USING`/`WITH CHECK` expressions,
+`withTenantContext`'s mechanism, and every existing attendance/audit/
+e-signature service's business logic are completely unmodified — this
+step is a physical-storage change plus new, additive management/archival
+machinery. Verified: `packages/db`'s full suite — **37 tests green** (28
+existing + 9 new in `partitioning.spec.ts`), against real local Postgres.
+`apps/api`'s full suite — **528 tests green** (521 existing + 7 new in
+`partitioning.e2e-spec.ts`), zero regressions — every pre-existing
+attendance/audit/e-signature spec file passes completely unmodified,
+proving this step is transparent to every existing caller. A real bug
+this step's OWN test run caught before it shipped: the migration's
+initial partition-bootstrap window (current month ± a small margin) was
+too narrow for this codebase's own existing fixed-date test fixtures
+(`attendance.e2e-spec.ts` writes hardcoded 2026 dates like `2026-04-01`)
+— "no partition of relation found for row" on a plain `INSERT`, a direct,
+concrete illustration of exactly the failure mode this step's automated
+partition-ahead-of-time job exists to prevent. Fixed by widening the
+migration's bootstrap logic to always cover at least the whole current
+calendar year through Q1 of the next one (in addition to whatever real
+historical/future data requires), verified by resetting the local dev DB
+from scratch and re-running the full suite clean. Full-repo `pnpm build`/
+`pnpm lint` green across all 8 workspace tasks. `apps/portal`/`apps/admin`
+untouched — this step is backend/infra-only, no UI surface (per this
+step's own scope).

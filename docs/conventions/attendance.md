@@ -201,19 +201,22 @@ MANUAL`. Either way it enqueues a fire-and-forget summary recompute for
   creation, the geo-fence config route, the biometric demo route) are
   `@AuditLog`'d directly.
 
-## Scale — the partition-ready design
+## Scale — the partition-ready design, now actually partitioned (5.2)
 
 - **`AttendanceRecord`'s primary key is the composite `(id, workDate)`** —
   the SAME shape `AuditLog` already established in 0.9, for the identical
   reason: Postgres requires the partition key to be part of every unique
-  constraint/primary key on a partitioned table. **The intended partition
-  key is `work_date`** — Phase 5.2 is expected to add the actual
-  `PARTITION BY RANGE (work_date)` migration (optionally sub-partitioned
-  `BY LIST` on `tenant_id` for very large tenants, per the original note
-  above the `Tenant` model in `schema.prisma`); this step's shape is
-  chosen so that migration lands as additive, not breaking. Verified
-  directly against `information_schema.table_constraints`/
-  `key_column_usage` in `attendance.e2e-spec.ts`.
+  constraint/primary key on a partitioned table. **The partition key is
+  `work_date`** — Phase 5.2 added the actual `PARTITION BY RANGE (work_date)`
+  migration (monthly grain; sub-partitioning `BY LIST` on `tenant_id` for a
+  very large tenant, floated in the original note above the `Tenant` model
+  in `schema.prisma`, was not needed at this step's scale), landing
+  additively, not breaking, exactly as this step's shape was chosen to
+  allow. See [partitioning-archival.md](./partitioning-archival.md) for
+  the full write-up. Verified directly against
+  `information_schema.table_constraints`/`key_column_usage` in
+  `attendance.e2e-spec.ts` (this step's own shape) and, for the actual
+  partitioning, `packages/db/test/partitioning.spec.ts`.
 - **Every index on `attendance_records` leads with `tenant_id`**
   (`@@index([tenantId, employeeId, workDate])`,
   `@@index([tenantId, branchId, workDate])`,

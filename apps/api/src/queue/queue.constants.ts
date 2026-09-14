@@ -10,3 +10,5 @@ export const LMS_CERTIFICATION_EXPIRY_QUEUE = 'lms-certification-expiry';
 export const WEBHOOK_DELIVERY_QUEUE = 'webhook-delivery';
 export const BILLING_SEAT_SYNC_QUEUE = 'billing-seat-sync';
 export const MIGRATION_QUEUE = 'migration';
+export const PARTITION_MAINTENANCE_QUEUE = 'partition-maintenance';
+export const PARTITION_ARCHIVAL_QUEUE = 'partition-archival';

@@ -105,6 +105,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/benefits.md`](./docs/conventions/benefits.md)                               | Benefits administration: plan config mirroring `PayrollComponentDefinition`, statutory schemes needing zero payroll-engine change, enrollment + optional workflow approval, the benefits→payroll input hand-off, cost reporting. (3.5.2)                                                                                                |
 | [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md)                       | E-signatures: the tamper-evident evidentiary trail (document hashing, DB-immutable events, a certificate), external token-scoped signing links, sequential/parallel signer sequencing, the Offer/Policy integrations, the compliance boundary, and the future e-sign-provider seam. (3.5.3)                                             |
 | [`docs/conventions/scaling-data-layer.md`](./docs/conventions/scaling-data-layer.md)           | Data-layer scale hardening: PgBouncer + the transaction-pooling/RLS safety proof, a real streaming read replica (RLS-identical + read-after-write), and tenant-scoped Redis caching (country packs, org structure, permissions) with immediate invalidation — plus the entitlement-caching attempt that was empirically reverted. (5.1) |
+| [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md)     | Native `PARTITION BY RANGE` for `attendance_records`/`audit_log`/`platform_audit_log` (additive conversion, RLS+immutability proven identical on partitions, partition pruning proven), the automated ahead-of-time partition-creation job, and the archival/retention mechanism + its Phase 6.1 GDPR seam. (5.2)                       |
 
 ## 5. Build log summary
 
@@ -561,6 +562,33 @@ Phase 0–3's foundation.
   timing-sensitive test class; the pooler is fully proven and is a
   one-env-var production cutover. See
   [`docs/conventions/scaling-data-layer.md`](./docs/conventions/scaling-data-layer.md).
+- **5.2** — Table partitioning + archival (Phase 5's second slice): turns ON
+  the native Postgres `PARTITION BY RANGE` partitioning `attendance_records`
+  (1.3) and `audit_log` (0.9) were deliberately built PARTITION-READY for
+  since day one — plus `platform_audit_log` (4.1), whose own doc comment
+  had explicitly flagged it for this same treatment — via one additive,
+  hand-written migration (rename-aside, recreate as a native partitioned
+  table with identical columns/PK/FKs/indexes/RLS/grants, bootstrap
+  partitions, copy every row, drop the old table); `signature_events` was
+  assessed and deliberately NOT partitioned (no partition-key-inclusive PK,
+  much lower/differently-bounded growth). RLS + `audit_log`'s DB-level
+  immutability proven to hold IDENTICALLY through the partitioned parent
+  (a GRANT on the parent does not even propagate to a partition addressed
+  directly by name — partitions are, if anything, more locked down by
+  default); partition pruning proven via a real `EXPLAIN`. An idempotent
+  `hrm_ensure_range_partitions` Postgres function (owner-only, `hrm_app` has
+  no `CREATE` privilege at all) backs a daily scheduled BullMQ job
+  (`PartitionMaintenanceService`) that keeps every managed table's
+  partitions created ahead of time — no manual partition creation, ever.
+  A monthly scheduled archival job (`PartitionArchivalService`) exports an
+  aged partition's rows (gzip JSONL, SHA-256 checksummed) to the SAME
+  MinIO/S3 seam 1.1 established, and ONLY once that upload durably
+  succeeds does it detach+drop the partition — proven to never disturb
+  RLS/immutability for the data that remains. `TenantRetentionOverride` is
+  the honestly-scoped Phase 6.1 GDPR/data-residency SEAM (settable/
+  readable, dual-audited) — not yet a completed per-tenant purge, since a
+  single partition holds every tenant's rows for its date range. See
+  [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md).
 
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
@@ -584,12 +612,17 @@ Phase 0–3's foundation.
       invalidation-on-write — plus one cache (entitlement) deliberately
       reverted after being empirically proven unsafe. See
       [`docs/conventions/scaling-data-layer.md`](./docs/conventions/scaling-data-layer.md).
-- [ ] **5.2** Partitioning — `audit_log`/`attendance_records`
-      `PARTITION BY RANGE` (both already built PARTITION-READY — composite
-      PKs — since 0.9/1.3, see
-      [`docs/conventions/audit-custom-fields.md`](./docs/conventions/audit-custom-fields.md)
-      and [`docs/conventions/attendance.md`](./docs/conventions/attendance.md)
-      — the actual partitioning migration itself is still deferred).
+- [x] **5.2** Table partitioning + archival — native `PARTITION BY RANGE`
+      (additive conversion) for `attendance_records`/`audit_log`/
+      `platform_audit_log`, RLS + `audit_log` DB-level immutability proven
+      identical on partitions, partition pruning proven; an automated,
+      idempotent ahead-of-time partition-creation job (no manual partition
+      creation, ever); age-based archival to object storage (export-then-
+      detach-then-drop, proven never to disturb remaining data) with a
+      configurable retention policy and the Phase 6.1 GDPR seam
+      (`TenantRetentionOverride`). `signature_events` assessed and
+      deliberately not partitioned (documented why). See
+      [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md).
 - [ ] **5.3** Kubernetes / horizontal autoscaling — the 0.10 resilience
       chassis's stateless-by-design posture (see
       [`docs/conventions/resilience.md`](./docs/conventions/resilience.md))

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TENANT_EDITIONS } from '../constants/feature-flags';
+import { PARTITIONED_TABLE_NAMES } from '../constants/partitioning';
 import { PLATFORM_ROLE_NAMES } from '../constants/platform-permissions';
 import { countryPackConfigSchema } from './country-pack.validator';
 
@@ -152,3 +153,24 @@ export const platformAuditQuerySchema = z.object({
   take: z.coerce.number().int().min(1).max(200).optional().default(50),
 });
 export type PlatformAuditQueryInput = z.infer<typeof platformAuditQuerySchema>;
+
+// --- Table partitioning + archival (step 5.2) --------------------------
+
+export const partitionedTableNameParamSchema = z.enum(PARTITIONED_TABLE_NAMES);
+
+export const updatePartitionedTableConfigRequestSchema = z
+  .object({
+    lookaheadMonths: z.number().int().min(1).max(24).optional(),
+    retentionMonths: z.number().int().min(1).max(1200).optional(),
+    archiveEnabled: z.boolean().optional(),
+  })
+  .strict()
+  .refine((value) => value.lookaheadMonths !== undefined || value.retentionMonths !== undefined || value.archiveEnabled !== undefined, {
+    message: 'At least one of lookaheadMonths/retentionMonths/archiveEnabled must be provided.',
+  });
+export type UpdatePartitionedTableConfigInput = z.infer<typeof updatePartitionedTableConfigRequestSchema>;
+
+export const upsertTenantRetentionOverrideRequestSchema = z.object({
+  retentionMonths: z.number().int().min(1).max(1200),
+});
+export type UpsertTenantRetentionOverrideInput = z.infer<typeof upsertTenantRetentionOverrideRequestSchema>;

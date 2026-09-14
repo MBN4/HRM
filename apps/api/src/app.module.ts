@@ -32,6 +32,7 @@ import { HelpdeskModule } from './helpdesk/helpdesk.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { LmsModule } from './lms/lms.module';
 import { IntegrationsModule } from './integrations/integrations.module';
+import { PartitioningModule } from './partitioning/partitioning.module';
 import { PlatformModule } from './platform/platform.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
@@ -115,6 +116,13 @@ import { WorkflowModule } from './workflow/workflow.module';
     // via signer `order`), the tamper-evident evidentiary trail, and the
     // Offer/Policy integrations. See docs/conventions/e-signatures.md.
     EsignatureModule,
+    // Step 5.2 (Phase 5) — table partitioning + archival: the automated
+    // partition-creation job and the age-based archival-to-object-storage
+    // job for attendance_records/audit_log/platform_audit_log (the actual
+    // native PARTITION BY RANGE conversion lives in packages/db's
+    // partition_high_growth_tables migration). See
+    // docs/conventions/partitioning-archival.md.
+    PartitioningModule,
   ],
   controllers: [AppController],
   providers: [AppService],

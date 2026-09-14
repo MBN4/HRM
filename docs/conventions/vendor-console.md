@@ -352,8 +352,9 @@ live-aggregate heavy tables."
 tenant-scoped and NOT subject to RLS, for the same reason. PARTITION-READY
 shape (composite `(id, occurredAt)` PK), the same reasoning `AuditLog`
 (0.9) already documents for itself — this table is append-only and
-unbounded too, though the actual `PARTITION BY RANGE` migration remains
-Phase 5.2 for both.
+unbounded too, and Phase 5.2 added the actual `PARTITION BY RANGE
+(occurred_at)` migration for both (plus `attendance_records`) — see
+[partitioning-archival.md](./partitioning-archival.md).
 
 ## 10. `apps/admin` — the console UI
 

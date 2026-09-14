@@ -24,6 +24,9 @@ import { PlatformImpersonationService } from './impersonation/platform-impersona
 import { MigrationModule } from '../migration/migration.module';
 import { PlatformMigrationController } from './migration/platform-migration.controller';
 import { PlatformMigrationService } from './migration/platform-migration.service';
+import { PartitioningModule } from '../partitioning/partitioning.module';
+import { PlatformPartitioningController } from './partitioning/platform-partitioning.controller';
+import { PlatformPartitioningService } from './partitioning/platform-partitioning.service';
 import { PlatformTenantController } from './tenants/platform-tenant.controller';
 import { PlatformTenantService } from './tenants/platform-tenant.service';
 import { PlatformUsageController } from './usage/platform-usage.controller';
@@ -62,7 +65,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
   // MigrationModule (3.5.1) — reused for `ImportBatchService` so
   // `PlatformMigrationService` never re-implements upload/dry-run/commit
   // orchestration a second time. See docs/conventions/data-migration.md.
-  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule, CountryPacksModule],
+  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule, CountryPacksModule, PartitioningModule],
   controllers: [
     PlatformAuthController,
     PlatformAdminController,
@@ -74,6 +77,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformBillingController,
     PlatformBrandingController,
     PlatformMigrationController,
+    PlatformPartitioningController,
   ],
   providers: [
     PasswordService,
@@ -89,6 +93,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformBillingService,
     PlatformBrandingService,
     PlatformMigrationService,
+    PlatformPartitioningService,
   ],
   exports: [PlatformAuditRecordService],
 })

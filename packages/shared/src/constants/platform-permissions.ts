@@ -42,6 +42,10 @@ export const PLATFORM_PERMISSIONS = {
   BRANDING_MANAGE: 'platform.branding.manage',
   /** Step 3.5.1 — run/oversee the data migration toolkit on a tenant's behalf during onboarding (upload, dry-run, commit, review error reports). Onboarding-support work, the same non-destructive risk tier IMPERSONATION_START already documents for itself — held by BOTH roles. */
   TENANT_MIGRATION_MANAGE: 'platform.tenant.migration.manage',
+  /** Step 5.2 — read partition status/config, archived-partition listings, and download an archived export. Support-safe (read-only), the same "READ is broad, MANAGE is narrow" split BILLING_READ/BRANDING_READ already establish. */
+  PARTITIONING_READ: 'platform.partitioning.read',
+  /** Step 5.2 — change a table's default lookahead/retention/archive-enabled config, set a tenant-specific retention override, or manually trigger the partition-creation/archival jobs. OWNER-only, same posture as BILLING_MANAGE/BRANDING_MANAGE. */
+  PARTITIONING_MANAGE: 'platform.partitioning.manage',
 } as const;
 
 export type PlatformPermissionKey = (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];
@@ -68,5 +72,6 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleNameKey, readonly Pla
     PLATFORM_PERMISSIONS.BILLING_READ,
     PLATFORM_PERMISSIONS.BRANDING_READ,
     PLATFORM_PERMISSIONS.TENANT_MIGRATION_MANAGE,
+    PLATFORM_PERMISSIONS.PARTITIONING_READ,
   ],
 };
