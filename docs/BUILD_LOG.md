@@ -3173,3 +3173,95 @@ from scratch and re-running the full suite clean. Full-repo `pnpm build`/
 `pnpm lint` green across all 8 workspace tasks. `apps/portal`/`apps/admin`
 untouched — this step is backend/infra-only, no UI surface (per this
 step's own scope).
+
+## 3.5.5 — Pakistan country pack
+
+(2026-09-14) — `packages/db/src/seed-country-packs.ts`,
+`apps/api/test/country-packs.e2e-spec.ts`, `apps/api/test/benefits.e2e-spec.ts`.
+See [`docs/conventions/pakistan-pack.md`](./conventions/pakistan-pack.md)
+for the full write-up. Pure AUTHORING work on the EXISTING, unmodified
+Country Pack schema and rules engine — zero changes anywhere in
+`apps/api/src/country-packs`, `apps/api/src/payroll`, or
+`packages/shared/src/validators`. Replaces the ad-hoc "Pakistan-style" test
+pack step 3.5.2 created directly inside `benefits.e2e-spec.ts` (1%/5% EOBI
+only, no tax, no required fields, never seeded) with a REAL, production-
+shaped Pakistan pack, seeded exactly like the US/QA reference packs.
+
+**THE COMPLIANCE BOUNDARY, made more insistent than US/QA's own
+"illustrative, not certified" framing**: every legally-sensitive figure —
+income tax slab thresholds/rates, EOBI contribution rates + monthly wage
+ceiling, Provident Fund rate — carries its own explicit `// VERIFY:`
+comment naming exactly what to confirm and against what source (FBR, EOBI,
+the client's own PF trust deed) before this pack runs real payroll. The
+pack's STRUCTURE (which brackets/components exist, how they combine, what's
+required at onboarding) is production-ready; its FIGURES are not, and are
+never presented as if they were.
+
+**What's in the pack**: PKR / `DD/MM/YYYY` / `MONDAY` first-day-of-week (a
+genuinely different choice from both existing packs, which both use
+`SUNDAY` regardless of their own weekend); `defaultLanguage: 'ur'` /
+`rtl: true` — a deliberate choice proving the i18n framework's RTL wiring
+generalizes beyond Qatar's Arabic (`ur` was already sitting unused in
+`@hrm/shared`'s `RTL_LANGUAGES` whitelist since 0.9); Sat/Sun weekend, 40
+standard weekly hours, a VERIFY-flagged 2.0x overtime multiplier (Factories
+Act double-rate, genuinely different from both US's 1.5x and Qatar's
+1.25x); a public-holiday calendar with SIX real fixed-date 2026 national
+holidays (Kashmir Solidarity Day, Pakistan Day, Labour Day, Independence
+Day, Iqbal Day, Quaid-e-Azam Day) plus FOUR lunar (Eid-ul-Fitr, Eid-ul-Adha,
+Ashura, Eid Milad-un-Nabi) holidays seeded with astronomically-projected
+placeholder dates and an explicit "(VERIFY — approx., confirm via
+moon-sighting/govt. notification)" suffix baked into the holiday's own
+`name` field — the one schema field available to carry that warning
+through to a resolved pack, since `publicHolidaySchema` has no "TBD date"
+concept; a single progressive `income_tax` tax layer (the SAME
+`PROGRESSIVE_BRACKETS` algorithm the US federal layer already uses — zero
+engine change, and structurally different in SHAPE from the US pack, which
+has no equivalent to a "state income tax" layer since Pakistan has none);
+a wage-ceiling-based EOBI pair (`eobi_employee`/`eobi_employer`,
+`PERCENTAGE` + `cap`, the SAME shape the US pack's FICA social-security
+layer already uses for its own wage-base cap) plus a Provident Fund pair
+(`provident_fund_employee`/`_employer`), four statutory components total —
+preserving the ad-hoc 3.5.2 fixture's own EOBI rates (1%/5%) while ADDING
+the wage ceiling that fixture never had; `["CNIC","NTN"]` required employee
+fields (CNIC mirrors US's `SSN`/Qatar's `QATAR_ID`; NTN mirrors US's `W4`)
+— enforced by `EmployeeService`'s existing, unmodified required-field
+validation with zero new code; a `payslipTemplate` in Urdu (6 line items,
+employer-only components correctly omitted, the same posture the US pack's
+own template already takes for `futa`); `payrollMode: 'CALCULATE'`;
+`hostingRegionHint: 'me-south-1'` (advisory only, flagged for a real
+Phase 6.1 data-residency feature to actually address for PK's banking/
+telecom sectors — not implemented here).
+
+**Test suite updates**: `country-packs.e2e-spec.ts`'s core "same code path,
+divergent behavior driven entirely by data" proof (previously US-vs-QA
+only) gains a THIRD branch and test — PK resolving PKR/Sat-Sun/RTL-Urdu/the
+real tax+statutory components/CNIC+NTN, through the identical
+`GET /country-packs/effective` endpoint. `benefits.e2e-spec.ts`'s ad-hoc
+`PK_PACK_CONFIG` constant and its direct `countryPack.create` call are
+removed entirely — `seedCountryPacks(prisma)` (already called in that
+file's own `beforeAll`) now seeds the real pack, and its own
+`resetFixtures` no longer deletes the `PK` `CountryPack` row (a real,
+permanent reference pack now, like US/QA never being deleted either). Its
+statutory-schemes-differ test and real-payroll-run test are rewritten to
+assert against the real pack's own four statutory components and hand-
+computed income-tax/EOBI/PF amounts (derived directly from the pack's own
+declared rates/brackets/cap, explicitly NOT asserted as legally correct —
+the test proves the WIRING, the pack is the single source of truth for the
+numbers).
+
+Verified: `PAKISTAN_PACK` parses cleanly against the existing
+`countryPackConfigSchema` (confirmed directly via a standalone parse
+check, not just inferred). `packages/db`'s full suite — 37/37 tests green,
+unaffected (this step needed no schema/migration change at all).
+`apps/api`'s full suite — 529 tests total (528 existing + 1 new in
+`country-packs.e2e-spec.ts`; `benefits.e2e-spec.ts` stays at 14 tests, two
+rewritten in place, net zero new/removed) — 527 passed / 2 failed on the
+full-suite run, the SAME pre-existing `migration.e2e-spec.ts` timing flake
+this suite already carries (see 5.1's own BUILD_LOG entry) and unrelated
+to this step (that file never touches country packs/payroll/benefits at
+all); confirmed by an isolated rerun passing 10/10 cleanly. Zero
+regressions — every pre-existing US/QA-driven assertion in both touched
+files passes completely unmodified, proving this step changed nothing
+about how the two existing reference packs behave. Full-repo `pnpm build`/
+`pnpm lint` green across all 8 workspace tasks. `apps/portal`/`apps/admin`
+untouched — this step is backend/data-only, no UI surface.

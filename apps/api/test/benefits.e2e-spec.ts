@@ -30,35 +30,11 @@ const PK_COUNTRY_CODE = 'PK';
 
 const jwt = new JwtService({ secret: process.env.JWT_SECRET });
 
-// An ad-hoc Pakistan-style reference pack — deliberately NOT added to
-// seed-country-packs.ts (0.5's own file), created directly the same way
-// payroll.e2e-spec.ts's own DELEGATE-mode proof pack is: a genuinely
-// different country from the two shipped reference packs (US/QA),
-// carrying an EOBI-style statutory pension component so this suite can
-// prove the SAME `computeStatutoryComponent` produces a THIRD country's
-// correct, different result with zero engine change.
-const PK_PACK_CONFIG: CountryPackConfig = {
-  locale: { currencyCode: 'PKR', currencySymbol: 'Rs', numberFormat: 'en-PK', dateFormat: 'DD/MM/YYYY', defaultLanguage: 'en', rtl: false, firstDayOfWeek: 'MONDAY' },
-  workingTime: { standardWeeklyHours: 40, weekendDays: ['SATURDAY', 'SUNDAY'], overtimeRules: { multiplier: 1.5 } },
-  leaveDefaults: { annualDays: 14, sickDays: 8, maternityDays: 90, paternityDays: 0 },
-  publicHolidays: {},
-  tax: { layers: [] },
-  statutory: {
-    components: [
-      // Employees' Old-Age Benefits Institution — illustrative, simplified
-      // rates (real EOBI is a small flat rupee amount per band, modeled
-      // here as a percentage of basic salary purely to demonstrate the
-      // SAME generic PERCENTAGE algorithm, asymmetric employee/employer
-      // rates, computed for a third country with zero engine change).
-      { name: 'eobi_employee', appliesTo: 'EMPLOYEE', kind: 'PERCENTAGE', base: 'basicSalary', rate: 0.01 },
-      { name: 'eobi_employer', appliesTo: 'EMPLOYER', kind: 'PERCENTAGE', base: 'basicSalary', rate: 0.05 },
-    ],
-  },
-  requiredEmployeeFields: [],
-  payslipTemplate: { language: 'en', lineItems: [{ key: 'gross', label: 'Gross' }, { key: 'net', label: 'Net' }] },
-  payrollMode: 'CALCULATE',
-  hostingRegionHint: 'ap-south-1',
-};
+// Pakistan is now a REAL, seeded reference pack (step 3.5.4 — see
+// docs/conventions/pakistan-pack.md) — `seedCountryPacks()` below seeds it
+// exactly like US/QA, replacing the ad-hoc pack this suite used to create
+// directly (3.5.2). No local PK_PACK_CONFIG needed anymore; `branchPkId`
+// below just points at the real seeded `PK` country code.
 
 const ZERO_TAX_COUNTRY_CODE = 'ZB';
 
@@ -82,7 +58,9 @@ const ZERO_TAX_PACK_CONFIG: CountryPackConfig = {
 
 async function resetFixtures() {
   await prisma.tenant.deleteMany({ where: { slug: { in: [TENANT_A_SLUG, TENANT_B_SLUG] } } });
-  await prisma.countryPack.deleteMany({ where: { countryCode: { in: [PK_COUNTRY_CODE, ZERO_TAX_COUNTRY_CODE] } } });
+  // PK is now a real, permanent seeded reference pack (like US/QA) — never
+  // deleted here, only the test-specific ZERO_TAX pack is cleaned up.
+  await prisma.countryPack.deleteMany({ where: { countryCode: ZERO_TAX_COUNTRY_CODE } });
 }
 
 function hostFor(slug: string) {
@@ -177,8 +155,7 @@ describe('benefits administration (e2e)', () => {
     await app.init();
 
     await resetFixtures();
-    await seedCountryPacks(prisma);
-    await prisma.countryPack.create({ data: { countryCode: PK_COUNTRY_CODE, version: 1, isActive: true, config: PK_PACK_CONFIG } });
+    await seedCountryPacks(prisma); // seeds the REAL US/QA/PK reference packs
     await prisma.countryPack.create({ data: { countryCode: ZERO_TAX_COUNTRY_CODE, version: 1, isActive: true, config: ZERO_TAX_PACK_CONFIG } });
 
     for (const [base, rate] of [
@@ -470,22 +447,58 @@ describe('benefits administration (e2e)', () => {
 
       const pkRes = await get(`/benefits/statutory?branchId=${branchPkId}`, tokenAdminA).expect(200);
       expect(pkRes.body.countryCode).toBe('PK');
-      expect(pkRes.body.components.map((c: { name: string }) => c.name)).toEqual(['eobi_employee', 'eobi_employer']);
+      expect(pkRes.body.components.map((c: { name: string }) => c.name)).toEqual([
+        'eobi_employee',
+        'eobi_employer',
+        'provident_fund_employee',
+        'provident_fund_employer',
+      ]);
     });
 
-    it('a real PK payroll run computes the EOBI contribution correctly — same engine, third country, zero code change', async () => {
-      const empPk = await makeEmployeeWithSalary(branchPkId, 8000, 'PKR');
+    it('a real PK payroll run computes income tax + EOBI + Provident Fund correctly — same engine, third country, zero code change', async () => {
+      // Proves the WIRING (the same unmodified rules engine correctly
+      // applies the real Pakistan pack's income tax bracket + two
+      // wage-ceiling-based/percentage statutory components to a real
+      // payroll run) — NOT that these figures are legally correct amounts.
+      // Every rate/threshold/cap below is copied directly from the pack's
+      // own documented VERIFY-placeholder figures (see
+      // seed-country-packs.ts's PAKISTAN_PACK) — this test would need to
+      // change the moment those placeholders are replaced with real,
+      // verified law, which is exactly the point: the pack is the single
+      // source of truth, this test just proves the engine reads it correctly.
+      const basicSalary = 150_000;
+      const empPk = await makeEmployeeWithSalary(branchPkId, basicSalary, 'PKR');
       const runId = await runPayroll(branchPkId, 2026, 6);
       const line = await lineFor(runId, empPk.id);
 
-      const expectedEmployee = Math.round(8000 * 0.01 * 100) / 100;
-      const expectedEmployer = Math.round(8000 * 0.05 * 100) / 100;
-      expect(Number(line.netPay)).toBeCloseTo(8000 - expectedEmployee, 2);
-      expect(Number(line.employerCost)).toBeCloseTo(8000 + expectedEmployer, 2);
+      // income_tax: PROGRESSIVE_BRACKETS on annualSalary (150,000 * 12 =
+      // 1,800,000), de-annualized by /12 back to a monthly figure (the
+      // existing, unmodified "annualize -> compute -> de-annualize"
+      // engine behavior — see docs/conventions/payroll.md):
+      //   0-600,000 @ 0%      = 0
+      //   600,000-1,200,000 @ 5%  = 30,000
+      //   1,200,000-1,800,000 @ 15% = 90,000
+      //   annual total = 120,000 -> monthly = 10,000
+      const expectedIncomeTax = 10_000;
+      // eobi_*: PERCENTAGE of basicSalary capped at the pack's 29,000 wage ceiling.
+      const eobiBase = Math.min(basicSalary, 29_000);
+      const expectedEobiEmployee = Math.round(eobiBase * 0.01 * 100) / 100;
+      const expectedEobiEmployer = Math.round(eobiBase * 0.05 * 100) / 100;
+      // provident_fund_*: PERCENTAGE of basicSalary, no cap.
+      const expectedPfEmployee = Math.round(basicSalary * 0.0833 * 100) / 100;
+      const expectedPfEmployer = Math.round(basicSalary * 0.0833 * 100) / 100;
+
+      const expectedNet = basicSalary - expectedIncomeTax - expectedEobiEmployee - expectedPfEmployee;
+      const expectedEmployerCost = basicSalary + expectedEobiEmployer + expectedPfEmployer;
+      expect(Number(line.netPay)).toBeCloseTo(expectedNet, 2);
+      expect(Number(line.employerCost)).toBeCloseTo(expectedEmployerCost, 2);
 
       const breakdown = line.componentBreakdown as { key: string; type: string; amount: number }[];
-      expect(breakdown.find((c) => c.key === 'eobi_employee')).toMatchObject({ type: 'EMPLOYEE_STATUTORY', amount: expectedEmployee });
-      expect(breakdown.find((c) => c.key === 'eobi_employer')).toMatchObject({ type: 'EMPLOYER_COST', amount: expectedEmployer });
+      expect(breakdown.find((c) => c.key === 'income_tax')).toMatchObject({ type: 'TAX', amount: expectedIncomeTax });
+      expect(breakdown.find((c) => c.key === 'eobi_employee')).toMatchObject({ type: 'EMPLOYEE_STATUTORY', amount: expectedEobiEmployee });
+      expect(breakdown.find((c) => c.key === 'eobi_employer')).toMatchObject({ type: 'EMPLOYER_COST', amount: expectedEobiEmployer });
+      expect(breakdown.find((c) => c.key === 'provident_fund_employee')).toMatchObject({ type: 'EMPLOYEE_STATUTORY', amount: expectedPfEmployee });
+      expect(breakdown.find((c) => c.key === 'provident_fund_employer')).toMatchObject({ type: 'EMPLOYER_COST', amount: expectedPfEmployer });
     });
   });
 

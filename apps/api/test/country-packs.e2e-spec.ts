@@ -49,6 +49,7 @@ describe('country packs (e2e)', () => {
   let tenantBId: string;
   let branchAUsId: string;
   let branchAQaId: string;
+  let branchAPkId: string;
   let branchAUnsupportedId: string;
   let branchBQaId: string;
 
@@ -82,11 +83,15 @@ describe('country packs (e2e)', () => {
     const branchAQa = await prisma.branch.create({
       data: { tenantId: tenantAId, name: 'A Doha Office', countryCode: 'QA', timezone: 'Asia/Qatar' },
     });
+    const branchAPk = await prisma.branch.create({
+      data: { tenantId: tenantAId, name: 'A Karachi Office', countryCode: 'PK', timezone: 'Asia/Karachi' },
+    });
     const branchAUnsupported = await prisma.branch.create({
       data: { tenantId: tenantAId, name: 'A Unsupported Country Office', countryCode: 'ZZ', timezone: 'UTC' },
     });
     branchAUsId = branchAUs.id;
     branchAQaId = branchAQa.id;
+    branchAPkId = branchAPk.id;
     branchAUnsupportedId = branchAUnsupported.id;
 
     const branchBQa = await prisma.branch.create({
@@ -177,6 +182,30 @@ describe('country packs (e2e)', () => {
         'grsia_pension_employer',
       ]);
       expect(res.body.requiredEmployeeFields).toEqual(['QATAR_ID', 'VISA_SPONSORSHIP']);
+    });
+
+    it('a PK branch resolves PKR / Sat-Sun weekend / RTL Urdu / PK income tax + EOBI + Provident Fund / CNIC+NTN required', async () => {
+      // The real, production-shaped Pakistan pack (step 3.5.4) — see
+      // docs/conventions/pakistan-pack.md — replacing the ad-hoc PK test
+      // pack 3.5.2's benefits e2e suite used to create directly. Same
+      // engine, THIRD country, proving the divergence claim generically —
+      // its figures are documented VERIFY placeholders, not certified law
+      // (see seed-country-packs.ts's own PAKISTAN_PACK doc comment).
+      const res = await getEffective(TENANT_A_SLUG, tokenAdminA, branchAPkId).expect(200);
+
+      expect(res.body.locale.currencyCode).toBe('PKR');
+      expect(res.body.locale.defaultLanguage).toBe('ur');
+      expect(res.body.locale.rtl).toBe(true);
+      expect(res.body.workingTime.weekendDays.slice().sort()).toEqual(['SATURDAY', 'SUNDAY']);
+      expect(res.body.tax.layers.map((l: { name: string }) => l.name)).toEqual(['income_tax']);
+      expect(res.body.statutory.components.map((c: { name: string }) => c.name)).toEqual([
+        'eobi_employee',
+        'eobi_employer',
+        'provident_fund_employee',
+        'provident_fund_employer',
+      ]);
+      expect(res.body.requiredEmployeeFields).toEqual(['CNIC', 'NTN']);
+      expect(res.body.payrollMode).toBe('CALCULATE');
     });
 
     it('a branch in a country with no active pack fails loudly (404), not with a silent generic default', async () => {

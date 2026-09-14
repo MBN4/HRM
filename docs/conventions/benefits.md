@@ -109,6 +109,11 @@ started; this step's own job is narrower:
   pack — created directly by `benefits.e2e-spec.ts`, never added to
   `seed-country-packs.ts`, the SAME "test-specific fixture" precedent
   `payroll.e2e-spec.ts`'s own DELEGATE-mode pack already established.
+  **Superseded in step 3.5.5**: this ad-hoc fixture was replaced with a
+  real, production-shaped, seeded Pakistan pack (wage-ceiling-based EOBI,
+  a real income tax layer, a Provident Fund component, CNIC/NTN required)
+  — `benefits.e2e-spec.ts` now resolves `PK` against the real seed instead
+  of creating its own config. See [pakistan-pack.md](./pakistan-pack.md).
 
 **Compliance boundary — same as payroll.md's own.** Legal correctness of a
 country's statutory schemes (rates, which employees a scheme actually

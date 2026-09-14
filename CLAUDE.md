@@ -104,6 +104,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md)                   | Data migration & onboarding toolkit: dry-run-via-rollback safety model, importers routed through the real Employee/Leave services, natural-key idempotency, manager-by-code linking, column-mapping templates, uploaded-file purge, tenant self-serve vs. platform-on-behalf-of. (3.5.1)                                                |
 | [`docs/conventions/benefits.md`](./docs/conventions/benefits.md)                               | Benefits administration: plan config mirroring `PayrollComponentDefinition`, statutory schemes needing zero payroll-engine change, enrollment + optional workflow approval, the benefits→payroll input hand-off, cost reporting. (3.5.2)                                                                                                |
 | [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md)                       | E-signatures: the tamper-evident evidentiary trail (document hashing, DB-immutable events, a certificate), external token-scoped signing links, sequential/parallel signer sequencing, the Offer/Policy integrations, the compliance boundary, and the future e-sign-provider seam. (3.5.3)                                             |
+| [`docs/conventions/pakistan-pack.md`](./docs/conventions/pakistan-pack.md)                     | A real, production-shaped Pakistan `CountryPack` (PKR, Sat-Sun weekend, RTL Urdu, a progressive income tax layer, wage-ceiling-based EOBI + Provident Fund, CNIC/NTN required), replacing the ad-hoc 3.5.2 test pack — every legally-sensitive figure an explicit, documented VERIFY-placeholder. (3.5.5)                               |
 | [`docs/conventions/scaling-data-layer.md`](./docs/conventions/scaling-data-layer.md)           | Data-layer scale hardening: PgBouncer + the transaction-pooling/RLS safety proof, a real streaming read replica (RLS-identical + read-after-write), and tenant-scoped Redis caching (country packs, org structure, permissions) with immediate invalidation — plus the entitlement-caching attempt that was empirically reverted. (5.1) |
 | [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md)     | Native `PARTITION BY RANGE` for `attendance_records`/`audit_log`/`platform_audit_log` (additive conversion, RLS+immutability proven identical on partitions, partition pruning proven), the automated ahead-of-time partition-creation job, and the archival/retention mechanism + its Phase 6.1 GDPR seam. (5.2)                       |
 
@@ -538,6 +539,38 @@ Phase 0–3's foundation.
   directly in the UI, the same compliance-boundary framing payroll.md/
   benefits.md already take for their own domains. See
   [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md).
+
+- **3.5.5** — A real, production-shaped Pakistan `CountryPack` — pure
+  AUTHORING work, zero engine/schema/evaluator changes: replaces the ad-hoc
+  "Pakistan-style" test pack step 3.5.2 created directly inside
+  `benefits.e2e-spec.ts` (never seeded) with a real pack in
+  `seed-country-packs.ts`, exactly like US/QA. PKR/Sat-Sun weekend/RTL
+  Urdu (`locale.rtl: true` — proving the i18n framework's RTL wiring
+  generalizes beyond Qatar's Arabic, since `ur` was already sitting unused
+  in `@hrm/shared`'s RTL whitelist)/`MONDAY` first-day-of-week (a genuinely
+  different choice from both existing packs); a single progressive
+  `income_tax` layer (the SAME `PROGRESSIVE_BRACKETS` algorithm the US
+  federal layer already uses); a wage-ceiling-based EOBI pair
+  (`PERCENTAGE`+`cap`, the SAME shape the US pack's FICA social-security
+  layer already uses for its own wage-base cap) plus a Provident Fund pair,
+  four statutory components total; `["CNIC","NTN"]` required employee
+  fields (the same opaque-key mechanism `EmployeeService` already enforces
+  for US/QA, zero new code); a Sat/Sun-weekend/Urdu-Islamic public-holiday
+  calendar with six real fixed-date national holidays and four lunar
+  (Eid/Ashura) holidays seeded as explicit, clearly-flagged
+  yearly-reconfirmation placeholders (the schema has no "TBD date" — the
+  warning lives in the holiday's own `name` field). **Every
+  legally-sensitive figure — tax slabs, EOBI rate/ceiling, PF rate — carries
+  its own explicit `// VERIFY:` comment** naming exactly what to confirm
+  and against what source (FBR/EOBI/the client's PF trust deed) before real
+  payroll runs against it — a more insistent version of the "illustrative,
+  not certified" framing US/QA already carry, since this pack is meant as a
+  real client's actual starting point. `country-packs.e2e-spec.ts`'s core
+  "same code path, divergent behavior" proof gains a THIRD branch (US/QA/PK)
+  through the identical endpoint; `benefits.e2e-spec.ts`'s statutory-schemes
+  proof and payroll-run proof are rewritten against the real pack's own
+  declared rates instead of the retired ad-hoc fixture. See
+  [`docs/conventions/pakistan-pack.md`](./docs/conventions/pakistan-pack.md).
   Phase 3.5 remaining: **3.5.4** (statutory reporting) is deferred.
 
 - **5.1** — Data-layer scale hardening (Phase 5's first slice): a real
@@ -603,6 +636,15 @@ Phase 0–3's foundation.
       integrations, and the documented compliance boundary. See
       [`docs/conventions/e-signatures.md`](./docs/conventions/e-signatures.md).
 - [ ] **3.5.4** Statutory reporting — deferred.
+- [x] **3.5.5** Pakistan country pack — a real, production-shaped
+      `CountryPack` (PKR, Sat-Sun weekend, RTL Urdu, a progressive income
+      tax layer, wage-ceiling-based EOBI + Provident Fund, CNIC/NTN
+      required) replacing the ad-hoc 3.5.2 test pack, authored entirely
+      with the EXISTING pack schema/rules engine — zero engine/schema/
+      evaluator changes. Every legally-sensitive figure is an explicit,
+      documented VERIFY-placeholder requiring sign-off from a qualified
+      Pakistani tax/payroll professional before real payroll use. See
+      [`docs/conventions/pakistan-pack.md`](./docs/conventions/pakistan-pack.md).
 
 - [x] **5.1** Data-layer scale hardening — PgBouncer connection pooling
       (proven RLS-safe under forced connection reuse), a real Postgres

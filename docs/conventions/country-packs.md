@@ -105,7 +105,14 @@ seed-country-packs.ts`, `seedCountryPacks()`, called by `prisma/seed.ts`;
   end-of-service gratuity as the statutory component/
   `["QATAR_ID","VISA_SPONSORSHIP"]` required — proving the identical
   schema and resolution/merge/rules-engine code drives opposite real
-  behavior.
+  behavior. **A third, production-shaped reference pack — Pakistan (step
+  3.5.5)** — was added later: PKR/Sat-Sun weekend/RTL Urdu/a real
+  progressive income tax layer + wage-ceiling-based EOBI + Provident Fund/
+  `["CNIC","NTN"]` required, replacing the ad-hoc PK test pack 3.5.2's
+  benefits suite used to create directly. Its figures are explicit,
+  documented VERIFY-placeholders (not just illustrative like US/QA) — see
+  [pakistan-pack.md](./pakistan-pack.md) for the full write-up and its own
+  compliance-boundary framing.
 - **Demo endpoints** (`apps/api/src/country-packs/country-packs.controller.ts`):
   `GET /country-packs/effective?branchId=` (defaults to the caller's
   context branch) is this step's required proof endpoint; `GET
