@@ -38,6 +38,9 @@ patches:
       - op: replace
         path: /data/S3_BUCKET
         value: hrm-prod-us-east-1
+      - op: replace
+        path: /data/DEPLOYMENT_REGION
+        value: us-east-1
   - target:
       kind: ConfigMap
       name: hrm-portal-config

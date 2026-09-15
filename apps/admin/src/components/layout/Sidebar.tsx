@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, Paintbrush, ShieldAlert, Upload, UserCog } from 'lucide-react';
+import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, Paintbrush, ShieldAlert, ShieldCheck, Upload, UserCog } from 'lucide-react';
 import { usePlatformAuth } from '../../lib/auth/PlatformAuthContext';
 
 const NAV_ITEMS = [
@@ -17,6 +17,10 @@ const NAV_ITEMS = [
   { href: '/migration', label: 'Data import', icon: Upload, ownerOnly: false },
   { href: '/impersonation', label: 'Impersonation', icon: ShieldAlert, ownerOnly: false },
   { href: '/audit', label: 'Audit trail', icon: FileClock, ownerOnly: false },
+  // Data privacy & residency (step 6.1) — PRIVACY_READ is held by both
+  // platform roles, the same "READ is broad" posture every other READ nav
+  // item here already follows. See docs/conventions/privacy-residency.md.
+  { href: '/privacy', label: 'Data privacy', icon: ShieldCheck, ownerOnly: false },
   { href: '/admins', label: 'Platform admins', icon: UserCog, ownerOnly: true },
 ] as const;
 

@@ -3,7 +3,17 @@
 # packages/db/src/seed-country-packs.ts and
 # docs/conventions/pakistan-pack.md). Mirrors overlays/us-east-1/ exactly
 # — see that file's own header comment for the topology this is one half
-# of.
+# of. Phase 6.1 — this is the CONCRETE residency case for the first real
+# client (Pakistan): a Pakistan-hosted tenant is pinned here via
+# Tenant.hostingRegion = "me-south-1", and DEPLOYMENT_REGION below is what
+# makes TenantScopeInterceptor's residency guard actually REJECT a request
+# for any tenant NOT pinned to this region on this stack — see
+# docs/conventions/privacy-residency.md. Pakistan's own data-localization
+# posture (State Bank of Pakistan / PECA considerations for financial and
+# personal data) is a real, jurisdiction-specific legal question flagged
+# here as a VERIFY item — the SAME "explicit, documented VERIFY-placeholder"
+# discipline pakistan-pack.md already holds every legally-sensitive figure
+# to — not resolved by this overlay alone.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -32,6 +42,9 @@ patches:
       - op: replace
         path: /data/S3_BUCKET
         value: hrm-prod-me-south-1
+      - op: replace
+        path: /data/DEPLOYMENT_REGION
+        value: me-south-1
   - target:
       kind: ConfigMap
       name: hrm-portal-config

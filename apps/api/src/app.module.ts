@@ -35,6 +35,7 @@ import { LoggingModule } from './common/logging/logging.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PartitioningModule } from './partitioning/partitioning.module';
+import { PrivacyModule } from './privacy/privacy.module';
 import { PlatformModule } from './platform/platform.module';
 import { StatutoryReportingModule } from './statutory-reporting/statutory-reporting.module';
 import { QueueModule } from './queue/queue.module';
@@ -140,6 +141,13 @@ import { WorkflowModule } from './workflow/workflow.module';
     // being the first concrete country. See
     // docs/conventions/statutory-reporting.md.
     StatutoryReportingModule,
+    // Step 6.1 (Phase 6's first slice) — data privacy & residency:
+    // data-subject export/erasure (anonymize-within audit_log, never
+    // row-deleted), consent tracking, the processing register + retention
+    // policy engine (building on 5.2's TenantRetentionOverride seam), and
+    // the residency-enforcement guard wired into TenantScopeInterceptor.
+    // See docs/conventions/privacy-residency.md.
+    PrivacyModule,
   ],
   controllers: [AppController],
   providers: [AppService],

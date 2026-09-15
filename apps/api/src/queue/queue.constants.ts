@@ -13,3 +13,4 @@ export const MIGRATION_QUEUE = 'migration';
 export const PARTITION_MAINTENANCE_QUEUE = 'partition-maintenance';
 export const PARTITION_ARCHIVAL_QUEUE = 'partition-archival';
 export const STATUTORY_REPORT_QUEUE = 'statutory-report';
+export const PRIVACY_QUEUE = 'privacy';

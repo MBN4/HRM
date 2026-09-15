@@ -250,6 +250,12 @@ model Tenant {
   // docs/conventions/statutory-reporting.md).
   generatedReports GeneratedReport[]
 
+  // Step 6.1 — data privacy & residency (see
+  // docs/conventions/privacy-residency.md).
+  dataSubjectRequests          DataSubjectRequest[]
+  consentRecords               ConsentRecord[]
+  tenantDataRetentionOverrides TenantDataRetentionOverride[]
+
   @@map("tenants")
 }
 
@@ -5347,4 +5353,216 @@ model ArchivedPartition {
   @@unique([tableName, partitionName])
   @@index([tableName, rangeStart])
   @@map("archived_partitions")
+}
+
+// ---------------------------------------------------------------------------
+// Data privacy & residency (Phase 6.1) — see
+// docs/conventions/privacy-residency.md. Builds directly on this schema's
+// existing tenancy/RLS (isolation), audit_log (immutability — never
+// row-deleted, only anonymized-within), and the 5.2 partitioning/archival
+// seam (`TenantRetentionOverride` above stays scoped to the three
+// PHYSICALLY partitioned tables; `TenantDataRetentionOverride` below is a
+// parallel, LOGICAL-data-category seam — Employee/Candidate rows are never
+// partitioned, so they need their own retention override table).
+// ---------------------------------------------------------------------------
+
+enum DataSubjectType {
+  EMPLOYEE
+  CANDIDATE
+  USER
+}
+
+enum PrivacyRequestType {
+  EXPORT
+  ERASURE
+}
+
+enum PrivacyRequestStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+// The closed set of data categories this module's erasure/retention policy
+// matrix is authored against — see docs/conventions/privacy-residency.md for
+// the full per-category erasure-policy table. A closed, code-level enum is
+// correct here (unlike WorkflowInstance.entityType's free-form-string
+// pattern): these categories are a fixed taxonomy this module's OWN engine
+// branches on, not a tenant-extensible catalog.
+enum DataCategory {
+  EMPLOYEE_PROFILE
+  EMPLOYEE_POST_EXIT
+  CANDIDATE_RECORDS
+  PAYROLL_TAX_RECORDS
+  AUDIT_TRAIL
+  DOCUMENTS
+}
+
+enum RetentionAction {
+  HARD_DELETE
+  ANONYMIZE
+  RETAIN_LEGAL
+}
+
+// One data-subject request (export or erasure) — tenant-scoped, ordinary
+// RLS. `subjectId` is a plain uuid with NO FK relation, deliberately — an
+// ERASURE request's whole point is that the subject row itself may be
+// scrubbed/gone by the time this row is read back, the same "id survives
+// even if what it once pointed to changes shape" reasoning
+// `AuditLog.entityId` already establishes for itself.
+model DataSubjectRequest {
+  id          String               @id @default(uuid()) @db.Uuid
+  tenantId    String               @map("tenant_id") @db.Uuid
+  requestType PrivacyRequestType   @map("request_type")
+  subjectType DataSubjectType      @map("subject_type")
+  subjectId   String               @map("subject_id") @db.Uuid
+  status      PrivacyRequestStatus @default(PENDING)
+  reason      String?
+  // Null when system-initiated (see `systemInitiated` below) or when a
+  // platform admin acted on the tenant's behalf (`initiatedByPlatformAdminId`
+  // below) — the same "nullable system/cross-boundary actor" convention
+  // `AuditLog.actorUserId`/`ImportBatch.initiatedByPlatformAdminId` already
+  // establish, deliberately with no FK relation object either (see those
+  // models' own comments).
+  requestedByUserId String? @map("requested_by_user_id") @db.Uuid
+  // Step 6.1, the SAME "platform acts for a tenant" shape
+  // `ImportBatch.initiatedByPlatformAdminId` already establishes — set when
+  // the VENDOR CONSOLE creates this request on a tenant's behalf.
+  initiatedByPlatformAdminId String?  @map("initiated_by_platform_admin_id") @db.Uuid
+  // True when the SCHEDULED RETENTION ENFORCEMENT JOB created this row
+  // (past-window auto-purge/anonymize) rather than a real person —
+  // `requestedByUserId`/`initiatedByPlatformAdminId` are both null in that
+  // case; this flag is what lets a caller tell "nobody asked, the policy
+  // fired" apart from "a real actor's identity was simply not captured".
+  systemInitiated Boolean @default(false) @map("system_initiated")
+  // EXPORT only — where the completed export bundle (export.json + any
+  // copied document bytes) lives in the SAME S3/MinIO bucket
+  // `StorageService` already manages, at
+  // `privacy-exports/<tenantId>/<requestId>/`.
+  resultStorageKey String? @map("result_storage_key")
+  // ERASURE only — per-`DataCategory` outcome (`HARD_DELETE`/`ANONYMIZE`/
+  // `RETAIN_LEGAL`, plus a short human-readable note), the erasure policy
+  // matrix's OWN record of exactly what it did for THIS subject, not just a
+  // generic "done".
+  erasureSummary Json?     @map("erasure_summary")
+  failureReason  String?   @map("failure_reason")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  completedAt    DateTime? @map("completed_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@index([tenantId, subjectType, subjectId])
+  @@map("data_subject_requests")
+}
+
+// One consent grant/revocation record — tenant-scoped, ordinary RLS.
+// `purpose` is a free-form string (e.g. "BIOMETRIC_ATTENDANCE",
+// "MARKETING_COMMS") deliberately, the SAME "no closed catalog for a
+// tenant/country-varying concept" reasoning `CustomFieldDefinition.entityType`
+// already establishes — which lawful-basis purposes a given tenant/country
+// actually needs to track is not this codebase's call to fix in an enum.
+model ConsentRecord {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @map("tenant_id") @db.Uuid
+  subjectType       DataSubjectType @map("subject_type")
+  subjectId         String          @map("subject_id") @db.Uuid
+  purpose           String
+  granted           Boolean
+  // Where the consent was captured (e.g. "ESS_PORTAL", "PAPER_FORM",
+  // "DATA_MIGRATION_IMPORT") — a plain string, not a closed enum, for the
+  // same reason `purpose` is.
+  source            String
+  recordedByUserId  String?   @map("recorded_by_user_id") @db.Uuid
+  grantedAt         DateTime? @map("granted_at")
+  revokedAt         DateTime? @map("revoked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, subjectType, subjectId])
+  @@map("consent_records")
+}
+
+// The Record of Processing Activities (ROPA) a GDPR-style regime expects a
+// controller to maintain — ONE catalog row per `DataCategory`, platform-wide
+// (no `tenantId`), the SAME "global reference data, no per-tenant column to
+// filter on" exemption `CountryPack`/`PartitionedTableConfig` already
+// establish. Authored by the VENDOR (platform), read live by every tenant
+// (`hrm_app` gets SELECT only — see the enable-RLS migration) exactly the
+// same "one shared catalog, read-only from the tenant side" shape
+// `CountryPack` already establishes for itself.
+model DataProcessingRegisterEntry {
+  category            DataCategory      @id
+  description         String
+  purposeOfProcessing String            @map("purpose_of_processing")
+  legalBasis          String            @map("legal_basis")
+  dataSubjectTypes    DataSubjectType[] @map("data_subject_types")
+  sourceModules       String[]          @map("source_modules")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+
+  @@map("data_processing_register")
+}
+
+// The vendor's disclosure of its OWN sub-processors (object storage, email
+// delivery, payment processing, error tracking, ...) — platform-wide, no
+// `tenantId`, the SAME exemption/read posture as
+// `DataProcessingRegisterEntry` immediately above.
+model SubProcessorRecord {
+  id                String         @id @default(uuid()) @db.Uuid
+  name              String         @unique
+  purpose           String
+  dataCategories    DataCategory[] @map("data_categories")
+  region            String
+  contractReference String?        @map("contract_reference")
+  addedAt           DateTime       @default(now()) @map("added_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  @@map("sub_processor_records")
+}
+
+// The PLATFORM DEFAULT retention/erasure-action per `DataCategory` — ONE
+// row per category, platform-wide, the exact same shape
+// `PartitionedTableConfig` already establishes for the three physically
+// partitioned tables, extended here to logical data categories that are
+// never partitioned at all (Employee, Candidate, ...). Writable only via
+// `@PlatformRoute()` (`PRIVACY_MANAGE`), through the owner `prisma` client.
+model DataRetentionPolicy {
+  category        DataCategory    @id
+  retentionMonths Int             @map("retention_months")
+  action          RetentionAction
+  legalBasisNote  String?         @map("legal_basis_note")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  @@map("data_retention_policies")
+}
+
+// A tenant's own retention preference for one `DataCategory` — the SAME
+// "tenant override on top of a platform default" shape
+// `TenantRetentionOverride` already establishes for partitioned tables, but
+// UNLIKE that one, this override IS operationally applied (not merely
+// informational) by `RetentionEnforcementService` — see
+// docs/conventions/privacy-residency.md for why the two seams differ:
+// `TenantRetentionOverride` can't be applied per-tenant because a single
+// PARTITION physically holds every tenant's rows for that date range, but a
+// `DataCategory` like `EMPLOYEE_POST_EXIT` is enforced with an ordinary
+// `WHERE tenant_id = ?` row-level query — there is no shared-partition
+// obstacle here.
+model TenantDataRetentionOverride {
+  id              String       @id @default(uuid()) @db.Uuid
+  tenantId        String       @map("tenant_id") @db.Uuid
+  category        DataCategory
+  retentionMonths Int          @map("retention_months")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, category])
+  @@index([tenantId])
+  @@map("tenant_data_retention_overrides")
 }

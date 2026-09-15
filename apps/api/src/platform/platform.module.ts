@@ -27,6 +27,9 @@ import { PlatformMigrationService } from './migration/platform-migration.service
 import { PartitioningModule } from '../partitioning/partitioning.module';
 import { PlatformPartitioningController } from './partitioning/platform-partitioning.controller';
 import { PlatformPartitioningService } from './partitioning/platform-partitioning.service';
+import { PrivacyModule } from '../privacy/privacy.module';
+import { PlatformPrivacyController } from './privacy/platform-privacy.controller';
+import { PlatformPrivacyService } from './privacy/platform-privacy.service';
 import { PlatformTenantController } from './tenants/platform-tenant.controller';
 import { PlatformTenantService } from './tenants/platform-tenant.service';
 import { PlatformUsageController } from './usage/platform-usage.controller';
@@ -65,7 +68,11 @@ import { PlatformUsageService } from './usage/platform-usage.service';
   // MigrationModule (3.5.1) — reused for `ImportBatchService` so
   // `PlatformMigrationService` never re-implements upload/dry-run/commit
   // orchestration a second time. See docs/conventions/data-migration.md.
-  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule, CountryPacksModule, PartitioningModule],
+  // PrivacyModule (6.1) — reused for DataSubjectRequestService (the SAME
+  // export/erasure engines a tenant's own request uses) so
+  // PlatformPrivacyService never re-implements them. See
+  // docs/conventions/privacy-residency.md.
+  imports: [PlatformAuthContextModule, AuthModule, BillingModule, BrandingModule, MigrationModule, CountryPacksModule, PartitioningModule, PrivacyModule],
   controllers: [
     PlatformAuthController,
     PlatformAdminController,
@@ -78,6 +85,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformBrandingController,
     PlatformMigrationController,
     PlatformPartitioningController,
+    PlatformPrivacyController,
   ],
   providers: [
     PasswordService,
@@ -94,6 +102,7 @@ import { PlatformUsageService } from './usage/platform-usage.service';
     PlatformBrandingService,
     PlatformMigrationService,
     PlatformPartitioningService,
+    PlatformPrivacyService,
   ],
   exports: [PlatformAuditRecordService],
 })

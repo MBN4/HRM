@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { TENANT_EDITIONS } from '../constants/feature-flags';
 import { PARTITIONED_TABLE_NAMES } from '../constants/partitioning';
 import { PLATFORM_ROLE_NAMES } from '../constants/platform-permissions';
+import { DATA_CATEGORIES, PRIVACY_REQUEST_STATUSES, RETENTION_ACTIONS } from '../constants/privacy';
 import { countryPackConfigSchema } from './country-pack.validator';
+import { createDataSubjectRequestSchema } from './privacy.validator';
 
 /**
  * Platform (vendor super-admin) request DTOs — step 4.1. See
@@ -174,3 +176,42 @@ export const upsertTenantRetentionOverrideRequestSchema = z.object({
   retentionMonths: z.number().int().min(1).max(1200),
 });
 export type UpsertTenantRetentionOverrideInput = z.infer<typeof upsertTenantRetentionOverrideRequestSchema>;
+
+// --- Data privacy & residency (step 6.1) --------------------------------
+// See docs/conventions/privacy-residency.md.
+
+export const dataCategoryParamSchema = z.enum(DATA_CATEGORIES);
+
+export const updateDataRetentionPolicyRequestSchema = z
+  .object({
+    retentionMonths: z.number().int().min(0).max(1200).optional(),
+    action: z.enum(RETENTION_ACTIONS).optional(),
+    legalBasisNote: z.string().max(2000).optional(),
+  })
+  .strict()
+  .refine((value) => value.retentionMonths !== undefined || value.action !== undefined || value.legalBasisNote !== undefined, {
+    message: 'At least one of retentionMonths/action/legalBasisNote must be provided.',
+  });
+export type UpdateDataRetentionPolicyInput = z.infer<typeof updateDataRetentionPolicyRequestSchema>;
+
+export const upsertSubProcessorRequestSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    purpose: z.string().min(1).max(1000),
+    dataCategories: z.array(z.enum(DATA_CATEGORIES)).default([]),
+    region: z.string().min(1).max(200),
+    contractReference: z.string().max(500).optional(),
+  })
+  .strict();
+export type UpsertSubProcessorInput = z.infer<typeof upsertSubProcessorRequestSchema>;
+
+/** The platform creating a data-subject request ON A TENANT's behalf — the SAME "platform acts for a tenant" shape TENANT_MIGRATION_MANAGE already establishes. */
+export const platformCreateDataSubjectRequestSchema = createDataSubjectRequestSchema;
+export type PlatformCreateDataSubjectRequestInput = z.infer<typeof platformCreateDataSubjectRequestSchema>;
+
+export const platformPrivacyRequestQuerySchema = z.object({
+  tenantId: z.string().uuid().optional(),
+  status: z.enum(PRIVACY_REQUEST_STATUSES).optional(),
+  take: z.coerce.number().int().min(1).max(200).optional().default(50),
+});
+export type PlatformPrivacyRequestQuery = z.infer<typeof platformPrivacyRequestQuerySchema>;

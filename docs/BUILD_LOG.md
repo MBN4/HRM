@@ -3626,11 +3626,12 @@ needed for the FINAL status code), cache hit/miss (3 services, one line
 each), circuit-breaker state, rate-limit/load-shed/pool-exhaustion
 rejection counters (each wired at its ALREADY-EXISTING single choke
 point). `GET /metrics`: `@Public()` + `@Priority('CRITICAL')` (never shed)
-+ a bearer-token guard. **Verified against a REAL Prometheus + Grafana**,
-not just unit-tested — brought up locally via `docker-compose.observability.yml`,
-confirmed live-scraping real metrics and correctly provisioning all 3
-dashboards; all 9 Prometheus alert rules confirmed to parse via a real
-Prometheus's own `/api/v1/rules`.
+
+- a bearer-token guard. **Verified against a REAL Prometheus + Grafana**,
+  not just unit-tested — brought up locally via `docker-compose.observability.yml`,
+  confirmed live-scraping real metrics and correctly provisioning all 3
+  dashboards; all 9 Prometheus alert rules confirmed to parse via a real
+  Prometheus's own `/api/v1/rules`.
 
 **Tracing**: an OpenTelemetry `NodeSDK`, imported as the literal first line
 of both entrypoints (before `reflect-metadata`, since auto-instrumentation
@@ -3643,6 +3644,7 @@ for other queues, not built for all 15.
 
 **Load testing — two real backend bugs found and fixed, measured before/
 after, not assumed**:
+
 1. **Payroll's per-employee component-definition re-fetch** — `PayrollEngineService.computeForEmployee`
    fetched the SAME (run-wide-identical) component-definition set once
    PER EMPLOYEE; hoisted to once-per-run in `PayrollRunProcessor`'s
@@ -3712,10 +3714,80 @@ since 5.1 the only known-flaky file, unrelated to this step (it did not
 reproduce on this step's own full-suite runs, each 100% green).
 Full-repo `pnpm build`/`pnpm lint` green across all 8 workspace tasks.
 `docker-compose.observability.yml` actually brought up locally (Prometheus
-+ Grafana, both verified live). All 8 k6 scenarios actually run against a
-real local API instance, not just written. `apps/portal`/`apps/admin`:
-untouched, no UI surface.
+
+- Grafana, both verified live). All 8 k6 scenarios actually run against a
+  real local API instance, not just written. `apps/portal`/`apps/admin`:
+  untouched, no UI surface.
 
 **PHASE 5 COMPLETE.** Data-layer scaling (5.1) + partitioning/archival
 (5.2) + horizontal scaling/Kubernetes/regional deployment (5.3) +
 observability/load testing (5.4). Phase 6 (scope not yet defined) is next.
+
+- **6.1 data privacy & residency — done — 2026-09-15.** Phase 6's first
+  slice — see [`docs/conventions/privacy-residency.md`](./conventions/privacy-residency.md).
+  Six new tables: tenant-scoped `DataSubjectRequest`/`ConsentRecord`/
+  `TenantDataRetentionOverride` (ordinary RLS) and platform-wide
+  `DataProcessingRegisterEntry`/`SubProcessorRecord`/`DataRetentionPolicy`
+  (no `tenantId`, `hrm_app` SELECT-only — the same exemption `CountryPack`
+  already establishes), seeded with a 6-category ROPA, 4 illustrative
+  sub-processor disclosures naming this codebase's own real adapter seams,
+  and illustrative platform-default retention/erasure-action figures.
+  **EXPORT** (`DataExportService`) aggregates an Employee/Candidate/User
+  subject's data across every module that holds it via plain reads (no
+  dedicated service to route a cross-cutting aggregation through) into one
+  JSON manifest plus copied document files ("JSON + files", proven
+  byte-identical). **ERASURE** (`PrivacyErasureService`) is a real, explicit
+  per-`DataCategory` policy — `EMPLOYEE_POST_EXIT` ANONYMIZES (scrubs PII,
+  keeps `employeeCode`/dates/status for downstream FK integrity),
+  `CANDIDATE_RECORDS` HARD_DELETEs via the existing cascade FKs,
+  `PAYROLL_TAX_RECORDS` is RETAIN_LEGAL (already PII-free by 2.1's own
+  design — anonymizing Employee is what scrubs it transitively, zero
+  payroll-schema change), and `AUDIT_TRAIL` is ANONYMIZED-WITHIN: the ONE
+  deliberate exception in this codebase that writes to `audit_log` through
+  the OWNER `prisma` client (mirroring `PartitionMaintenanceService`'s own
+  owner-client-only DDL reasoning), scrubbing PII string VALUES from
+  `before`/`after`/`metadata` while never deleting the row — proven
+  directly, the same shape `audit-log-immutability.spec.ts` already
+  established: the row survives, PII is gone, and `hrm_app` STILL cannot
+  `UPDATE`/`DELETE` it. A linked `User` is disabled + its tokens revoked
+  (reusing 2.3's offboarding primitive verbatim) — a previously-valid token
+  proven to 401 immediately after. **RETENTION ENFORCEMENT**
+  (`RetentionEnforcementService`) is a real scheduled BullMQ job (the SAME
+  orchestrate-then-fan-out shape `AnalyticsRollupService`/
+  `PartitionMaintenanceService` already establish, `0 6 * * *` UTC + a
+  manual trigger) auto-erasing past-window `TERMINATED` employees/stale
+  candidates via the IDENTICAL erasure engine an on-demand request uses,
+  honoring a genuinely-applied `TenantDataRetentionOverride` (unlike 5.2's
+  own `TenantRetentionOverride`, which stays informational-only because a
+  shared partition can't be split per-tenant — this category-keyed override
+  has no such obstacle) — proven end to end with a 1-month tenant override
+  auto-erasing a 3-month-stale employee. **RESIDENCY ENFORCEMENT** turns
+  5.3's documented `Tenant.hostingRegion`/regional-deployment SEAM into a
+  real, tested invariant: `TenantScopeInterceptor.assertResidency` rejects
+  (403, before rate limiting or a DB transaction even opens) any request
+  for a tenant whose `hostingRegion` doesn't match a new `DEPLOYMENT_REGION`
+  env var (unset = complete no-op, both existing region overlays now patch
+  it) — proven in a dedicated file setting the env var ONCE at module-load
+  time (mirroring `licensing-lifetime.e2e-spec.ts`'s own env-isolation
+  discipline, deliberately not toggled mid-file, since `@nestjs/config`'s
+  exact snapshot timing shouldn't be load-bearing for the proof). Pakistan
+  (`me-south-1`, the first real client) is the concrete residency case, its
+  own data-localization posture flagged as a VERIFY item per
+  pakistan-pack.md's own discipline. Vendor console (`apps/admin`
+  `/privacy`) gets a cross-tenant residency overview, platform retention/
+  sub-processor authoring, and cross-tenant request oversight — dual-audited
+  exactly like every other platform-acts-for-a-tenant action since 4.1;
+  tenant portal (`apps/portal` `/privacy`, `privacy.manage`) gets
+  export/erasure request + history, the processing register/sub-processor
+  read surfaces, and a tenant retention-override control. See
+  [`docs/conventions/privacy-residency.md`](./conventions/privacy-residency.md)
+  for the full per-category erasure-policy table and the
+  verified-locally-vs-at-deploy split for residency.
+- **6.1 verified — 2026-09-15.** `apps/api`'s full suite: **586 tests, 64
+  suites, all green** (562 existing + 24 new: 22 in `privacy.e2e-spec.ts`,
+  2 in `privacy-residency.e2e-spec.ts`) — zero regressions. Full-repo
+  `pnpm build`/`pnpm lint` green across every workspace (`@hrm/db`,
+  `@hrm/shared`, `@hrm/api`, `@hrm/portal`, `@hrm/admin`), including the new
+  `apps/portal`/`apps/admin` `/privacy` pages (both `next build`/`next lint`
+  clean). Both new region-overlay `DEPLOYMENT_REGION` patches confirmed via
+  `kustomize build`.

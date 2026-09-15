@@ -46,6 +46,10 @@ export const PLATFORM_PERMISSIONS = {
   PARTITIONING_READ: 'platform.partitioning.read',
   /** Step 5.2 — change a table's default lookahead/retention/archive-enabled config, set a tenant-specific retention override, or manually trigger the partition-creation/archival jobs. OWNER-only, same posture as BILLING_MANAGE/BRANDING_MANAGE. */
   PARTITIONING_MANAGE: 'platform.partitioning.manage',
+  /** Step 6.1 — read the processing register/sub-processor disclosure, the platform-default retention/erasure policy per data category, the residency (hostingRegion) overview, and cross-tenant data-subject-request oversight. Support-safe (read-only), the SAME "READ is broad, MANAGE is narrow" split BILLING_READ/BRANDING_READ/PARTITIONING_READ already establish. */
+  PRIVACY_READ: 'platform.privacy.read',
+  /** Step 6.1 — author the processing register/sub-processor catalog, change the platform-default retention/erasure policy per data category, or create a data-subject request on a tenant's behalf. OWNER-only, same posture as BILLING_MANAGE/BRANDING_MANAGE/PARTITIONING_MANAGE. */
+  PRIVACY_MANAGE: 'platform.privacy.manage',
 } as const;
 
 export type PlatformPermissionKey = (typeof PLATFORM_PERMISSIONS)[keyof typeof PLATFORM_PERMISSIONS];
@@ -73,5 +77,6 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleNameKey, readonly Pla
     PLATFORM_PERMISSIONS.BRANDING_READ,
     PLATFORM_PERMISSIONS.TENANT_MIGRATION_MANAGE,
     PLATFORM_PERMISSIONS.PARTITIONING_READ,
+    PLATFORM_PERMISSIONS.PRIVACY_READ,
   ],
 };

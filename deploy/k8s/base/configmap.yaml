@@ -26,6 +26,12 @@ data:
   TENANT_HEADER_NAME: 'x-tenant-id'
   PORTAL_BASE_URL: 'https://portal.yourhrms.com'
 
+  # --- Data residency enforcement (6.1) — which region THIS stack serves;
+  # every region overlay patches this to its own value. See
+  # docs/conventions/privacy-residency.md and
+  # docs/conventions/deployment-scaling.md § Regional deployment. ---
+  DEPLOYMENT_REGION: 'us-east-1'
+
   # --- Platform / vendor console (4.1) ---
   PLATFORM_MODE_ENABLED: 'true'
   PLATFORM_JWT_EXPIRES_IN: '30m'

@@ -22,6 +22,7 @@ import {
   Paintbrush,
   Receipt,
   Settings,
+  ShieldCheck,
   Target,
   Upload,
   User,
@@ -132,6 +133,10 @@ export function Sidebar() {
   // Statutory / government reporting (step 3.5.4) — see docs/conventions/statutory-reporting.md.
   if (can(PERMISSIONS.STATUTORY_REPORT_READ) || can(PERMISSIONS.STATUTORY_REPORT_GENERATE)) {
     adminItems.push({ href: '/statutory-reports', label: t('nav.statutoryReports'), icon: FileText });
+  }
+  // Data privacy & residency (step 6.1) — see docs/conventions/privacy-residency.md.
+  if (can(PERMISSIONS.PRIVACY_MANAGE)) {
+    adminItems.push({ href: '/privacy', label: t('nav.privacy'), icon: ShieldCheck });
   }
 
   return (

@@ -135,6 +135,18 @@ export const PERMISSIONS = {
   // PAYROLL_RUN/PAYSLIP_VIEW already establish for an adjacent concern.
   STATUTORY_REPORT_GENERATE: 'statutory_report.generate',
   STATUTORY_REPORT_READ: 'statutory_report.read',
+  // Step 6.1 (data privacy & residency) — see
+  // docs/conventions/privacy-residency.md. Requesting/reviewing a data
+  // subject's export or erasure, reading the processing register/
+  // sub-processor disclosure, and setting a tenant retention override are
+  // all ownership/compliance/legal territory, the SAME tier
+  // AUDIT_READ/LICENSE_MANAGE/BILLING_MANAGE already occupy — TENANT_ADMIN
+  // only (via ALL_PERMISSIONS), deliberately NOT copied onto HR_MANAGER's
+  // list below (an HR manager routinely handles an employee's exit, but a
+  // formal data-subject-rights request is a step up from ordinary HR
+  // policy work, matching this project's existing "who owns this
+  // territory" reasoning).
+  PRIVACY_MANAGE: 'privacy.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

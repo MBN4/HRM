@@ -263,6 +263,7 @@ export class TenantScopeInterceptor implements NestInterceptor {
     if (BLOCKED_TENANT_STATUSES.has(resolved.tenant.status)) {
       throw new ForbiddenException('This tenant account is suspended.');
     }
+    this.assertResidency(resolved.tenant.hostingRegion);
 
     await this.tenantRateLimit.enforce(resolved.tenantId);
     // Phase 5.4 — mirrors the resolved tenant into the request-level log
@@ -286,6 +287,36 @@ export class TenantScopeInterceptor implements NestInterceptor {
         () => firstValueFrom(next.handle(), { defaultValue: undefined }),
       );
     });
+  }
+
+  /**
+   * Step 6.1 — data residency ENFORCEMENT, not just the documented
+   * `Tenant.hostingRegion`/deployment-topology SEAM 5.3 left off at (see
+   * docs/conventions/deployment-scaling.md § Regional deployment and
+   * docs/conventions/privacy-residency.md). `DEPLOYMENT_REGION` names which
+   * region THIS running stack serves (set once per regional overlay, e.g.
+   * `deploy/k8s/overlays/us-east-1/`) — unset (every local/CI run, and any
+   * single-region deployment that hasn't opted into per-region config) is a
+   * complete no-op, matching this codebase's "no setup needed for local
+   * dev" posture everywhere else. When it IS set, a tenant pinned to a
+   * DIFFERENT region is rejected before rate limiting or the DB transaction
+   * even opens — the exact same "reject early, before spending any
+   * resource" placement `BLOCKED_TENANT_STATUSES` above already uses. This
+   * makes "a region's own stack only ever serves that region's own
+   * tenants" a real, enforced, testable invariant rather than an
+   * operational convention a misconfigured DNS/ingress rule could silently
+   * violate — see privacy-residency.md for the verified-locally (this
+   * guard, proven with two real `AppModule` instances under different
+   * `DEPLOYMENT_REGION` values) vs. verified-at-deploy (actual separate
+   * regional Postgres/S3/Redis stacks) split.
+   */
+  private assertResidency(tenantHostingRegion: string): void {
+    const deploymentRegion = this.config.get<string>('DEPLOYMENT_REGION');
+    if (deploymentRegion && tenantHostingRegion !== deploymentRegion) {
+      throw new ForbiddenException(
+        `This deployment only serves tenants hosted in "${deploymentRegion}"; this tenant is hosted in "${tenantHostingRegion}".`,
+      );
+    }
   }
 
   private async withRequestTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -318,10 +349,11 @@ export class TenantScopeInterceptor implements NestInterceptor {
 
     // Step 4.1 — TENANT_STATUS applies to the API-key path too, same as
     // the JWT/subdomain path above.
-    const tenant = await appPrisma.tenant.findUnique({ where: { id: validated.tenantId }, select: { status: true } });
+    const tenant = await appPrisma.tenant.findUnique({ where: { id: validated.tenantId }, select: { status: true, hostingRegion: true } });
     if (!tenant || BLOCKED_TENANT_STATUSES.has(tenant.status)) {
       throw new ForbiddenException('This tenant account is suspended.');
     }
+    this.assertResidency(tenant.hostingRegion);
 
     await this.tenantRateLimit.enforce(validated.tenantId);
     await this.apiKeyRateLimit.enforce(validated.apiKeyId, validated.rateLimitPerMinute);

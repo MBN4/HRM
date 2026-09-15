@@ -110,6 +110,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md)     | Native `PARTITION BY RANGE` for `attendance_records`/`audit_log`/`platform_audit_log` (additive conversion, RLS+immutability proven identical on partitions, partition pruning proven), the automated ahead-of-time partition-creation job, and the archival/retention mechanism + its Phase 6.1 GDPR seam. (5.2)                                                                  |
 | [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md)           | The statelessness audit + its multi-instance proof, the `worker.ts`/`PROCESS_ROLE` API-worker split (proven against real BullMQ), Docker images, `deploy/k8s/` manifests (HPA/KEDA, probes, graceful rollout, migration-job safety), and the regional-deployment seam. (5.3)                                                                                                       |
 | [`docs/conventions/observability-load.md`](./docs/conventions/observability-load.md)           | Structured/correlated logging + PII redaction, the Sentry error-tracking seam, Prometheus metrics + Grafana dashboards/alerts (all verified against real instances), OpenTelemetry tracing, and k6 load testing — two real bugs found+fixed (a payroll N+1, a `DbPoolExhaustionFilter` gap) plus the honest 20M extrapolation. (5.4)                                               |
+| [`docs/conventions/privacy-residency.md`](./docs/conventions/privacy-residency.md)             | Data-subject export/erasure, the per-`DataCategory` erasure policy + the audit-log anonymize-within reconciliation, consent tracking + the processing register/sub-processor disclosure, retention enforcement building on 5.2's seam, and residency enforcement building on 5.3's seam. (6.1)                                                                                     |
 
 ## 5. Build log summary
 
@@ -745,6 +746,22 @@ Phase 0–3's foundation.
 observability/load testing (5.4) — the full scale-and-operate layer, on
 top of every prior phase's foundation.
 
+- **6.1** — Data privacy & residency (Phase 6's first slice): data-subject
+  export (a structured JSON manifest + copied document files, byte-verified)
+  and erasure (a real per-`DataCategory` policy — `EMPLOYEE_POST_EXIT`
+  anonymized, `CANDIDATE_RECORDS` hard-deleted via existing cascades,
+  `PAYROLL_TAX_RECORDS` retained legally since it was already PII-free by
+  design, and `audit_log` anonymized-WITHIN via the one deliberate
+  owner-client exception in this codebase — proven to never row-delete or
+  weaken `hrm_app`'s own immutability grant); a scheduled retention-
+  enforcement sweep reusing the identical erasure engine, genuinely honoring
+  a tenant-specific override (unlike 5.2's informational-only one); consent
+  tracking + a processing register/sub-processor disclosure; and residency
+  ENFORCEMENT turning 5.3's `hostingRegion`/regional-deployment seam into a
+  real, tested `403` guard (`DEPLOYMENT_REGION`), with Pakistan (`me-south-1`)
+  as the concrete first-client residency case. See
+  [`docs/conventions/privacy-residency.md`](./docs/conventions/privacy-residency.md).
+
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
 - [x] **3.5.2** Benefits administration — plan config, statutory schemes
@@ -836,4 +853,16 @@ reporting (3.5.4) — the go-live/compliance layer for a real first client.
 (5.2) + horizontal scaling/Kubernetes/regional deployment (5.3) +
 observability/load testing (5.4).
 
-- [ ] **Phase 6** — _scope not yet defined_
+- [x] **6.1** Data privacy & residency — data-subject export/erasure (a
+      real per-`DataCategory` policy reconciling GDPR-style erasure with
+      `audit_log`'s DB-level immutability and legally-retained payroll
+      records), consent tracking, the processing register + sub-processor
+      disclosure, retention enforcement building on 5.2's seam (genuinely
+      tenant-overridable, unlike 5.2's own informational-only override),
+      and residency enforcement building on 5.3's seam (a real
+      `DEPLOYMENT_REGION`-gated `403`, Pakistan/`me-south-1` as the
+      concrete first-client case). See
+      [`docs/conventions/privacy-residency.md`](./docs/conventions/privacy-residency.md).
+- [ ] **6.2** Security hardening + WCAG accessibility + backups
+- [ ] **6.3** WAF / DDoS protection
+- [ ] **6.4** Incident response + chaos engineering
