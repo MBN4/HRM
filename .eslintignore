@@ -1,0 +1,7 @@
+# k6 load-test scripts run in k6's own runtime (not Node) and use k6 globals/
+# module system — they are not part of any app's lint scope.
+load/
+
+# Standalone scripts outside src/test aren't in tsconfig's include, so the
+# type-aware parser can't lint them; they're dev utilities, not app code.
+apps/api/scripts/
