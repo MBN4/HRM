@@ -1,0 +1,24 @@
+# Phase 5.4 — local/docker-compose Prometheus scrape config. Production
+# (k8s) scraping is a `ServiceMonitor`/`PodMonitor` CRD if the Prometheus
+# Operator is in use, or the equivalent static scrape config otherwise —
+# not shipped here, since it depends on which Prometheus deployment model
+# a given cluster already runs (see deploy/observability/README.md).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: hrm-api
+    metrics_path: /metrics
+    authorization:
+      credentials: local-dev-metrics-token
+    static_configs:
+      - targets: ['host.docker.internal:3001']
+
+  - job_name: hrm-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:3002']

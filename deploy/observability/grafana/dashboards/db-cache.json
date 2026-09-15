@@ -1,0 +1,67 @@
+{
+  "title": "HRM — Database & Cache",
+  "uid": "hrm-db-cache",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "utc",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["hrm", "db", "cache"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Cache hit ratio, by cache (country-pack / org-structure / permissions — 5.1)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        {
+          "expr": "sum(rate(hrm_cache_hits_total[5m])) by (cache) / (sum(rate(hrm_cache_hits_total[5m])) by (cache) + sum(rate(hrm_cache_misses_total[5m])) by (cache))",
+          "legendFormat": "{{cache}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "title": "Cache hits vs. misses (rate/s, by cache)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "sum(rate(hrm_cache_hits_total[5m])) by (cache)", "legendFormat": "hit {{cache}}" },
+        { "expr": "sum(rate(hrm_cache_misses_total[5m])) by (cache)", "legendFormat": "miss {{cache}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Prisma connection pool — open/busy connections (owner + app roles)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "description": "Populated only if the Prisma `metrics` preview feature is enabled and its own `/metrics` text is merged in — see docs/conventions/observability-load.md § Metrics for the current, simpler DB signal (pool-exhaustion REJECTIONS, always on) vs. this richer, opt-in one.",
+      "targets": [
+        { "expr": "prisma_pool_connections_open", "legendFormat": "open" },
+        { "expr": "prisma_pool_connections_busy", "legendFormat": "busy" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "DB connection-pool exhaustion rejections (503/min)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "rate(hrm_db_pool_exhaustion_rejections_total[1m]) * 60", "legendFormat": "pool exhaustion" }]
+    }
+  ]
+}

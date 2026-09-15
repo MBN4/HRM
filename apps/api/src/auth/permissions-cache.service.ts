@@ -2,7 +2,10 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import type { Prisma } from '@hrm/db';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { MetricsService } from '../metrics/metrics.service';
 import { loadUserContext, LoadedUserContext } from './load-user-context.util';
+
+const CACHE_NAME = 'permissions';
 
 /**
  * A short TTL, not a "cache until told otherwise" one — see the class doc
@@ -48,13 +51,18 @@ const CACHE_TTL_SECONDS = 15;
  */
 @Injectable()
 export class PermissionsCacheService {
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  constructor(
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly metrics: MetricsService,
+  ) {}
 
   async getContext(tx: Prisma.TransactionClient, tenantId: string, userId: string): Promise<LoadedUserContext> {
     const cached = await this.redis.get(this.cacheKey(tenantId, userId));
     if (cached) {
+      this.metrics.recordCacheHit(CACHE_NAME);
       return JSON.parse(cached) as LoadedUserContext;
     }
+    this.metrics.recordCacheMiss(CACHE_NAME);
 
     const context = await loadUserContext(tx, userId);
     await this.redis.set(this.cacheKey(tenantId, userId), JSON.stringify(context), 'EX', CACHE_TTL_SECONDS);

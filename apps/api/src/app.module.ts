@@ -31,6 +31,8 @@ import { AssetsModule } from './assets/assets.module';
 import { HelpdeskModule } from './helpdesk/helpdesk.module';
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { LmsModule } from './lms/lms.module';
+import { LoggingModule } from './common/logging/logging.module';
+import { MetricsModule } from './metrics/metrics.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { PartitioningModule } from './partitioning/partitioning.module';
 import { PlatformModule } from './platform/platform.module';
@@ -52,6 +54,13 @@ import { WorkflowModule } from './workflow/workflow.module';
     EventEmitterModule.forRoot({ wildcard: true }),
     RedisModule,
     QueueModule,
+    // Step 5.4 — structured logging (the ERROR_TRACKER seam) and the
+    // shared Prometheus registry (`/metrics`, queue-depth polling). Both
+    // @Global(), listed early alongside the rest of this cluster since
+    // several resilience/cache services below now inject `MetricsService`
+    // — see docs/conventions/observability-load.md.
+    LoggingModule,
+    MetricsModule,
     // Both @Global() — relative import order doesn't matter for DI
     // resolution (see ResilienceModule's doc comment for why load
     // shedding/the request timeout are plain services TenantScopeInterceptor

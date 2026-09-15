@@ -5,12 +5,15 @@ import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { isNotificationEventType } from '@hrm/shared';
 import { NOTIFICATIONS_QUEUE } from '../queue/queue.constants';
+import { injectTraceContext, TraceCarrier } from '../tracing/queue-trace.util';
 import { NotificationPreferenceService } from './notification-preference.service';
 import { NotificationRecipientResolverService } from './notification-recipient-resolver.service';
 
 export interface DeliverNotificationJobData {
   tenantId: string;
   notificationDeliveryId: string;
+  /** Phase 5.4 — carries the enqueuing request's trace context across the process boundary; see tracing/queue-trace.util.ts. */
+  traceContext?: TraceCarrier;
 }
 
 const JOB_OPTIONS = {
@@ -126,8 +129,9 @@ export class NotificationsService {
       await sleep(EMPTY_RECIPIENTS_RETRY_DELAYS_MS[attempt]);
     }
 
+    const traceContext = injectTraceContext();
     for (const notificationDeliveryId of deliveryIds) {
-      await this.queue.add('deliver', { tenantId, notificationDeliveryId }, JOB_OPTIONS);
+      await this.queue.add('deliver', { tenantId, notificationDeliveryId, traceContext }, JOB_OPTIONS);
     }
   }
 }

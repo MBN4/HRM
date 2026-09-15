@@ -2,6 +2,7 @@ import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
 import { RequestPriority } from '@hrm/shared';
+import { MetricsService } from '../../metrics/metrics.service';
 import { SystemLoadService } from './system-load.service';
 
 const DEFAULT_LOW_PRIORITY_THRESHOLD = 20;
@@ -37,6 +38,7 @@ export class LoadSheddingService {
   constructor(
     private readonly systemLoad: SystemLoadService,
     private readonly config: ConfigService,
+    private readonly metrics: MetricsService,
   ) {}
 
   /**
@@ -49,6 +51,8 @@ export class LoadSheddingService {
   admit(priority: RequestPriority, response: Response): () => void {
     if (priority !== 'CRITICAL' && this.systemLoad.current >= this.thresholdFor(priority)) {
       response.setHeader('Retry-After', String(SHED_RETRY_AFTER_SECONDS));
+      // Phase 5.4 — see docs/conventions/observability-load.md § Metrics.
+      this.metrics.incLoadShedRejection(priority);
       throw new ServiceUnavailableException(
         `The system is currently under load; this ${priority} request was shed. Please retry shortly.`,
       );

@@ -1,0 +1,83 @@
+# Phase 5.4 — the SAME alert rules as alerts.yml, wrapped as a k8s
+# `PrometheusRule` CRD for a cluster running the Prometheus Operator
+# (https://github.com/prometheus-operator/prometheus-operator). Apply
+# EITHER this (if the Operator is installed) OR point a plain Prometheus
+# at alerts.yml directly (see prometheus.yml's `rule_files:`) — never
+# both, to avoid duplicate-firing alerts.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hrm-api-slo
+  namespace: hrm
+  labels:
+    app.kubernetes.io/part-of: hrm
+    release: prometheus
+spec:
+  groups:
+    - name: hrm-api-slo
+      rules:
+        - alert: HrmHighErrorRate
+          expr: >
+            100 * sum(rate(hrm_http_requests_total{status_code=~"5.."}[5m]))
+            / sum(rate(hrm_http_requests_total[5m])) > 5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'HRM API 5xx error rate above 5% for 5 minutes'
+        - alert: HrmHighLatencyP99
+          expr: histogram_quantile(0.99, sum(rate(hrm_http_request_duration_seconds_bucket[5m])) by (le)) > 2
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'HRM API p99 latency above 2s for 10 minutes'
+        - alert: HrmQueueBacklogGrowing
+          expr: hrm_queue_depth{state="waiting"} > 500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'BullMQ queue "{{ $labels.queue }}" has over 500 waiting jobs for 10 minutes'
+        - alert: HrmQueueBacklogCritical
+          expr: hrm_queue_depth{state="waiting"} > 5000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'BullMQ queue "{{ $labels.queue }}" has over 5000 waiting jobs'
+        - alert: HrmDbPoolExhaustionFrequent
+          expr: rate(hrm_db_pool_exhaustion_rejections_total[5m]) * 60 > 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'DB connection-pool exhaustion occurring more than once/minute for 5 minutes'
+        - alert: HrmCircuitBreakerOpen
+          expr: hrm_circuit_breaker_state == 2
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Circuit breaker "{{ $labels.name }}" has been OPEN for 2+ minutes'
+        - alert: HrmRateLimitRejectionsSpike
+          expr: sum(rate(hrm_rate_limit_rejections_total[5m])) by (source) * 60 > 50
+          for: 5m
+          labels:
+            severity: info
+          annotations:
+            summary: 'Rate-limit rejections from source "{{ $labels.source }}" exceeding 50/min for 5 minutes'
+        - alert: HrmLoadSheddingActive
+          expr: sum(rate(hrm_load_shed_rejections_total[1m])) by (priority) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Load shedding is actively rejecting {{ $labels.priority }}-priority requests'
+        - alert: HrmProcessDown
+          expr: up{job=~"hrm-api|hrm-worker"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A {{ $labels.job }} target has been unreachable by Prometheus for 1 minute'

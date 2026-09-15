@@ -1,7 +1,17 @@
+// Phase 5.4 — MUST be the very first import (before even `reflect-metadata`):
+// OpenTelemetry auto-instrumentation patches `http`/`express`/`ioredis` at
+// their first `require()`, so the SDK must be listening before anything
+// else in the dependency graph pulls those modules in. See
+// tracing/init-tracing.ts's own doc comment.
+import './tracing/init-tracing';
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { PinoLoggerService } from './common/logging/pino-logger.service';
+import { requestIdMiddleware } from './common/logging/request-id.middleware';
+import { createHttpMetricsMiddleware } from './metrics/http-metrics.middleware';
+import { MetricsService } from './metrics/metrics.service';
 import { ShutdownService } from './resilience/shutdown/shutdown.service';
 import { setupSwagger } from './swagger';
 
@@ -22,8 +32,22 @@ async function bootstrap() {
   // against the EXACT bytes Stripe signed (re-serializing the parsed JSON
   // would not byte-for-byte match, and HMAC verification is byte-exact by
   // construction) — see docs/conventions/billing.md.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  // `bufferLogs: true` — Nest's own bootstrap-time log calls (module
+  // initialization, route mapping) are queued rather than dropped, then
+  // flushed the instant `app.useLogger()` below installs the structured
+  // logger, so even boot logs come out as consistent JSON.
+  const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
+
+  // Step 5.4 — replaces Nest's default console logger for the ENTIRE
+  // process: every existing `new Logger('SomeContext')` call site
+  // throughout this codebase (see docs/conventions/observability-load.md)
+  // now emits structured JSON with zero call-site changes, because Nest's
+  // `Logger` class delegates to one static, replaceable reference.
+  app.useLogger(new PinoLoggerService({ serviceName: 'hrm-api' }));
+
   app.enableCors();
+  app.use(requestIdMiddleware);
+  app.use(createHttpMetricsMiddleware(app.get(MetricsService)));
 
   // Step 3.3 — OpenAPI/Swagger for the versioned public API ONLY, not this
   // codebase's entire internal surface — see setupSwagger's own doc

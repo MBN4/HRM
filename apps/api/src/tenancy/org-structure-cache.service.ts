@@ -2,6 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import type { Prisma } from '@hrm/db';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { MetricsService } from '../metrics/metrics.service';
+
+const CACHE_NAME = 'org-structure';
 
 const CACHE_TTL_SECONDS = 60;
 
@@ -29,13 +32,18 @@ export interface CachedBranch {
  */
 @Injectable()
 export class OrgStructureCacheService {
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  constructor(
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly metrics: MetricsService,
+  ) {}
 
   async getBranches(tx: Prisma.TransactionClient, tenantId: string): Promise<CachedBranch[]> {
     const cached = await this.redis.get(this.cacheKey(tenantId));
     if (cached) {
+      this.metrics.recordCacheHit(CACHE_NAME);
       return JSON.parse(cached) as CachedBranch[];
     }
+    this.metrics.recordCacheMiss(CACHE_NAME);
 
     const branches = await tx.branch.findMany({
       select: { id: true, name: true, countryCode: true },

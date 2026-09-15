@@ -1,13 +1,14 @@
 import { Inject } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
-import type { Employee, Prisma } from '@hrm/db';
+import type { Employee, PayrollComponentDefinition, Prisma } from '@hrm/db';
 import { Prisma as PrismaNS, withTenantContext } from '@hrm/db';
 import { PAYROLL_RUN_QUEUE } from '../../queue/queue.constants';
 import { shouldAutorunWorkers } from '../../queue/queue-worker.util';
 import { IdempotencyService } from '../../resilience/idempotency/idempotency.service';
 import { EncryptionService } from '../../common/encryption/encryption.service';
 import { resolveActiveBenefitContributions } from '../../benefits/benefits-payroll-input.util';
+import { PayrollComponentDefinitionService } from '../components/payroll-component-definition.service';
 import { resolvePayrollPackConfig, ResolvedPayrollPack } from '../payroll-pack.util';
 import { PayrollEngineService } from '../engine/payroll-engine.service';
 import { PAYROLL_PROVIDER_ADAPTER, PayrollProviderAdapter } from '../delegate/payroll-provider.interface';
@@ -44,6 +45,7 @@ export class PayrollRunProcessor extends WorkerHost {
     private readonly rollup: MultiCurrencyRollupService,
     private readonly exchangeRates: ExchangeRateService,
     private readonly encryption: EncryptionService,
+    private readonly componentDefinitions: PayrollComponentDefinitionService,
     @Inject(PAYROLL_PROVIDER_ADAPTER) private readonly delegateAdapter: PayrollProviderAdapter,
   ) {
     super();
@@ -63,31 +65,40 @@ export class PayrollRunProcessor extends WorkerHost {
   async process(job: Job<PayrollRunJobData>): Promise<void> {
     const { tenantId, payrollRunId } = job.data;
 
-    const { run, pack, employees, completedIds } = await withTenantContext(tenantId, async (tx: Prisma.TransactionClient) => {
-      const run = await tx.payrollRun.findUniqueOrThrow({ where: { id: payrollRunId } });
-      const pack = await resolvePayrollPackConfig(tx, tenantId, run.branchId);
-      // FINAL_SETTLEMENT (step 2.3, additive — see docs/conventions/
-      // recruitment-lifecycle.md): exactly the one (already possibly
-      // non-ACTIVE) employee this run was created for, instead of the
-      // branch's whole ACTIVE roster. `PayrollEngineService.computeForEmployee`
-      // below is invoked identically either way — nothing about the
-      // ENGINE changes, only which employees this WORKER iterates.
-      const employees =
-        run.runType === 'FINAL_SETTLEMENT'
-          ? await tx.employee.findMany({ where: { id: run.settlementEmployeeId! } })
-          : await tx.employee.findMany({ where: { branchId: run.branchId, status: 'ACTIVE' } });
-      const alreadyComputed = await tx.payrollRunLine.findMany({
-        where: { payrollRunId, status: 'COMPUTED' },
-        select: { employeeId: true },
-      });
-      return { run, pack, employees, completedIds: new Set(alreadyComputed.map((line) => line.employeeId)) };
-    });
+    const { run, pack, employees, completedIds, componentDefs } = await withTenantContext(
+      tenantId,
+      async (tx: Prisma.TransactionClient) => {
+        const run = await tx.payrollRun.findUniqueOrThrow({ where: { id: payrollRunId } });
+        const pack = await resolvePayrollPackConfig(tx, tenantId, run.branchId);
+        // FINAL_SETTLEMENT (step 2.3, additive — see docs/conventions/
+        // recruitment-lifecycle.md): exactly the one (already possibly
+        // non-ACTIVE) employee this run was created for, instead of the
+        // branch's whole ACTIVE roster. `PayrollEngineService.computeForEmployee`
+        // below is invoked identically either way — nothing about the
+        // ENGINE changes, only which employees this WORKER iterates.
+        const employees =
+          run.runType === 'FINAL_SETTLEMENT'
+            ? await tx.employee.findMany({ where: { id: run.settlementEmployeeId! } })
+            : await tx.employee.findMany({ where: { branchId: run.branchId, status: 'ACTIVE' } });
+        const alreadyComputed = await tx.payrollRunLine.findMany({
+          where: { payrollRunId, status: 'COMPUTED' },
+          select: { employeeId: true },
+        });
+        // Phase 5.4 — a REAL, MEASURED N+1 fix (see
+        // docs/conventions/observability-load.md § Load testing findings):
+        // `pack.countryCode` is identical for every employee in this run,
+        // so the active component-definition set is fetched ONCE here
+        // instead of once per employee inside `PayrollEngineService.computeForEmployee`.
+        const componentDefs = await this.componentDefinitions.listActive(tx, pack.countryCode);
+        return { run, pack, employees, completedIds: new Set(alreadyComputed.map((line) => line.employeeId)), componentDefs };
+      },
+    );
 
     for (const employee of employees) {
       if (completedIds.has(employee.id)) {
         continue;
       }
-      await this.processEmployee(tenantId, payrollRunId, run.branchId, employee.id, run, pack);
+      await this.processEmployee(tenantId, payrollRunId, run.branchId, employee.id, run, pack, componentDefs);
     }
 
     await withTenantContext(tenantId, (tx: Prisma.TransactionClient) => this.recomputeTotals(tx, tenantId, payrollRunId));
@@ -100,6 +111,7 @@ export class PayrollRunProcessor extends WorkerHost {
     employeeId: string,
     run: { payrollMode: string; periodYear: number; periodMonth: number; currencyCode: string },
     pack: ResolvedPayrollPack,
+    componentDefs: PayrollComponentDefinition[],
   ): Promise<void> {
     const idempotencyKey = `${tenantId}:${payrollRunId}:${employeeId}`;
 
@@ -119,7 +131,7 @@ export class PayrollRunProcessor extends WorkerHost {
           const result =
             run.payrollMode === 'DELEGATE'
               ? { ...(await this.delegateAdapter.submitEmployee(tx, tenantId, employee, pack, period)), computedVia: 'DELEGATE' as const }
-              : { ...(await this.engine.computeForEmployee(tx, employee, pack, period)), computedVia: 'ENGINE' as const };
+              : { ...(await this.engine.computeForEmployee(tx, employee, pack, period, componentDefs)), computedVia: 'ENGINE' as const };
 
           // Benefits payroll-input hand-off (step 3.5.2, ORCHESTRATION
           // only — see docs/conventions/benefits.md). Mirrors the

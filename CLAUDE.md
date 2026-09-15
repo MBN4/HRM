@@ -109,6 +109,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/scaling-data-layer.md`](./docs/conventions/scaling-data-layer.md)           | Data-layer scale hardening: PgBouncer + the transaction-pooling/RLS safety proof, a real streaming read replica (RLS-identical + read-after-write), and tenant-scoped Redis caching (country packs, org structure, permissions) with immediate invalidation — plus the entitlement-caching attempt that was empirically reverted. (5.1)                                            |
 | [`docs/conventions/partitioning-archival.md`](./docs/conventions/partitioning-archival.md)     | Native `PARTITION BY RANGE` for `attendance_records`/`audit_log`/`platform_audit_log` (additive conversion, RLS+immutability proven identical on partitions, partition pruning proven), the automated ahead-of-time partition-creation job, and the archival/retention mechanism + its Phase 6.1 GDPR seam. (5.2)                                                                  |
 | [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md)           | The statelessness audit + its multi-instance proof, the `worker.ts`/`PROCESS_ROLE` API-worker split (proven against real BullMQ), Docker images, `deploy/k8s/` manifests (HPA/KEDA, probes, graceful rollout, migration-job safety), and the regional-deployment seam. (5.3)                                                                                                       |
+| [`docs/conventions/observability-load.md`](./docs/conventions/observability-load.md)           | Structured/correlated logging + PII redaction, the Sentry error-tracking seam, Prometheus metrics + Grafana dashboards/alerts (all verified against real instances), OpenTelemetry tracing, and k6 load testing — two real bugs found+fixed (a payroll N+1, a `DbPoolExhaustionFilter` gap) plus the honest 20M extrapolation. (5.4)                                               |
 
 ## 5. Build log summary
 
@@ -700,6 +701,49 @@ Phase 0–3's foundation.
   HPA/KEDA scale event, DNS/cert-manager behavior — no cluster exists in
   this environment) rather than blurring the two. See
   [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md).
+- **5.4** — Observability + load testing (Phase 5's FINAL slice, two
+  genuinely different halves per this step's own brief): structured JSON
+  logging (`PinoLoggerService`, installed via `app.useLogger()` so every
+  EXISTING `Logger` call site emits correlated output with zero call-site
+  changes; correlation and PII redaction both reuse EXISTING mechanisms —
+  the tenancy `AsyncLocalStorage` store and the 0.9 audit-redaction
+  function verbatim), a swappable error-tracking seam (Sentry/Noop, the
+  SAME pattern as Stripe/ACME), Prometheus metrics (`/metrics`, one
+  registry per process, every label bounded — never a raw tenant id;
+  queue depth is the SAME signal `worker-hpa-keda.yaml` already reads),
+  OpenTelemetry tracing (auto-instrumented HTTP/Redis; one representative
+  api→worker span-linked flow), and Grafana dashboards + Prometheus alert
+  rules — ALL verified against real local Prometheus/Grafana instances,
+  not just written. **A real gap this step's OWN e2e test caught**: an
+  exception thrown from inside a rolled-back Postgres transaction can lose
+  its tenant-correlation context (a genuine `AsyncLocalStorage`-across-
+  native-async-boundary edge case) — fixed by mirroring tenant identity
+  into the always-alive request-level store. **Load testing (k6, a
+  realistic skewed multi-tenant fixture, never one giant tenant) found and
+  fixed TWO real backend bugs, measured before/after**: payroll's per-
+  employee re-fetch of a run-wide-identical component-definition set
+  (300-employee run: ~8.3s → ~6.9s, zero correctness change, 57 existing
+  tests still pass identically) and a genuine gap in 0.10's
+  `DbPoolExhaustionFilter` (it recognized Prisma's `P2024` but not `P2028`
+  — the error code this codebase's OWN interactive-transaction-per-request
+  architecture actually produces under real load — meaning pool pressure
+  was surfacing as a raw `500`, not the intended clean `503`); a NEW
+  regression test proves the fix. Three load-test SCRIPT bugs (a login
+  retry storm hitting the auth rate limiter, uncached per-iteration
+  logins, zero think-time) were ALSO found and fixed along the way — once
+  corrected, the designated high-volume path (a 200-employee attendance
+  clock-in burst) measures 100% success at p95=120ms. Closes with an
+  HONEST 20M-user extrapolation: what already scales horizontally
+  (stateless api/worker, replicas, PgBouncer, partitioning, KEDA) vs. what
+  the true ceiling would still need (tenant-level DB sharding, real
+  logins/sec capacity planning, a genuine multi-hour soak test) — never
+  claimed as already covered. See
+  [`docs/conventions/observability-load.md`](./docs/conventions/observability-load.md).
+
+**PHASE 5 COMPLETE.** Data-layer scaling (5.1) + partitioning/archival
+(5.2) + horizontal scaling/Kubernetes/regional deployment (5.3) +
+observability/load testing (5.4) — the full scale-and-operate layer, on
+top of every prior phase's foundation.
 
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
@@ -771,8 +815,25 @@ reporting (3.5.4) — the go-live/compliance layer for a real first client.
       tenant->region pinning via 0.3's existing subdomain resolution) —
       explicitly not Phase 6.1's cross-region enforcement. See
       [`docs/conventions/deployment-scaling.md`](./docs/conventions/deployment-scaling.md).
-- [ ] **5.4** Observability + load testing — deferred.
+- [x] **5.4** Observability + load testing — structured/correlated JSON
+      logging (zero call-site changes, reuses the tenancy `AsyncLocalStorage`
+      store + the 0.9 audit-redaction function), a Sentry/Noop error-
+      tracking seam, Prometheus metrics (`/metrics`, bounded labels, the
+      SAME queue-depth number `worker-hpa-keda.yaml` reads) + Grafana
+      dashboards + alert rules (verified against real local instances),
+      OpenTelemetry tracing (auto-instrumented + one api→worker span-linked
+      flow), and k6 load testing against a realistic skewed multi-tenant
+      fixture — TWO real backend bugs found+fixed and measured (a payroll
+      per-employee N+1; a `DbPoolExhaustionFilter` gap letting real DB-
+      pressure errors surface as raw 500s), three load-test SCRIPT bugs
+      also found+fixed along the way, and an honest 20M-user extrapolation
+      (what already scales horizontally vs. what the true ceiling would
+      still need — tenant-level sharding, real capacity numbers, a genuine
+      soak test). See
+      [`docs/conventions/observability-load.md`](./docs/conventions/observability-load.md).
 
-**Phase 5 remaining: 5.4 (observability + load testing), deferred.**
+**PHASE 5 COMPLETE.** Data-layer scaling (5.1) + partitioning/archival
+(5.2) + horizontal scaling/Kubernetes/regional deployment (5.3) +
+observability/load testing (5.4).
 
 - [ ] **Phase 6** — _scope not yet defined_

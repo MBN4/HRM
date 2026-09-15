@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Employee, Prisma } from '@hrm/db';
+import type { Employee, PayrollComponentDefinition, Prisma } from '@hrm/db';
 import type { Expr, StatutoryComponent, TaxLayer } from '@hrm/shared';
 import { evaluateExpression } from '../../country-packs/rules-engine/expression-evaluator';
 import { computeMultiLayerTax } from '../../country-packs/rules-engine/tax-calculator';
@@ -50,6 +50,15 @@ export class PayrollEngineService {
     employee: Employee,
     pack: ResolvedPayrollPack,
     period: { periodYear: number; periodMonth: number },
+    // Phase 5.4 — OPTIONAL: a caller iterating many employees in the SAME
+    // run (the only real caller today, `PayrollRunProcessor`) can pre-fetch
+    // this ONCE and pass it in, since it depends only on `pack.countryCode`
+    // — identical for every employee in one run — never anything
+    // employee-specific. A real, measured N+1 this closes: see
+    // docs/conventions/observability-load.md § Load testing findings.
+    // Omitted (any future caller computing a one-off preview) falls back
+    // to fetching it here, exactly as before this step.
+    componentDefs?: PayrollComponentDefinition[],
   ): Promise<PayrollComputationResult> {
     const start = periodStartDate(period.periodYear, period.periodMonth);
     const end = periodEndDate(period.periodYear, period.periodMonth);
@@ -77,7 +86,7 @@ export class PayrollEngineService {
     const hourlyRate = annualStandardHours > 0 ? (basicSalaryMonthly * 12) / annualStandardHours : 0;
     const overtimePay = round2((overtimeMinutes / 60) * hourlyRate * pack.config.workingTime.overtimeRules.multiplier);
 
-    const componentDefs = await this.components.listActive(tx, pack.countryCode);
+    const resolvedComponentDefs = componentDefs ?? (await this.components.listActive(tx, pack.countryCode));
     const preGrossVariables = { basicSalary: basicSalaryMonthly, yearsOfService };
 
     const componentLines: PayrollComponentLine[] = [
@@ -92,7 +101,7 @@ export class PayrollEngineService {
 
     let earningsTotal = 0;
     let discretionaryDeductionsTotal = 0;
-    for (const def of componentDefs) {
+    for (const def of resolvedComponentDefs) {
       const amount = round2(computeComponentAmount(def, preGrossVariables));
       componentLines.push({ key: def.key, label: def.name, type: def.type, amount });
       if (def.type === 'DEDUCTION') {

@@ -1,8 +1,14 @@
+// Phase 5.4 — see main.ts's identical comment: must be the very first
+// import, before `reflect-metadata`, for OTel auto-instrumentation to
+// patch `http`/`ioredis` before anything else requires them.
+import './tracing/init-tracing';
 import 'reflect-metadata';
 import { createServer } from 'node:http';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { PinoLoggerService } from './common/logging/pino-logger.service';
+import { MetricsService } from './metrics/metrics.service';
 import { ShutdownService } from './resilience/shutdown/shutdown.service';
 import { ReadinessService } from './resilience/health/readiness.service';
 
@@ -33,10 +39,16 @@ const SHUTDOWN_GRACE_PERIOD_MS = Number(process.env.SHUTDOWN_GRACE_PERIOD_MS ?? 
 const WORKER_HEALTH_PORT = Number(process.env.WORKER_HEALTH_PORT ?? 3002);
 
 async function bootstrap() {
-  const context = await NestFactory.createApplicationContext(AppModule);
+  const context = await NestFactory.createApplicationContext(AppModule, { bufferLogs: true });
+  // Step 5.4 — the SAME structured logger main.ts installs for the API,
+  // here for the worker: every existing `Logger` call site (including
+  // inside `@Processor` classes) emits consistent JSON, tagged
+  // `service: 'hrm-worker'` instead of `'hrm-api'`.
+  context.useLogger(new PinoLoggerService({ serviceName: 'hrm-worker' }));
   const logger = new Logger('WorkerBootstrap');
   const shutdownService = context.get(ShutdownService);
   const readiness = context.get(ReadinessService);
+  const metrics = context.get(MetricsService);
 
   // A minimal, purpose-built HTTP surface for a kubelet liveness/readiness
   // probe to reach this process — deliberately NOT `AppModule`'s
@@ -46,7 +58,17 @@ async function bootstrap() {
   // shutdown-flag checks the API's own `/health/ready` uses, just exposed
   // over a tiny hand-rolled server instead of Nest's HTTP layer, so the
   // worker process never needs to stand up Express/Fastify or mount a
-  // single one of AppModule's feature controllers.
+  // single one of AppModule's feature controllers. `/metrics` rides the
+  // SAME tiny server (Step 5.4) — the worker's `MetricsService` instance
+  // is a SEPARATE registry from the API's own (each process registers its
+  // own `collectDefaultMetrics`/queue-depth/job-duration series), scraped
+  // as its own target — see docs/conventions/observability-load.md.
+  // Deliberately unauthenticated here (unlike the API's `/metrics`,
+  // gated by `MetricsAuthGuard`): this server has no Nest guard pipeline
+  // at all, so the SAME defense-in-depth this file's own doc comment
+  // already asks of every deployment (restrict this port at the network
+  // layer — a NetworkPolicy/security-group rule, never expose it publicly)
+  // is what secures this endpoint too.
   const healthServer = createServer((req, res) => {
     if (req.url === '/health/live') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -63,6 +85,19 @@ async function bootstrap() {
         .catch((error: unknown) => {
           res.writeHead(503, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ready: false, error: String(error) }));
+        });
+      return;
+    }
+    if (req.url === '/metrics') {
+      metrics
+        .metricsText()
+        .then((text) => {
+          res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
+          res.end(text);
+        })
+        .catch((error: unknown) => {
+          res.writeHead(500);
+          res.end(String(error));
         });
       return;
     }

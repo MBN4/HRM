@@ -1,0 +1,66 @@
+{
+  "title": "HRM — Queues & Workers",
+  "uid": "hrm-queues-workers",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "utc",
+  "time": { "from": "now-6h", "to": "now" },
+  "tags": ["hrm", "worker", "bullmq"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "Prometheus" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Waiting jobs per queue (the KEDA autoscaling signal — worker-hpa-keda.yaml)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "hrm_queue_depth{state=\"waiting\"}", "legendFormat": "{{queue}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Active jobs per queue",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "hrm_queue_depth{state=\"active\"}", "legendFormat": "{{queue}}" }]
+    },
+    {
+      "id": 3,
+      "title": "Failed jobs per queue (cumulative)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "hrm_queue_depth{state=\"failed\"}", "legendFormat": "{{queue}}" }]
+    },
+    {
+      "id": 4,
+      "title": "Delayed jobs per queue",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [{ "expr": "hrm_queue_depth{state=\"delayed\"}", "legendFormat": "{{queue}}" }]
+    },
+    {
+      "id": 5,
+      "title": "Worker process CPU (hrm-worker service)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "targets": [
+        { "expr": "rate(hrm_process_process_cpu_seconds_total{service=\"hrm-worker\"}[5m])", "legendFormat": "worker cpu" }
+      ]
+    }
+  ]
+}

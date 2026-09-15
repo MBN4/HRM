@@ -2,6 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import type { Job } from 'bullmq';
 import { NOTIFICATIONS_QUEUE } from '../queue/queue.constants';
 import { shouldAutorunWorkers } from '../queue/queue-worker.util';
+import { runWithExtractedTraceContext } from '../tracing/queue-trace.util';
 import type { DeliverNotificationJobData } from './notifications.service';
 import { NotificationDeliveryService } from './notification-delivery.service';
 
@@ -22,6 +23,12 @@ export class NotificationProcessor extends WorkerHost {
 
   async process(job: Job<DeliverNotificationJobData>): Promise<void> {
     const maxAttempts = job.opts.attempts ?? 1;
-    await this.delivery.deliver(job.data.tenantId, job.data.notificationDeliveryId, job.attemptsMade, maxAttempts);
+    // Phase 5.4 — see docs/conventions/observability-load.md § Tracing:
+    // the sample api->worker span-linking flow. `job.data.traceContext`
+    // is the enqueuing request's trace context, injected by
+    // `NotificationsService.handleDomainEvent`.
+    await runWithExtractedTraceContext('notifications.deliver', job.data.traceContext, () =>
+      this.delivery.deliver(job.data.tenantId, job.data.notificationDeliveryId, job.attemptsMade, maxAttempts),
+    );
   }
 }

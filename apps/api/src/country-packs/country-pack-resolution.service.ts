@@ -2,8 +2,11 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { countryPackConfigSchema, tenantCountryOverrideSchema } from '@hrm/shared';
 import { REDIS_CLIENT } from '../redis/redis.constants';
+import { MetricsService } from '../metrics/metrics.service';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { EffectiveCountryPackConfig, mergeCountryPackConfig } from './country-pack-override.util';
+
+const CACHE_NAME = 'country-pack';
 
 export class CountryPackNotFoundError extends NotFoundException {
   constructor(countryCode: string) {
@@ -45,6 +48,7 @@ export class CountryPackResolutionService {
   constructor(
     private readonly tenantContext: TenantContextService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly metrics: MetricsService,
   ) {}
 
   /**
@@ -89,8 +93,10 @@ export class CountryPackResolutionService {
     if (tenantId) {
       const cached = await this.redis.get(this.cacheKey(tenantId, countryCode));
       if (cached) {
+        this.metrics.recordCacheHit(CACHE_NAME);
         return JSON.parse(cached) as EffectiveCountryPackConfig;
       }
+      this.metrics.recordCacheMiss(CACHE_NAME);
     }
 
     const tx = this.tenantContext.getTx();

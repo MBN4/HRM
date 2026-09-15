@@ -19,10 +19,19 @@
  * `compensation`, redacted the same "over-redact the whole value, don't
  * enumerate leaf fields" way. Extended in step 2.3 (Recruitment lifecycle)
  * to also match `proposedSalary` — an `Offer`'s proposed compensation is
- * exactly as sensitive as an `Employee`'s, redacted the same way.
+ * exactly as sensitive as an `Employee`'s, redacted the same way. Extended
+ * in step 5.4 to also match `ssn`/`cnic`/`ntn`/`qatarId`/`nationalId`/
+ * `passportNumber`/`bankAccount`/`iban`/`taxId` — `Employee.statutoryFields`
+ * (country-pack-driven required-field keys like `SSN`/`CNIC`/`NTN`/
+ * `QATAR_ID`, see docs/conventions/employee.md/pakistan-pack.md) is now
+ * ALSO reachable from structured logs, not just the audit sink this
+ * pattern originally shipped for — `PinoLoggerService` (see
+ * docs/conventions/observability-load.md) reuses this exact function as
+ * its log-scrubbing mechanism, so every term added here protects both
+ * sinks at once, automatically.
  */
 const REDACTED_KEY_PATTERN =
-  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown|proposedSalary/i;
+  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown|proposedSalary|ssn|cnic|ntn|qatarId|nationalId|passportNumber|bankAccount|iban|taxId/i;
 
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 

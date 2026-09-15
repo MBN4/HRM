@@ -3562,3 +3562,160 @@ multi-instance demo overlay. `apps/portal`/`apps/admin` Playwright suites:
 untouched (no UI/behavior surface, only build-output shape changed).
 
 **Phase 5 remaining: 5.4 (observability + load testing), deferred.**
+
+## 5.4 — Observability + load testing
+
+(2026-09-14) — `apps/api/src/common/logging` (new: `PinoLoggerService`,
+`error-tracker.ts`, `request-context.store.ts`, `request-id.middleware.ts`,
+`logging.module.ts`), `apps/api/src/metrics` (new: `MetricsService`,
+`QueueMetricsService`, `MetricsController`, `MetricsAuthGuard`,
+`http-metrics.middleware.ts`), `apps/api/src/tracing` (new:
+`init-tracing.ts`, `queue-trace.util.ts`), `packages/shared/src/audit/redact.ts`
+(pattern extended), `apps/api/src/main.ts`/`worker.ts` (logger/tracing/
+metrics-middleware wiring), `apps/api/src/tenancy/tenant-scope.interceptor.ts`
+(one additive `setRequestLogIdentity` mirror), `apps/api/src/resilience/db-pool-exhaustion.filter.ts`
+(the P2028 fix — see below), `apps/api/src/payroll/{engine,runs}` (the N+1
+fix — see below), 6 small instrumentation hooks (rate-limit filter, load
+shedding, circuit breaker, 3 caches), `deploy/observability/` (new:
+Grafana dashboards + provisioning, Prometheus alert rules ×2 formats),
+`docker-compose.observability.yml` (new), `load/` (new: 8 k6 scenarios,
+`lib/helpers.js`, `README.md`), `apps/api/scripts/seed-load-test-data.ts`
+(new), 3 new test files (`pino-logger.service.spec.ts`,
+`observability.e2e-spec.ts`, `resilience-pool-exhaustion-txn-start.e2e-spec.ts`).
+See [`docs/conventions/observability-load.md`](./conventions/observability-load.md)
+for the full write-up. Phase 5's FINAL slice, two genuinely different
+halves per this step's own brief: full production observability (largely
+provable locally) and load-testing the hot paths to find/fix real
+bottlenecks while documenting the 20M-user extrapolation HONESTLY — never
+"tested at scale."
+
+**Structured logging**: `PinoLoggerService` installed via `app.useLogger(...)`
+in both entrypoints makes every EXISTING `Logger` call site across ~19
+files emit consistent, correlated JSON with zero call-site changes (Nest's
+`Logger` delegates to one static, replaceable reference). Correlation
+(`requestId`/`tenantId`/`userId`) is automatic on every line via pino's
+`mixin` hook reading two `AsyncLocalStorage` stores — the tenancy one
+`TenantScopeInterceptor` already populates, reused as-is, plus a new tiny
+`requestId`-only store set up by plain `app.use()` middleware. PII safety
+reuses the 0.9 audit-redaction function VERBATIM (`redactSensitiveFields`,
+extended with `ssn`/`cnic`/`ntn`/`qatarId`/etc. — protecting both sinks at
+once). **A real gap this step's OWN e2e test caught**: an exception thrown
+from inside a rolled-back Postgres transaction can settle AFTER the tenant
+`AsyncLocalStorage` continuation that was active at throw-time is already
+gone (Prisma's own async rollback round-trip breaks the continuity) — so
+`tenantId` went missing from captured error context specifically for
+that path. Fixed by having `TenantScopeInterceptor` mirror `tenantId`/
+`userId` into the (always-alive) request-level store the moment they're
+resolved, with the logger falling back to that mirror when the live
+tenant store is gone.
+
+**Error tracking**: the SAME "real binding only when configured, Noop
+otherwise" seam as Stripe/ACME — `SENTRY_DSN` unset binds `NoopErrorTracker`;
+set, binds a real `SentryErrorTracker` (`sendDefaultPii: false`, this
+codebase's own redaction is the trusted mechanism). Forwards only already-
+scrubbed correlation fields, never a caller's raw arguments.
+
+**Metrics**: one `prom-client` registry per process (api AND worker each
+get their own), every label BOUNDED (route template, method, status,
+queue/cache/breaker name, priority — never a raw tenant id). `hrm_queue_depth`
+(polled every 15s via ONE shared `ioredis` connection across all 15
+queues — zero processor changes, and the identical number
+`worker-hpa-keda.yaml` already reads from Redis directly), HTTP request
+rate/latency (a `res.on('finish', ...)` middleware, not an interceptor —
+needed for the FINAL status code), cache hit/miss (3 services, one line
+each), circuit-breaker state, rate-limit/load-shed/pool-exhaustion
+rejection counters (each wired at its ALREADY-EXISTING single choke
+point). `GET /metrics`: `@Public()` + `@Priority('CRITICAL')` (never shed)
++ a bearer-token guard. **Verified against a REAL Prometheus + Grafana**,
+not just unit-tested — brought up locally via `docker-compose.observability.yml`,
+confirmed live-scraping real metrics and correctly provisioning all 3
+dashboards; all 9 Prometheus alert rules confirmed to parse via a real
+Prometheus's own `/api/v1/rules`.
+
+**Tracing**: an OpenTelemetry `NodeSDK`, imported as the literal first line
+of both entrypoints (before `reflect-metadata`, since auto-instrumentation
+must patch `http`/`express`/`ioredis` before their first `require()`).
+HTTP/Redis get spans automatically; api→worker job linking (BullMQ crosses
+a process boundary no instrumentation library can hook) is wired into ONE
+representative flow (notifications' producer/consumer pair) via explicit
+W3C-Trace-Context inject/extract — honestly scoped as a pattern to repeat
+for other queues, not built for all 15.
+
+**Load testing — two real backend bugs found and fixed, measured before/
+after, not assumed**:
+1. **Payroll's per-employee component-definition re-fetch** — `PayrollEngineService.computeForEmployee`
+   fetched the SAME (run-wide-identical) component-definition set once
+   PER EMPLOYEE; hoisted to once-per-run in `PayrollRunProcessor`'s
+   existing bootstrap transaction. Measured on a real 300-employee whale
+   tenant's payroll CALCULATE run, twice each way: **8.28s/8.34s before →
+   6.88s/7.32s after** (~15-18% faster) — zero correctness change (the
+   full payroll/benefits/recruitment/operations e2e suite, 57 tests of
+   real computed-amount assertions, passes identically before and after).
+2. **`DbPoolExhaustionFilter`'s `P2028` gap** — the filter only recognized
+   Prisma code `P2024`; under REAL concurrent load, this codebase's actual
+   architecture (every tenant request runs inside an interactive
+   `$transaction()`, via `withTenantContext`) produces `P2028`
+   ("Transaction API error: Unable to start a transaction in the given
+   time") instead, which fell through to a raw, confusing `500` — the
+   exact failure this filter exists to prevent, just for the code path
+   this system's own design actually exercises. Found via a real k6 run
+   (a large volume of 500s on `/analytics/dashboard`, confirmed via
+   `/metrics` that neither existing rejection counter had fired, then a
+   minimal isolated repro pinned the exact code) — the PRE-EXISTING
+   `resilience-pool-exhaustion.e2e-spec.ts` never caught this because it
+   happens to set `DB_POOL_TIMEOUT_SECONDS` equal to Prisma's own
+   `maxWait` default, while this codebase's REAL default
+   (`DB_POOL_TIMEOUT_SECONDS=5` > the 2000ms `maxWait` default) always
+   hits P2028 first. Fixed: both codes now map to the same clean `503` +
+   `Retry-After`. A new, deliberately-separate-file regression test
+   (mirroring the existing file's own env-var-isolation discipline) proves
+   it — verified empirically that reproducing this specific path needs
+   real concurrent pressure (20 contenders), not a 1-vs-1 race.
+
+**Load-test SCRIPT bugs found and fixed along the way** — a real, useful
+category in its own right, left documented in the scripts themselves: a
+login-retry loop that burned through `POST /auth/login`'s OWN 5-attempts/
+15-minute brute-force rate limit and then stayed locked out for the rest
+of a run; not caching a login token per VU at all (measuring "how fast can
+argon2 verify passwords back-to-back" instead of the endpoint each script
+was named for); and zero think-time between iterations producing a
+sustained request rate no real usage pattern would generate. Once fixed,
+`attendance-clockin.js`'s real, corrected result — a 200-employee clock-in
+burst — is **100% success, p95 = 120.58ms**, the concrete proof behind
+attendance.md's own "a handful of indexed reads, one write" claim.
+
+**Verified under load, tied to 0.10/5.1/5.3**: per-tenant rate-limit
+isolation (both a direct concurrent-burst capture of a real `429` and
+`rate-limit-isolation.js`'s two-tenant proof), load shedding engaging on a
+REAL business path this time (a captured, verbatim `503` "this NORMAL
+request was shed" body from `/attendance/clock-in` itself, not only the
+demo route), and DB/transaction backpressure returning clean `503`s with
+`Retry-After`, never a hang.
+
+**The honest 20M extrapolation**: what scales horizontally with what's
+already built (stateless api/worker, read replicas, PgBouncer,
+partitioning, KEDA queue-depth autoscaling — all Phase 5's own prior
+slices) vs. what would need MORE at the true ceiling (tenant-level DB
+sharding once a single primary's write throughput becomes the limit — the
+natural extension of 5.3's own `hostingRegion` placement seam; argon2
+capacity planning needs a real target logins/second number this document
+deliberately doesn't invent; a genuine soak test over hours/days, not the
+minutes-long bursts this step measured) — stated plainly, never implied
+as already covered.
+
+Verified: `apps/api`'s full suite — **62 test suites, 562 tests total**
+(549 existing + 6 new in `pino-logger.service.spec.ts` + 6 new in
+`observability.e2e-spec.ts` + 1 new in
+`resilience-pool-exhaustion-txn-start.e2e-spec.ts`), the same single
+pre-existing `migration.e2e-spec.ts` timing flake this suite has carried
+since 5.1 the only known-flaky file, unrelated to this step (it did not
+reproduce on this step's own full-suite runs, each 100% green).
+Full-repo `pnpm build`/`pnpm lint` green across all 8 workspace tasks.
+`docker-compose.observability.yml` actually brought up locally (Prometheus
++ Grafana, both verified live). All 8 k6 scenarios actually run against a
+real local API instance, not just written. `apps/portal`/`apps/admin`:
+untouched, no UI surface.
+
+**PHASE 5 COMPLETE.** Data-layer scaling (5.1) + partitioning/archival
+(5.2) + horizontal scaling/Kubernetes/regional deployment (5.3) +
+observability/load testing (5.4). Phase 6 (scope not yet defined) is next.

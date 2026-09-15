@@ -1,0 +1,41 @@
+# Phase 5.4 — a LOCAL, optional Prometheus + Grafana stack for actually
+# looking at the metrics `/metrics` exposes, and exercising the alert
+# rules against real (if modest) traffic. Additive, like
+# docker-compose.scale.yml — combine with the root compose file via `-f`:
+#
+#   pnpm --filter @hrm/api run start:prod   # (or dev) — API on :3001
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up prometheus grafana
+#   # Grafana: http://localhost:3300 (admin/admin) — the 3 dashboards in
+#   # deploy/observability/grafana/dashboards/ are auto-provisioned.
+#   # Prometheus: http://localhost:9090
+#
+# `host.docker.internal` (prometheus.yml's scrape target) resolves back to
+# the HOST machine's own `localhost` from inside the container — where the
+# api/worker processes actually run in local dev (not containerized) per
+# this repo's normal `pnpm --filter @hrm/api run dev` workflow.
+services:
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: hrm-prometheus
+    volumes:
+      - ./deploy/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '9090:9090'
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: hrm-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '3300:3000'
+    depends_on:
+      - prometheus

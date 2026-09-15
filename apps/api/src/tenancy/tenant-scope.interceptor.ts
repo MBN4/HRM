@@ -28,6 +28,7 @@ import { IS_PLATFORM_KEY } from './platform-route.decorator';
 import { TenantResolutionService } from './tenant-resolution.service';
 import { RequestTenantStore } from './tenant-context.store';
 import { TenantContextService } from './tenant-context.service';
+import { setRequestLogIdentity } from '../common/logging/request-context.store';
 
 const EMPTY_CONTEXT: Omit<RequestTenantStore, 'platform' | 'tx'> = {
   tenantId: null,
@@ -264,6 +265,12 @@ export class TenantScopeInterceptor implements NestInterceptor {
     }
 
     await this.tenantRateLimit.enforce(resolved.tenantId);
+    // Phase 5.4 — mirrors the resolved tenant into the request-level log
+    // context AS SOON AS it's known, independent of the Postgres
+    // transaction below — see request-context.store.ts's own doc comment
+    // for exactly why this can't just be read off `tenantContextStorage`
+    // at error-log time in every case.
+    setRequestLogIdentity(resolved.tenantId);
 
     const isAllowAnonymous = this.reflector.getAllAndOverride<boolean>(IS_ALLOW_ANONYMOUS_KEY, [
       context.getHandler(),
@@ -272,6 +279,7 @@ export class TenantScopeInterceptor implements NestInterceptor {
 
     return withTenantContext(resolved.tenantId, async (tx) => {
       const authContext = isAllowAnonymous ? EMPTY_CONTEXT : await this.authenticate(req, resolved.tenantId, tx);
+      setRequestLogIdentity(resolved.tenantId, authContext.userId ?? undefined);
 
       return this.tenantContext.run(
         { ...authContext, tenantId: resolved.tenantId, platform: false, tx },
@@ -317,6 +325,7 @@ export class TenantScopeInterceptor implements NestInterceptor {
 
     await this.tenantRateLimit.enforce(validated.tenantId);
     await this.apiKeyRateLimit.enforce(validated.apiKeyId, validated.rateLimitPerMinute);
+    setRequestLogIdentity(validated.tenantId);
 
     return withTenantContext(validated.tenantId, async (tx) => {
       const apiKeyContext: Omit<RequestTenantStore, 'platform' | 'tx'> = {

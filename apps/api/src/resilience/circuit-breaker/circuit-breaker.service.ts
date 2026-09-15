@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { CircuitBreakerOptions, CircuitState, DEFAULT_CIRCUIT_BREAKER_OPTIONS } from '@hrm/shared';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
+import { MetricsService } from '../../metrics/metrics.service';
 import { CircuitOpenError } from './circuit-open.exception';
 
 function keyFor(name: string, suffix: string): string {
@@ -37,11 +38,20 @@ function keyFor(name: string, suffix: string): string {
 export class CircuitBreakerService {
   private readonly logger = new Logger(CircuitBreakerService.name);
 
-  constructor(@Inject(REDIS_CLIENT) private readonly redis: Redis) {}
+  constructor(
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly metrics: MetricsService,
+  ) {}
 
   async execute<T>(name: string, fn: () => Promise<T>, options: Partial<CircuitBreakerOptions> = {}): Promise<T> {
     const opts: CircuitBreakerOptions = { ...DEFAULT_CIRCUIT_BREAKER_OPTIONS, ...options };
     const state = await this.transitionIfDue(name, opts);
+    // Phase 5.4 — a gauge, sampled on every use (see
+    // docs/conventions/observability-load.md § Metrics) rather than only
+    // on transition: correct either way (it always reflects the CURRENT
+    // state by the time anything scrapes it), and simpler than a second
+    // "did it change" branch at each of the three transition points below.
+    this.metrics.setCircuitBreakerState(name, state);
 
     if (state === 'OPEN') {
       throw new CircuitOpenError(name);
