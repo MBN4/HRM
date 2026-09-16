@@ -55,7 +55,7 @@ export default function OnboardingPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-ink-900">{t('nav.onboarding')}</h1>
         {canManage && (
-          <Button data-testid="refresh-button" variant="secondary" size="sm" onClick={() => reload()}>
+          <Button data-testid="refresh-button" variant="secondary" size="sm" aria-label={t('common.refresh')} onClick={() => reload()}>
             <RefreshCw className="h-4 w-4" aria-hidden />
           </Button>
         )}

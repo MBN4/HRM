@@ -105,14 +105,17 @@ export default function PerformancePage() {
                 </thead>
                 <tbody className="divide-y divide-ink-100">
                   {cycles.map((cycle: AppraisalCycle) => (
-                    <tr
-                      key={cycle.id}
-                      data-testid="cycle-row"
-                      data-status={cycle.status}
-                      className="cursor-pointer hover:bg-sand-50"
-                      onClick={() => router.push(`/performance/${cycle.id}`)}
-                    >
-                      <td className="py-2.5 text-ink-800">{cycle.name}</td>
+                    <tr key={cycle.id} data-testid="cycle-row" data-status={cycle.status} className="hover:bg-sand-50">
+                      <td className="py-2.5 text-ink-800">
+                        {/* A real <button>, not a row-level onClick — this row also holds
+                            its OWN interactive open/close buttons below (nesting a second
+                            interactive control inside an interactive row breaks both mouse
+                            and assistive-tech operation), matching the same pattern
+                            recruitment/page.tsx already uses for its own expandable rows. */}
+                        <button type="button" className="text-start hover:underline" onClick={() => router.push(`/performance/${cycle.id}`)}>
+                          {cycle.name}
+                        </button>
+                      </td>
                       <td className="py-2.5 text-ink-600">{t(`performance.cycleType.${cycle.cycleType}`)}</td>
                       <td className="py-2.5">
                         <StatusBadge status={cycle.status} label={t(`performance.cycleStatus.${cycle.status}`)} />

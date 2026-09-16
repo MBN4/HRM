@@ -103,7 +103,7 @@ export default function OffboardingPage() {
         <h1 className="text-xl font-semibold text-ink-900">{t('offboarding.processes')}</h1>
         <div className="flex items-center gap-2">
           {canManage && (
-            <Button data-testid="refresh-button" variant="secondary" size="sm" onClick={() => reload()}>
+            <Button data-testid="refresh-button" variant="secondary" size="sm" aria-label={t('common.refresh')} onClick={() => reload()}>
               <RefreshCw className="h-4 w-4" aria-hidden />
             </Button>
           )}
@@ -144,7 +144,22 @@ export default function OffboardingPage() {
                   <tbody className="divide-y divide-ink-100">
                     {processes.map((process) => (
                       <Fragment key={process.id}>
-                        <tr data-testid="offboarding-process-row" data-status={process.status} className="cursor-pointer hover:bg-sand-50" onClick={() => setExpandedId(expandedId === process.id ? null : process.id)}>
+                        <tr
+                          data-testid="offboarding-process-row"
+                          data-status={process.status}
+                          tabIndex={0}
+                          role="button"
+                          aria-expanded={expandedId === process.id}
+                          aria-label={process.employeeId}
+                          className="cursor-pointer hover:bg-sand-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
+                          onClick={() => setExpandedId(expandedId === process.id ? null : process.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setExpandedId(expandedId === process.id ? null : process.id);
+                            }
+                          }}
+                        >
                           <td className="py-2.5">
                             <StatusBadge status={process.status} label={t(`offboarding.status.${process.status}`)} />
                           </td>

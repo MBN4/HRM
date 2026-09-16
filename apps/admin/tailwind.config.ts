@@ -47,7 +47,17 @@ const config: Config = {
           100: '#e5e7eb',
           200: '#ccd0d8',
           300: '#a2a9b6',
-          400: '#767f91',
+          // WCAG 2.1 AA color-contrast (1.4.3) fix (Phase 6.2) — the
+          // original #767f91 was only 4.03:1 on white, below the 4.5:1
+          // normal-text minimum (it only cleared 4.5:1 against the
+          // Sidebar's own dark ink-900 background, a separate usage fixed
+          // below by switching that ONE call site to ink-300 instead — see
+          // docs/conventions/security-hardening.md's accessibility
+          // findings). Every other ink-400 usage in this app is on a
+          // white/light surface, so the token itself is corrected here.
+          // #616a7a clears 4.5:1 on both white (5.45:1) and sand-50
+          // (5.14:1) with headroom.
+          400: '#616a7a',
           500: '#5a6377',
           600: '#454d5f',
           700: '#333947',
@@ -59,7 +69,11 @@ const config: Config = {
           50: '#fdf7ed',
           400: '#eba93a',
           500: '#d38e1f',
-          600: '#af7213',
+          // WCAG 2.1 AA color-contrast fix (Phase 6.2) — the original
+          // #af7213 was 3.76:1 against amber-50, below 4.5:1, and this is
+          // the ONLY consumer of amber-600 (Badge.tsx's "warning" tone,
+          // e.g. PAST_DUE/PENDING_VERIFICATION). #8f5e0e clears 5.22:1.
+          600: '#8f5e0e',
         },
         coral: {
           50: '#fdf0ef',

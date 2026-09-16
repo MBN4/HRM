@@ -18,6 +18,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@hrm/config": "workspace:*",
     "@hrm/db": "workspace:*",
     "@node-rs/argon2": "^2.0.2",

@@ -93,6 +93,7 @@ export default function RecruitmentPage() {
             data-testid="refresh-button"
             variant="secondary"
             size="sm"
+            aria-label={t('common.refresh')}
             onClick={() => {
               reloadRequisitions();
               reloadPostings();

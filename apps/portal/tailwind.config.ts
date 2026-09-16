@@ -46,7 +46,18 @@ const config: Config = {
           100: '#e6e8eb',
           200: '#cfd3d9',
           300: '#a7aeb8',
-          400: '#788393',
+          // WCAG 2.1 AA color-contrast (1.4.3) fix (Phase 6.2) — the
+          // original #788393 was only 3.84:1 on white, below the 4.5:1
+          // normal-text minimum, and this token is used as secondary/
+          // muted body text (table headers, empty-state copy, badge-free
+          // labels) in ~170 places across the portal, always on a white or
+          // near-white (sand-50) background — never on a dark surface (see
+          // docs/conventions/security-hardening.md's accessibility
+          // findings) — so it's corrected at the TOKEN, not per call site.
+          // #657084 clears 4.5:1 on both white (5.00:1) and sand-50
+          // (4.74:1) with headroom, while staying visually distinct from
+          // ink-500.
+          400: '#657084',
           500: '#5b6577',
           600: '#454d5c',
           700: '#343a46',
@@ -58,7 +69,12 @@ const config: Config = {
           50: '#fdf8ed',
           400: '#eeab2f',
           500: '#d68f1a',
-          600: '#b3730f',
+          // WCAG 2.1 AA color-contrast fix (Phase 6.2) — the original
+          // #b3730f was 3.69:1 against amber-50, below 4.5:1, and this is
+          // the ONLY consumer of amber-600 (Badge.tsx's "warning" tone —
+          // PENDING/LATE/HIGH-priority status badges). #94600d clears
+          // 5.03:1.
+          600: '#94600d',
         },
         coral: {
           50: '#fdf1ef',

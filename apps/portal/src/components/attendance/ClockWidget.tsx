@@ -75,6 +75,8 @@ export function ClockWidget({ locale }: { locale: string }) {
           onClick={() => fileInputRef.current?.click()}
           className={`rounded-lg border p-2 ${photo ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-ink-200 text-ink-400 hover:bg-sand-100'}`}
           title={t('attendance.photo')}
+          aria-label={t('attendance.photo')}
+          aria-pressed={!!photo}
         >
           <Camera className="h-4 w-4" aria-hidden />
         </button>

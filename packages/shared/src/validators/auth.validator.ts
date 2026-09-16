@@ -42,3 +42,28 @@ export const setPushTokenSchema = z.object({
   pushToken: z.string().min(1).max(512).nullable(),
 });
 export type SetPushTokenInput = z.infer<typeof setPushTokenSchema>;
+
+// --- Optional tenant-user MFA (step 6.2) — see docs/conventions/security-hardening.md.
+// Same shape as the platform admin schemas in platform.validator.ts, applied
+// to the tenant identity space instead.
+
+const totpCodeSchema = z.string().regex(/^\d{6}$/, 'code must be a 6-digit TOTP code');
+
+export const mfaEnrollConfirmSchema = z.object({
+  code: totpCodeSchema,
+});
+export type MfaEnrollConfirmInput = z.infer<typeof mfaEnrollConfirmSchema>;
+
+export const mfaDisableSchema = z.object({
+  password: z.string().min(1),
+  /** Either a 6-digit TOTP code or a one-time recovery code — same acceptance as platform's own MFA verify. */
+  code: z.string().min(6),
+});
+export type MfaDisableInput = z.infer<typeof mfaDisableSchema>;
+
+export const mfaVerifySchema = z.object({
+  challengeToken: z.string().min(1),
+  /** Either a 6-digit TOTP code or a one-time recovery code. */
+  code: z.string().min(6),
+});
+export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;

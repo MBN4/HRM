@@ -94,8 +94,20 @@ export default function PayrollPage() {
                       key={run.id}
                       data-testid="payroll-run-row"
                       data-status={run.status}
-                      className="cursor-pointer hover:bg-sand-50"
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`${branchName(run.branchId)}, ${run.periodMonth}/${run.periodYear}`}
+                      className="cursor-pointer hover:bg-sand-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
                       onClick={() => router.push(`/payroll/${run.id}`)}
+                      onKeyDown={(e) => {
+                        // role="link" activates on Enter only (unlike
+                        // role="button", Space is left alone so it still
+                        // performs its native page-scroll behavior).
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          router.push(`/payroll/${run.id}`);
+                        }
+                      }}
                     >
                       <td className="py-2.5 text-ink-800">{branchName(run.branchId)}</td>
                       <td className="py-2.5 text-ink-600">

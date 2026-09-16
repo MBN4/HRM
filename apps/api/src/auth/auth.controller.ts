@@ -2,6 +2,9 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseInterceptors } fr
 import {
   changePasswordSchema,
   loginSchema,
+  mfaDisableSchema,
+  mfaEnrollConfirmSchema,
+  mfaVerifySchema,
   refreshSchema,
   requestPasswordResetSchema,
   resetPasswordSchema,
@@ -9,6 +12,9 @@ import {
   PERMISSIONS,
   type ChangePasswordInput,
   type LoginInput,
+  type MfaDisableInput,
+  type MfaEnrollConfirmInput,
+  type MfaVerifyInput,
   type RefreshInput,
   type RequestPasswordResetInput,
   type ResetPasswordInput,
@@ -44,6 +50,39 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   refresh(@Body(new ZodValidationPipe(refreshSchema)) body: RefreshInput) {
     return this.auth.refresh(this.requireTenantId(), body.refreshToken);
+  }
+
+  /**
+   * Completes an MFA-required login (step 6.2) — `@AllowAnonymous()`
+   * because the caller only has the short-lived `challengeToken` `login()`
+   * returned, not a session yet; same reasoning platform's
+   * `POST /platform/auth/mfa/verify` already documents for itself.
+   */
+  @Post('mfa/verify')
+  @AllowAnonymous()
+  @Priority('CRITICAL')
+  @HttpCode(HttpStatus.OK)
+  verifyMfa(@Body(new ZodValidationPipe(mfaVerifySchema)) body: MfaVerifyInput) {
+    return this.auth.verifyMfa(this.requireTenantId(), this.tenantContext.getTx(), body);
+  }
+
+  /** Starts (or restarts) OPTIONAL MFA enrollment for the CALLER's own account — authenticated, unlike platform's pre-session enrollment flow. */
+  @Post('mfa/enroll')
+  @HttpCode(HttpStatus.OK)
+  startMfaEnrollment() {
+    return this.auth.startMfaEnrollment(this.requireTenantId(), this.tenantContext.getTx(), this.requireUserId());
+  }
+
+  @Post('mfa/enroll/confirm')
+  @HttpCode(HttpStatus.OK)
+  confirmMfaEnrollment(@Body(new ZodValidationPipe(mfaEnrollConfirmSchema)) body: MfaEnrollConfirmInput) {
+    return this.auth.confirmMfaEnrollment(this.requireTenantId(), this.tenantContext.getTx(), this.requireUserId(), body);
+  }
+
+  @Post('mfa/disable')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async disableMfa(@Body(new ZodValidationPipe(mfaDisableSchema)) body: MfaDisableInput) {
+    await this.auth.disableMfa(this.requireTenantId(), this.tenantContext.getTx(), this.requireUserId(), body);
   }
 
   @Post('logout')

@@ -35,10 +35,11 @@ import { appPrisma, prisma, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '
 import { AppModule } from '../src/app.module';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
 import { EncryptionService } from '../src/common/encryption/encryption.service';
+import { EnvSecretsProvider } from '../src/common/encryption/key-provider/env-secrets.provider';
 import { generateTotp } from '../src/platform/auth/totp.util';
 import { cleanupTestPlatformAdmins, createTestPlatformAdmin } from './helpers/platform-test-auth';
 
-const encryption = new EncryptionService(new ConfigService({ FIELD_ENCRYPTION_KEY: process.env.FIELD_ENCRYPTION_KEY }));
+const encryption = new EncryptionService(new EnvSecretsProvider(new ConfigService({ FIELD_ENCRYPTION_KEY: process.env.FIELD_ENCRYPTION_KEY })));
 
 const ARGON2ID = 2;
 const TENANT_SLUG = 'platform-auth-tenant';

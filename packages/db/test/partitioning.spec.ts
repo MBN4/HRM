@@ -250,21 +250,32 @@ describe('hrm_ensure_range_partitions is idempotent (safe to call repeatedly, as
     // from a prior run — the whole point of the assertion below is "the
     // SECOND call adds nothing more than the first", which only means
     // something if we start from a genuinely clean slate for this exact
-    // pair.
-    const stamp = Date.now() % 100;
-    const month = `20${30 + Math.floor(stamp / 12)}-${String((stamp % 12) + 1).padStart(2, '0')}-01`;
+    // pair. `Date.now() % 100` only has 100 slots, so it WILL eventually
+    // collide with a partition a past run left behind (and did — five
+    // stale audit_log partitions from 2030-2036 were found sitting in the
+    // dev DB when this test started failing); `process.hrtime.bigint()`
+    // gives a much wider, monotonic-clock-derived slot (2040-2415, 4500
+    // months), and the `finally` below drops the partition it creates so
+    // this run never becomes tomorrow's leftover either.
+    const stamp = Number(process.hrtime.bigint() % 4500n);
+    const month = `${2040 + Math.floor(stamp / 12)}-${String((stamp % 12) + 1).padStart(2, '0')}-01`;
+    const suffix = month.slice(0, 7).replace('-', '_');
 
-    const before = await partitionExists('audit_log', month);
-    expect(before).toBe(false);
+    try {
+      const before = await partitionExists('audit_log', month);
+      expect(before).toBe(false);
 
-    await prisma.$executeRawUnsafe(`SELECT hrm_ensure_range_partitions('audit_log', 'audit_log_p', $1::date, $1::date)`, month);
-    const countAfterFirst = await countPartitionsOf('audit_log');
-    expect(await partitionExists('audit_log', month)).toBe(true);
+      await prisma.$executeRawUnsafe(`SELECT hrm_ensure_range_partitions('audit_log', 'audit_log_p', $1::date, $1::date)`, month);
+      const countAfterFirst = await countPartitionsOf('audit_log');
+      expect(await partitionExists('audit_log', month)).toBe(true);
 
-    await prisma.$executeRawUnsafe(`SELECT hrm_ensure_range_partitions('audit_log', 'audit_log_p', $1::date, $1::date)`, month);
-    const countAfterSecond = await countPartitionsOf('audit_log');
+      await prisma.$executeRawUnsafe(`SELECT hrm_ensure_range_partitions('audit_log', 'audit_log_p', $1::date, $1::date)`, month);
+      const countAfterSecond = await countPartitionsOf('audit_log');
 
-    expect(countAfterSecond).toBe(countAfterFirst);
+      expect(countAfterSecond).toBe(countAfterFirst);
+    } finally {
+      await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS audit_log_p${suffix}`);
+    }
   });
 
   it('hrm_app has no EXECUTE privilege on the partition-creation function (DDL stays owner-only)', async () => {

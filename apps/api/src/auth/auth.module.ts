@@ -5,6 +5,7 @@ import { LicensingModule } from '../licensing/licensing.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PermissionsGuard } from './guards/permissions.guard';
+import { TenantMfaService } from './mfa/tenant-mfa.service';
 import { PasswordService } from './password.service';
 import { AUTH_PROVIDER } from './providers/auth-provider.token';
 import { LocalAuthProvider } from './providers/local-auth.provider';
@@ -41,6 +42,7 @@ import { TokenService } from './token.service';
     PasswordService,
     TokenService,
     PermissionsGuard,
+    TenantMfaService,
     LocalAuthProvider,
     // The SSO seam: AuthService depends on the AUTH_PROVIDER token, not on
     // LocalAuthProvider directly. Swapping in a tenant-configurable

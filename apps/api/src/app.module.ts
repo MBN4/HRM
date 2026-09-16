@@ -41,6 +41,7 @@ import { StatutoryReportingModule } from './statutory-reporting/statutory-report
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './redis/redis.module';
 import { ResilienceModule } from './resilience/resilience.module';
+import { SecurityModule } from './security/security.module';
 import { StorageModule } from './storage/storage.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { WorkflowModule } from './workflow/workflow.module';
@@ -67,6 +68,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     // shedding/the request timeout are plain services TenantScopeInterceptor
     // calls directly, rather than separately-ordered global interceptors).
     ResilienceModule,
+    SecurityModule,
     TenancyModule,
     AuthModule,
     CountryPacksModule,

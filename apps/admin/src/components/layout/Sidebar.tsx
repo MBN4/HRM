@@ -34,7 +34,11 @@ export function Sidebar() {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">V</div>
         <div>
           <p className="text-sm font-semibold text-white">Vendor Console</p>
-          <p className="text-xs text-ink-400">Platform-wide · cross-tenant</p>
+          {/* ink-400 is tuned for LIGHT surfaces (WCAG contrast fix, see
+              tailwind.config.ts) — this is the one usage on the dark
+              sidebar background, so it uses ink-300 instead (7.80:1 here
+              vs. ink-400's 3.74:1). */}
+          <p className="text-xs text-ink-300">Platform-wide · cross-tenant</p>
         </div>
       </div>
 

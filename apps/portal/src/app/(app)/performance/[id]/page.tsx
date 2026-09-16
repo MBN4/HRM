@@ -175,8 +175,19 @@ export default function AppraisalCycleDetailPage({ params }: { params: { id: str
                       data-testid="appraisal-row"
                       data-status={appraisal.status}
                       data-employee-id={appraisal.employeeId}
-                      className="cursor-pointer hover:bg-sand-50"
+                      tabIndex={0}
+                      role="link"
+                      aria-label={appraisal.employeeId}
+                      className="cursor-pointer hover:bg-sand-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
                       onClick={() => router.push(`/performance/appraisals/${appraisal.id}`)}
+                      onKeyDown={(e) => {
+                        // role="link" activates on Enter only (Space is
+                        // left to its native page-scroll behavior).
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          router.push(`/performance/appraisals/${appraisal.id}`);
+                        }
+                      }}
                     >
                       <td className="py-2.5 text-ink-800">{appraisal.employeeId}</td>
                       <td className="py-2.5">

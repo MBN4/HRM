@@ -13,6 +13,7 @@ import { requestIdMiddleware } from './common/logging/request-id.middleware';
 import { createHttpMetricsMiddleware } from './metrics/http-metrics.middleware';
 import { MetricsService } from './metrics/metrics.service';
 import { ShutdownService } from './resilience/shutdown/shutdown.service';
+import { configureSecurity } from './security/configure-security';
 import { setupSwagger } from './swagger';
 
 /**
@@ -45,7 +46,11 @@ async function bootstrap() {
   // `Logger` class delegates to one static, replaceable reference.
   app.useLogger(new PinoLoggerService({ serviceName: 'hrm-api' }));
 
-  app.enableCors();
+  // Step 6.2 — secure headers (helmet, CSP tuned for /v1/docs) + a real
+  // CORS allow-list, replacing the previous `app.enableCors()` with NO
+  // options at all (any origin) — see docs/conventions/security-hardening.md.
+  // Factored out so the e2e suite can exercise the SAME wiring.
+  configureSecurity(app);
   app.use(requestIdMiddleware);
   app.use(createHttpMetricsMiddleware(app.get(MetricsService)));
 

@@ -241,9 +241,9 @@ model Tenant {
   benefitContributionRecords  BenefitContributionRecord[]
 
   // Step 3.5.3 — e-signatures (see docs/conventions/e-signatures.md).
-  signatureRequests    SignatureRequest[]
-  signatureSigners     SignatureSigner[]
-  signatureEvents      SignatureEvent[]
+  signatureRequests     SignatureRequest[]
+  signatureSigners      SignatureSigner[]
+  signatureEvents       SignatureEvent[]
   signatureCertificates SignatureCertificate[]
 
   // Step 3.5.4 — statutory / government reporting (see
@@ -491,11 +491,11 @@ enum UserStatus {
 }
 
 model User {
-  id                String     @id @default(uuid()) @db.Uuid
-  tenantId          String     @map("tenant_id") @db.Uuid
-  email             String
-  hashedPassword    String     @map("hashed_password")
-  status            UserStatus @default(PENDING)
+  id                     String     @id @default(uuid()) @db.Uuid
+  tenantId               String     @map("tenant_id") @db.Uuid
+  email                  String
+  hashedPassword         String     @map("hashed_password")
+  status                 UserStatus @default(PENDING)
   // Employee->manager relation SEAM for the workflow engine's MANAGER
   // approver rule (step 0.7) — modeled here, on User, because the real
   // Employee module doesn't exist yet (phase 1.1). Once it does, the
@@ -504,12 +504,12 @@ model User {
   // nothing about the workflow engine itself should need to change, only
   // this one resolution function. See /CLAUDE.md § Conventions → Workflow
   // engine → Approver rules.
-  managerId         String?    @map("manager_id") @db.Uuid
+  managerId              String?    @map("manager_id") @db.Uuid
   // Per-user notification-language override (BCP-47, e.g. "en", "ar") — seam
   // for the notification hub (step 0.8). Null = fall back to the recipient's
   // resolved branch's Country Pack `locale.defaultLanguage`. See
   // /CLAUDE.md § Conventions → Notifications → Recipient locale resolution.
-  preferredLanguage String?    @map("preferred_language")
+  preferredLanguage      String?    @map("preferred_language")
   // Opaque push-notification device token (e.g. an Expo push token) — seam
   // for the notification hub's PUSH channel (step 0.8), added in step 1.4
   // for the mobile app. Null = no device registered; `LogPushProvider`
@@ -518,9 +518,19 @@ model User {
   // provider already takes. A real FCM/Expo-push-API provider swapped in
   // later reads this exact column; nothing else about the delivery
   // pipeline needs to change. See /CLAUDE.md § Conventions → Notifications.
-  pushToken         String?    @map("push_token")
-  createdAt         DateTime   @default(now()) @map("created_at")
-  updatedAt         DateTime   @updatedAt @map("updated_at")
+  pushToken              String?    @map("push_token")
+  // Step 6.2 — OPTIONAL tenant-user MFA (TOTP, RFC 6238), same three-column
+  // shape as PlatformAdmin's own MANDATORY MFA below, reusing the exact
+  // same totp.util.ts implementation and EncryptionService/HashingService
+  // primitives. "Optional" is enforced in AuthService/TenantMfaService, not
+  // by a DB constraint — a freshly created user simply has mfaEnabled=false
+  // and logs in with password alone; nothing here forces enrollment. See
+  // docs/conventions/security-hardening.md → Tenant MFA.
+  mfaSecretEncrypted     String?    @map("mfa_secret_encrypted")
+  mfaEnabled             Boolean    @default(false) @map("mfa_enabled")
+  mfaRecoveryCodesHashed Json?      @map("mfa_recovery_codes_hashed")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -5085,9 +5095,9 @@ enum SignatureEventType {
 }
 
 model SignatureRequest {
-  id       String @id @default(uuid()) @db.Uuid
-  tenantId String @map("tenant_id") @db.Uuid
-  title    String
+  id         String  @id @default(uuid()) @db.Uuid
+  tenantId   String  @map("tenant_id") @db.Uuid
+  title      String
   // Polymorphic link to the module row this signature concerns (e.g.
   // `"Offer"`/`"Policy"`) — nullable, since a bare uploaded HR contract has
   // no owning module row at all. No FK, same reasoning as
@@ -5099,7 +5109,7 @@ model SignatureRequest {
   // `branchId`); left null for a tenant-wide document, the same "no scope
   // to widen into, but never out of scope either" posture Announcements'
   // untargeted rows already take.
-  branchId String? @map("branch_id") @db.Uuid
+  branchId   String? @map("branch_id") @db.Uuid
 
   documentSource     SignatureDocumentSource @map("document_source")
   documentStorageKey String                  @map("document_storage_key")
@@ -5108,7 +5118,7 @@ model SignatureRequest {
   // creation and NEVER recomputed — this is what a later tamper-evidence
   // check (`GET /e-signatures/requests/:id/verify`) compares the object's
   // CURRENT bytes against.
-  documentHash String @map("document_hash")
+  documentHash       String                  @map("document_hash")
 
   status          SignatureRequestStatus @default(DRAFT)
   createdByUserId String                 @map("created_by_user_id") @db.Uuid
@@ -5140,14 +5150,14 @@ model SignatureSigner {
   // SEQUENTIAL. See `SigningProgressService`.
   order              Int    @default(0)
 
-  signerType SignerType @map("signer_type")
+  signerType    SignerType @map("signer_type")
   // INTERNAL — a real User (ESS self-service, `GET /e-signatures/my-pending`).
-  userId     String?    @map("user_id") @db.Uuid
+  userId        String?    @map("user_id") @db.Uuid
   // EXTERNAL — no account at all (e.g. a candidate signing an offer letter
   // before joining); identified only by name/email, reached via a scoped
   // single-purpose signing link, never RBAC/JWT.
-  externalName  String? @map("external_name")
-  externalEmail String? @map("external_email")
+  externalName  String?    @map("external_name")
+  externalEmail String?    @map("external_email")
 
   status SignerStatus @default(PENDING)
 
@@ -5161,10 +5171,10 @@ model SignatureSigner {
   accessTokenHash      String?   @map("access_token_hash")
   accessTokenExpiresAt DateTime? @map("access_token_expires_at")
 
-  sentAt      DateTime? @map("sent_at")
-  viewedAt    DateTime? @map("viewed_at")
-  signedAt    DateTime? @map("signed_at")
-  declinedAt  DateTime? @map("declined_at")
+  sentAt     DateTime? @map("sent_at")
+  viewedAt   DateTime? @map("viewed_at")
+  signedAt   DateTime? @map("signed_at")
+  declinedAt DateTime? @map("declined_at")
 
   signingMethod            SigningMethod? @map("signing_method")
   // Exactly one of these two is set once `status = SIGNED`, per
@@ -5279,12 +5289,12 @@ enum PartitionedTableName {
 // `@PlatformRoute()` (`PARTITIONING_MANAGE`), seeded with sane defaults by
 // the migration that creates this table.
 model PartitionedTableConfig {
-  tableName PartitionedTableName @id @map("table_name")
+  tableName       PartitionedTableName @id @map("table_name")
   // How many months of hot partitions the scheduled partition-creation job
   // keeps created AHEAD of "now" — see PartitionMaintenanceService. Chosen
   // generously (default 3) so a slow/failed job run still leaves a comfortable
   // buffer before any write could ever hit a missing partition.
-  lookaheadMonths Int @default(3) @map("lookahead_months")
+  lookaheadMonths Int                  @default(3) @map("lookahead_months")
   // A partition whose range END is older than (now - retentionMonths) is
   // eligible for archival (detach + export + drop) — see
   // PartitionArchivalService. This is the PLATFORM DEFAULT only.
@@ -5292,9 +5302,9 @@ model PartitionedTableConfig {
   // partition holds many tenants' rows for the same date range, so a
   // tenant-specific override does not (yet) drive per-tenant purging within
   // a shared partition — see docs/conventions/partitioning-archival.md.
-  retentionMonths Int     @default(24) @map("retention_months")
-  archiveEnabled  Boolean @default(true) @map("archive_enabled")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  retentionMonths Int                  @default(24) @map("retention_months")
+  archiveEnabled  Boolean              @default(true) @map("archive_enabled")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
 
   @@map("partitioned_table_configs")
 }
@@ -5413,44 +5423,44 @@ enum RetentionAction {
 // even if what it once pointed to changes shape" reasoning
 // `AuditLog.entityId` already establishes for itself.
 model DataSubjectRequest {
-  id          String               @id @default(uuid()) @db.Uuid
-  tenantId    String               @map("tenant_id") @db.Uuid
-  requestType PrivacyRequestType   @map("request_type")
-  subjectType DataSubjectType      @map("subject_type")
-  subjectId   String               @map("subject_id") @db.Uuid
-  status      PrivacyRequestStatus @default(PENDING)
-  reason      String?
+  id                         String               @id @default(uuid()) @db.Uuid
+  tenantId                   String               @map("tenant_id") @db.Uuid
+  requestType                PrivacyRequestType   @map("request_type")
+  subjectType                DataSubjectType      @map("subject_type")
+  subjectId                  String               @map("subject_id") @db.Uuid
+  status                     PrivacyRequestStatus @default(PENDING)
+  reason                     String?
   // Null when system-initiated (see `systemInitiated` below) or when a
   // platform admin acted on the tenant's behalf (`initiatedByPlatformAdminId`
   // below) — the same "nullable system/cross-boundary actor" convention
   // `AuditLog.actorUserId`/`ImportBatch.initiatedByPlatformAdminId` already
   // establish, deliberately with no FK relation object either (see those
   // models' own comments).
-  requestedByUserId String? @map("requested_by_user_id") @db.Uuid
+  requestedByUserId          String?              @map("requested_by_user_id") @db.Uuid
   // Step 6.1, the SAME "platform acts for a tenant" shape
   // `ImportBatch.initiatedByPlatformAdminId` already establishes — set when
   // the VENDOR CONSOLE creates this request on a tenant's behalf.
-  initiatedByPlatformAdminId String?  @map("initiated_by_platform_admin_id") @db.Uuid
+  initiatedByPlatformAdminId String?              @map("initiated_by_platform_admin_id") @db.Uuid
   // True when the SCHEDULED RETENTION ENFORCEMENT JOB created this row
   // (past-window auto-purge/anonymize) rather than a real person —
   // `requestedByUserId`/`initiatedByPlatformAdminId` are both null in that
   // case; this flag is what lets a caller tell "nobody asked, the policy
   // fired" apart from "a real actor's identity was simply not captured".
-  systemInitiated Boolean @default(false) @map("system_initiated")
+  systemInitiated            Boolean              @default(false) @map("system_initiated")
   // EXPORT only — where the completed export bundle (export.json + any
   // copied document bytes) lives in the SAME S3/MinIO bucket
   // `StorageService` already manages, at
   // `privacy-exports/<tenantId>/<requestId>/`.
-  resultStorageKey String? @map("result_storage_key")
+  resultStorageKey           String?              @map("result_storage_key")
   // ERASURE only — per-`DataCategory` outcome (`HARD_DELETE`/`ANONYMIZE`/
   // `RETAIN_LEGAL`, plus a short human-readable note), the erasure policy
   // matrix's OWN record of exactly what it did for THIS subject, not just a
   // generic "done".
-  erasureSummary Json?     @map("erasure_summary")
-  failureReason  String?   @map("failure_reason")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  completedAt    DateTime? @map("completed_at")
+  erasureSummary             Json?                @map("erasure_summary")
+  failureReason              String?              @map("failure_reason")
+  createdAt                  DateTime             @default(now()) @map("created_at")
+  updatedAt                  DateTime             @updatedAt @map("updated_at")
+  completedAt                DateTime?            @map("completed_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -5466,21 +5476,21 @@ model DataSubjectRequest {
 // already establishes — which lawful-basis purposes a given tenant/country
 // actually needs to track is not this codebase's call to fix in an enum.
 model ConsentRecord {
-  id                String          @id @default(uuid()) @db.Uuid
-  tenantId          String          @map("tenant_id") @db.Uuid
-  subjectType       DataSubjectType @map("subject_type")
-  subjectId         String          @map("subject_id") @db.Uuid
-  purpose           String
-  granted           Boolean
+  id               String          @id @default(uuid()) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  subjectType      DataSubjectType @map("subject_type")
+  subjectId        String          @map("subject_id") @db.Uuid
+  purpose          String
+  granted          Boolean
   // Where the consent was captured (e.g. "ESS_PORTAL", "PAPER_FORM",
   // "DATA_MIGRATION_IMPORT") — a plain string, not a closed enum, for the
   // same reason `purpose` is.
-  source            String
-  recordedByUserId  String?   @map("recorded_by_user_id") @db.Uuid
-  grantedAt         DateTime? @map("granted_at")
-  revokedAt         DateTime? @map("revoked_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  source           String
+  recordedByUserId String?         @map("recorded_by_user_id") @db.Uuid
+  grantedAt        DateTime?       @map("granted_at")
+  revokedAt        DateTime?       @map("revoked_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 

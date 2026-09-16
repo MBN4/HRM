@@ -1,16 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { Prisma } from '@hrm/db';
+import { Prisma } from '@hrm/db';
 import type { Redis } from 'ioredis';
 import type {
   ChangePasswordInput,
   LoginInput,
+  MfaDisableInput,
+  MfaEnrollConfirmInput,
+  MfaVerifyInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
 } from '@hrm/shared';
 import { REDIS_CLIENT } from '../redis/redis.constants';
 import { AUTH_EVENTS } from './auth-events';
+import { TenantMfaService } from './mfa/tenant-mfa.service';
 import { PermissionsCacheService } from './permissions-cache.service';
 import { PasswordService } from './password.service';
 import { AUTH_PROVIDER } from './providers/auth-provider.token';
@@ -19,6 +23,8 @@ import { RateLimiterService } from '../redis/rate-limiter.service';
 import { TokenService } from './token.service';
 
 const PASSWORD_RESET_TTL_SECONDS = 30 * 60;
+const MFA_ENROLLMENT_TTL_SECONDS = 10 * 60;
+const MFA_CHALLENGE_TTL_SECONDS = 5 * 60;
 
 export interface AuthenticatedSession {
   accessToken: string;
@@ -27,6 +33,21 @@ export interface AuthenticatedSession {
   roles: string[];
   permissions: string[];
   branchIds: string[] | null;
+}
+
+/** Returned by `login()` in place of a session when the account has MFA enabled — a client must call `POST /auth/mfa/verify` with this token next. */
+export interface MfaChallengeResult {
+  mfaRequired: true;
+  challengeToken: string;
+}
+
+interface MfaEnrollRecord {
+  userId: string;
+  encryptedSecret: string;
+}
+
+interface MfaChallengeRecord {
+  userId: string;
 }
 
 @Injectable()
@@ -39,9 +60,10 @@ export class AuthService {
     private readonly eventEmitter: EventEmitter2,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly permissionsCache: PermissionsCacheService,
+    private readonly mfa: TenantMfaService,
   ) {}
 
-  async login(tenantId: string, tx: Prisma.TransactionClient, input: LoginInput): Promise<AuthenticatedSession> {
+  async login(tenantId: string, tx: Prisma.TransactionClient, input: LoginInput): Promise<AuthenticatedSession | MfaChallengeResult> {
     const rateLimitKey = `login:${tenantId}:${input.email}`;
     await this.rateLimiter.consume(rateLimitKey, 5, 15 * 60);
 
@@ -55,16 +77,144 @@ export class AuthService {
 
     // Reset on success: the window exists to punish a run of failures
     // (credential stuffing/guessing), not to cap how often a legitimate
-    // user can log in.
+    // user can log in. Reset happens once the PASSWORD factor succeeds,
+    // regardless of whether an MFA step follows — a correct password is
+    // still evidence this isn't a guessing attack.
     await this.rateLimiter.reset(rateLimitKey);
 
-    const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, user.id);
-    const accessToken = this.tokens.signAccessToken(tenantId, user.id);
-    const refreshToken = await this.tokens.issueRefreshToken(tenantId, user.id);
+    if (user.mfaEnabled) {
+      const challengeToken = randomUUID();
+      await this.redis.set(
+        this.mfaChallengeKey(tenantId, challengeToken),
+        JSON.stringify({ userId: user.id } satisfies MfaChallengeRecord),
+        'EX',
+        MFA_CHALLENGE_TTL_SECONDS,
+      );
+      this.emit(AUTH_EVENTS.MFA_CHALLENGE_ISSUED, tenantId, { userId: user.id });
+      return { mfaRequired: true, challengeToken };
+    }
 
+    const session = await this.issueSession(tenantId, tx, user.id);
     this.emit(AUTH_EVENTS.LOGIN, tenantId, { userId: user.id });
+    return session;
+  }
 
-    return { accessToken, refreshToken, userId: user.id, roles, permissions, branchIds };
+  /**
+   * Completes an MFA-required login: validates the challenge token (issued
+   * by `login()` above) and either a TOTP code or a one-time recovery code,
+   * the same acceptance shape `PlatformAuthService.verifyMfa` already
+   * established. Rate-limited per user, separately from the password step,
+   * so a stolen/guessed password alone still can't be brute-forced into a
+   * session.
+   */
+  async verifyMfa(tenantId: string, tx: Prisma.TransactionClient, input: MfaVerifyInput): Promise<AuthenticatedSession> {
+    const record = await this.getRecord<MfaChallengeRecord>(this.mfaChallengeKey(tenantId, input.challengeToken));
+    const invalid = () => new UnauthorizedException('Invalid or expired MFA challenge — log in again.');
+    if (!record) {
+      throw invalid();
+    }
+
+    const user = await tx.user.findUnique({ where: { id: record.userId } });
+    if (!user || user.status !== 'ACTIVE' || !user.mfaEnabled || !user.mfaSecretEncrypted) {
+      throw invalid();
+    }
+
+    await this.rateLimiter.consume(`mfa:${tenantId}:${user.id}`, 8, 15 * 60);
+
+    let ok = /^\d{6}$/.test(input.code) && this.mfa.verifyCode(user.mfaSecretEncrypted, input.code);
+    if (!ok) {
+      const hashedCodes = ((user.mfaRecoveryCodesHashed as string[] | null) ?? []) as string[];
+      const remaining = await this.mfa.verifyAndConsumeRecoveryCode(hashedCodes, input.code);
+      if (remaining) {
+        ok = true;
+        await tx.user.update({ where: { id: user.id }, data: { mfaRecoveryCodesHashed: remaining } });
+        this.emit(AUTH_EVENTS.MFA_RECOVERY_CODE_USED, tenantId, { userId: user.id });
+      }
+    }
+
+    if (!ok) {
+      this.emit(AUTH_EVENTS.MFA_VERIFY_FAILED, tenantId, { userId: user.id });
+      throw new UnauthorizedException('Invalid MFA code.');
+    }
+
+    await this.rateLimiter.reset(`mfa:${tenantId}:${user.id}`);
+    await this.redis.del(this.mfaChallengeKey(tenantId, input.challengeToken));
+
+    const session = await this.issueSession(tenantId, tx, user.id);
+    this.emit(AUTH_EVENTS.LOGIN, tenantId, { userId: user.id });
+    return session;
+  }
+
+  /** Starts (or restarts) enrollment for the CALLER's own account — already authenticated, so no separate token is needed the way platform's pre-session enrollment flow needs one. */
+  async startMfaEnrollment(tenantId: string, tx: Prisma.TransactionClient, userId: string): Promise<{ secret: string; otpauthUrl: string }> {
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    const enrollment = this.mfa.generateEnrollment(user.email);
+    await this.redis.set(
+      this.mfaEnrollKey(tenantId, userId),
+      JSON.stringify({ userId, encryptedSecret: enrollment.encryptedSecret } satisfies MfaEnrollRecord),
+      'EX',
+      MFA_ENROLLMENT_TTL_SECONDS,
+    );
+    return { secret: enrollment.secret, otpauthUrl: enrollment.otpauthUrl };
+  }
+
+  async confirmMfaEnrollment(
+    tenantId: string,
+    tx: Prisma.TransactionClient,
+    userId: string,
+    input: MfaEnrollConfirmInput,
+  ): Promise<{ recoveryCodes: string[] }> {
+    const record = await this.getRecord<MfaEnrollRecord>(this.mfaEnrollKey(tenantId, userId));
+    if (!record) {
+      throw new UnauthorizedException('No pending MFA enrollment — call POST /auth/mfa/enroll first.');
+    }
+    if (!this.mfa.verifyCode(record.encryptedSecret, input.code)) {
+      this.emit(AUTH_EVENTS.MFA_ENROLL_FAILED, tenantId, { userId });
+      throw new UnauthorizedException('Invalid verification code.');
+    }
+
+    const recoveryCodes = this.mfa.generateRecoveryCodes();
+    const hashedRecoveryCodes = await this.mfa.hashRecoveryCodes(recoveryCodes);
+    await tx.user.update({
+      where: { id: userId },
+      data: { mfaSecretEncrypted: record.encryptedSecret, mfaEnabled: true, mfaRecoveryCodesHashed: hashedRecoveryCodes },
+    });
+    await this.redis.del(this.mfaEnrollKey(tenantId, userId));
+    this.emit(AUTH_EVENTS.MFA_ENROLLED, tenantId, { userId });
+
+    return { recoveryCodes };
+  }
+
+  /** Requires BOTH the current password AND a valid MFA code — a hijacked session (valid access token, no password) alone cannot silently turn MFA off. */
+  async disableMfa(tenantId: string, tx: Prisma.TransactionClient, userId: string, input: MfaDisableInput): Promise<void> {
+    const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
+    const invalid = () => new UnauthorizedException('Current password or MFA code is incorrect.');
+
+    if (!(await this.password.verify(user.hashedPassword, input.password))) {
+      throw invalid();
+    }
+    if (!user.mfaEnabled || !user.mfaSecretEncrypted) {
+      throw invalid();
+    }
+
+    let ok = /^\d{6}$/.test(input.code) && this.mfa.verifyCode(user.mfaSecretEncrypted, input.code);
+    if (!ok) {
+      const hashedCodes = ((user.mfaRecoveryCodesHashed as string[] | null) ?? []) as string[];
+      ok = (await this.mfa.verifyAndConsumeRecoveryCode(hashedCodes, input.code)) !== null;
+    }
+    if (!ok) {
+      throw invalid();
+    }
+
+    await tx.user.update({
+      where: { id: userId },
+      data: { mfaEnabled: false, mfaSecretEncrypted: null, mfaRecoveryCodesHashed: Prisma.JsonNull },
+    });
+    // Disabling a second factor is exactly the kind of change that should
+    // invalidate every other live session — same posture changePassword
+    // already takes below.
+    await this.tokens.revokeAllForUser(tenantId, userId);
+    this.emit(AUTH_EVENTS.MFA_DISABLED, tenantId, { userId });
   }
 
   async refresh(tenantId: string, refreshToken: string): Promise<{ accessToken: string; refreshToken: string }> {
@@ -157,8 +307,28 @@ export class AuthService {
     this.emit(AUTH_EVENTS.PASSWORD_RESET_COMPLETED, tenantId, { userId: record.userId });
   }
 
+  private async issueSession(tenantId: string, tx: Prisma.TransactionClient, userId: string): Promise<AuthenticatedSession> {
+    const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, userId);
+    const accessToken = this.tokens.signAccessToken(tenantId, userId);
+    const refreshToken = await this.tokens.issueRefreshToken(tenantId, userId);
+    return { accessToken, refreshToken, userId, roles, permissions, branchIds };
+  }
+
+  private async getRecord<T>(key: string): Promise<T | null> {
+    const raw = await this.redis.get(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  }
+
   private resetKey(token: string): string {
     return `auth:pwreset:${token}`;
+  }
+
+  private mfaEnrollKey(tenantId: string, userId: string): string {
+    return `auth:mfa:enroll:${tenantId}:${userId}`;
+  }
+
+  private mfaChallengeKey(tenantId: string, token: string): string {
+    return `auth:mfa:challenge:${tenantId}:${token}`;
   }
 
   private emit(type: (typeof AUTH_EVENTS)[keyof typeof AUTH_EVENTS], tenantId: string, extra: Record<string, string>) {

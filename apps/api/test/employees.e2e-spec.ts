@@ -304,10 +304,13 @@ describe('employees (e2e)', () => {
       const row = await prisma.employee.findUniqueOrThrow({ where: { id } });
       expect(row.bankAccountNumberEncrypted).not.toBeNull();
       expect(row.bankAccountNumberEncrypted).not.toContain(plainAccountNumber);
-      expect(row.bankAccountNumberEncrypted!.split(':')).toHaveLength(3);
+      // Step 6.2 — ciphertext is now version-prefixed ("v<version>:<iv>:<authTag>:<data>",
+      // 4 colon-separated segments) to support field-encryption key rotation
+      // — see EncryptionService's own doc comment. Still never the plaintext.
+      expect(row.bankAccountNumberEncrypted!.split(':')).toHaveLength(4);
       expect(row.baseSalaryEncrypted).not.toBeNull();
       expect(row.baseSalaryEncrypted).not.toContain('120000');
-      expect(row.baseSalaryEncrypted!.split(':')).toHaveLength(3);
+      expect(row.baseSalaryEncrypted!.split(':')).toHaveLength(4);
     });
   });
 

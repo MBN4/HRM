@@ -3791,3 +3791,88 @@ observability/load testing (5.4). Phase 6 (scope not yet defined) is next.
   `apps/portal`/`apps/admin` `/privacy` pages (both `next build`/`next lint`
   clean). Both new region-overlay `DEPLOYMENT_REGION` patches confirmed via
   `kustomize build`.
+
+- **6.2 security hardening + WCAG accessibility + backups/DR — done —
+  2026-09-16.** Phase 6's second slice — a HARDENING + RE-VERIFICATION pass,
+  not new business functionality; it never weakens an existing control
+  anywhere in the codebase. See
+  [`docs/conventions/security-hardening.md`](./conventions/security-hardening.md)
+  for the full detail; this entry is the summary. New:
+  `apps/api/src/security` (`configure-security.ts` installing `helmet` +
+  a real CSP, `CorsOriginService` — a tenant-resolution-shaped allow-list
+  covering `TENANT_BASE_DOMAIN` subdomains, `CORS_ADDITIONAL_ORIGINS`, and
+  VERIFIED tenant custom domains, replacing the previous wide-open
+  `app.enableCors()`); `apps/api/src/common/encryption/key-provider`
+  (version-prefixed ciphertext + a `version -> key` map giving
+  `EncryptionService` real key rotation with zero migration for
+  already-encrypted values, behind a new `ENCRYPTION_KEY_PROVIDER` DI seam —
+  `EnvSecretsProvider` real, `CloudSecretsProvider` a documented
+  `NotImplementedException` seam); `apps/api/src/auth/mfa`
+  (`TenantMfaService` — OPTIONAL tenant-`User` TOTP MFA reusing step 4.1's
+  `totp.util.ts` directly, three new `User` columns, `POST /auth/mfa/
+{enroll,enroll/confirm,verify,disable}`, a new Prisma migration
+  `20260915114338_add_tenant_user_mfa`); `apps/api/test/
+tenant-isolation-exhaustive.e2e-spec.ts` (one new consolidated suite
+  walking every module from 0.x through 6.1 with two seeded tenants — the
+  first single file to do so; zero real cross-tenant leaks found);
+  `apps/api/test/{security-headers-cors,tenant-mfa}.e2e-spec.ts`;
+  `.github/workflows/ci.yml` (this repo's first-ever CI workflow —
+  build/lint/test against real Postgres/Redis/MinIO, `pnpm audit`
+  informational-only, `gitleaks` secret scanning); real WCAG 2.1 AA fixes
+  across `apps/portal`/`apps/admin` (`Modal` focus management, `tailwind
+.config.ts` color-contrast token fixes, `PageSpinner` `role="status"`,
+  icon-only-button `aria-label`s, keyboard-operable custom controls) plus
+  new `@axe-core/playwright` coverage (`apps/portal/tests/
+accessibility.spec.ts`, `apps/admin/tests/accessibility.spec.ts`); and
+  `ops/backup/` (`backup-postgres.sh`/`backup-minio.sh` — GPG-AES256-
+  encrypted `pg_dump -Fc`/object-storage exports; `restore-drill.sh` — a
+  real restore into a disposable scratch database with row-count/RLS/
+  `audit_log`-immutability proof; `DR-RUNBOOK.md`).
+  `docs/security-checklist.md` is the new on-prem/self-host hardening
+  checklist referenced from §1.10 of the conventions doc.
+
+- **6.2 verified — 2026-09-16.** Full regression run fresh this session
+  (not assumed from the prior implementation session): `pnpm build`
+  (6/6 workspace tasks) and `pnpm lint` (8/8 workspace tasks) both green;
+  `pnpm test -- --runInBand` green across all three workspaces that carry
+  Jest suites — `@hrm/api` **68 suites / 678 tests**, `@hrm/db` **6 suites /
+  37 tests**, `@hrm/mobile` **4 suites / 19 tests** — zero regressions.
+  Explicitly re-run and confirmed individually: `tenant-isolation-
+exhaustive.e2e-spec.ts` (**63/63**, every module from 0.x-6.1, including
+  the encrypted-salary-never-leaks check and the tenant-A-API-key-via-/v1
+  check), `tenant-mfa.e2e-spec.ts` (**13/13**), and `security-headers-
+cors.e2e-spec.ts` (**6/6**) — 82 tests total across the three suites this
+  closeout was told to call out by name, all green.
+  **One real bug found and fixed during this closeout's own regression
+  run** (a genuine test-isolation gap, not a 6.2 regression, in a
+  pre-existing 5.2 spec): `packages/db/test/partitioning.spec.ts`'s
+  "idempotent partition creation" test picked its "unique to this run"
+  test month from `Date.now() % 100` — only 100 possible slots — and never
+  cleaned up the partition it created; five stale `audit_log` partitions
+  left behind by earlier runs (`p2030_10`, `p2034_01`, `p2035_10`,
+  `p2036_04`, `p2036_11`) had accumulated in the persistent local dev DB,
+  and this run finally collided with one, failing the test's own
+  "starts from a clean slate" precondition. Fixed by widening the slot
+  space (`process.hrtime.bigint() % 4500n`, 4500 months instead of 100)
+  and wrapping the test body in `try/finally` so it drops its own
+  partition on exit regardless of outcome — re-run clean, and the five
+  stale leftovers were dropped by hand once to restore the dev DB to a
+  known-clean state. **Restore drill**: a fresh `backup-postgres.sh` run
+  against the live `hrm_dev` (post-6.1, post-MFA-migration schema/data,
+  never exercised by the drill before) produced a new encrypted artifact,
+  and `restore-drill.sh` was run against it end to end, unmodified,
+  first try — all checks green: row counts match source-vs-restored for
+  `tenants`/`users`/`employees`/`branches`/`audit_log` (14/640/627/16/35),
+  a sample tenant row byte-identical, `hrm_app` with no tenant context
+  fails loudly on the restored DB, `hrm_app` scoped to one tenant sees
+  exactly that tenant's branches (3) and none of the other 13, and
+  `hrm_app` UPDATE/DELETE against the restored `audit_log` both rejected
+  with `permission denied` — the scratch database dropped automatically
+  afterward, `hrm_dev` untouched throughout. **Accessibility**: both apps'
+  `@axe-core/playwright` suites run fresh this session against real
+  Chromium — `apps/portal` **6/6** (`/login`, ESS dashboard LTR + RTL,
+  `/leave` list+modal LTR + RTL, `/payroll`), `apps/admin` **5/5**
+  (`/login` password step + MFA-challenge step, `/dashboard`, `/tenants`,
+  the "New tenant" modal) — 11/11 total, zero violations, no new fixes
+  needed this session (the real fixes were already made and are described
+  above). **PHASE 6.2 COMPLETE.**

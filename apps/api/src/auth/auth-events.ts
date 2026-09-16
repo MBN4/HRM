@@ -15,6 +15,14 @@ export const AUTH_EVENTS = {
   PASSWORD_RESET_REQUESTED: 'auth.password_reset_requested',
   PASSWORD_RESET_COMPLETED: 'auth.password_reset_completed',
   REFRESH_REUSE_DETECTED: 'auth.refresh_reuse_detected',
+  // Step 6.2 — optional tenant-user MFA. Mirrors the platform.auth.* event
+  // names PlatformAuthService already emits for its own (mandatory) MFA.
+  MFA_ENROLLED: 'auth.mfa_enrolled',
+  MFA_ENROLL_FAILED: 'auth.mfa_enroll_failed',
+  MFA_CHALLENGE_ISSUED: 'auth.mfa_challenge_issued',
+  MFA_VERIFY_FAILED: 'auth.mfa_verify_failed',
+  MFA_RECOVERY_CODE_USED: 'auth.mfa_recovery_code_used',
+  MFA_DISABLED: 'auth.mfa_disabled',
 } as const;
 
 export type AuthEventType = (typeof AUTH_EVENTS)[keyof typeof AUTH_EVENTS];

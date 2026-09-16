@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, ChevronDown, LogOut } from 'lucide-react';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
@@ -14,6 +14,26 @@ export function Topbar() {
   const { logout, user } = useAuth();
   const { employee } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // The user menu is a custom (non-<select>) dropdown — Escape must close
+  // it (WCAG 2.1.2, no keyboard trap) and it must close on outside click
+  // too, or it stays open over unrelated page content indefinitely.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMenuOpen(false);
+    }
+    function onClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onClickOutside);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onClickOutside);
+    };
+  }, [menuOpen]);
 
   const { data: notifications } = useAsync(() => listNotifications(), []);
   const unreadCount = notifications?.filter((n) => !n.delivery.readAt).length ?? 0;
@@ -33,7 +53,11 @@ export function Topbar() {
           {locale === 'en' ? 'العربية' : 'English'}
         </button>
 
-        <Link href="/notifications" className="relative rounded-lg p-2 text-ink-500 hover:bg-sand-100 hover:text-ink-800">
+        <Link
+          href="/notifications"
+          className="relative rounded-lg p-2 text-ink-500 hover:bg-sand-100 hover:text-ink-800"
+          aria-label={unreadCount > 0 ? `${t('nav.notifications')} (${unreadCount} unread)` : t('nav.notifications')}
+        >
           <Bell className="h-5 w-5" aria-hidden />
           {unreadCount > 0 && (
             <span className="absolute end-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 text-[10px] font-bold text-white">
@@ -42,11 +66,12 @@ export function Topbar() {
           )}
         </Link>
 
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button
             type="button"
             data-testid="user-menu-button"
             onClick={() => setMenuOpen((v) => !v)}
+            aria-expanded={menuOpen}
             className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-ink-700 hover:bg-sand-100"
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800">
