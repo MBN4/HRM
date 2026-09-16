@@ -3876,3 +3876,68 @@ cors.e2e-spec.ts` (**6/6**) — 82 tests total across the three suites this
   the "New tenant" modal) — 11/11 total, zero violations, no new fixes
   needed this session (the real fixes were already made and are described
   above). **PHASE 6.2 COMPLETE.**
+
+- **6.3 edge security & DDoS (WAF/CDN) — done — 2026-09-16.** Phase 6's
+  third slice — see
+  [`docs/conventions/edge-security.md`](./conventions/edge-security.md)
+  for the full write-up; this entry is the summary. Edge infrastructure
+  (a WAF, DDoS mitigation, a CDN) lives at the HOSTING layer, in front of
+  this application, and genuinely cannot be run in this sandboxed
+  environment (no internet-facing deployment, no Cloudflare/AWS account) —
+  this step builds real, provider-portable configuration-as-code plus
+  honest runbooks for that layer, AND every piece of app-side behavior a
+  genuine edge deployment depends on being correct, each backed by a
+  real, executed `apps/api` e2e test. New: a `deploy/edge/` directory
+  (`waf/` — `cloudflare-waf-ruleset.tf` + `aws-waf-webacl.json`, the SAME
+  logical policy for two providers: an OWASP-style managed ruleset,
+  bad-bot/scanner blocking, a 10MB request-size limit deliberately
+  matching `deploy/k8s/base/ingress.yaml`'s own `proxy-body-size` AND
+  `CareersController`'s real resume-upload limit, and a coarse IP-based
+  rate-based rule; `ddos/RUNBOOK.md` — the two-line-of-defense posture
+  (edge absorbs volumetric, the EXISTING 0.10 chassis is the second line)
+  plus a sequential operational runbook that names Phase 6.4 as where a
+  formal postmortem belongs; `cdn/` — `cloudflare-cache-rules.tf` +
+  README covering CDN+residency and CDN+white-label-custom-domain/TLS);
+  `apps/api/src/security/trusted-proxy.ts` (`TRUSTED_PROXY_HOPS`, default
+  `0`/untrusted, wired into `main.ts` — makes `req.ip`, the one thing this
+  codebase already reads for a client address, resolve correctly through
+  a declared reverse-proxy chain while refusing to be spoofed when none
+  is declared); `apps/api/src/security/cache-control.{decorator,
+interceptor}.ts` + `configure-security.ts`'s new
+  `defaultCacheControlMiddleware` (blanket `Cache-Control: no-store`
+  default via plain Express middleware — deliberately NOT a global
+  `APP_INTERCEPTOR`, sidestepping the exact interceptor-ordering hazard
+  `resilience.md` already documents — with `@CacheControlPublic(...)` as
+  the single, explicit, route-scoped opt-in `CareersController`'s two
+  public listing routes now use). `deploy/k8s/base/configmap.yaml` gained
+  `TRUSTED_PROXY_HOPS: '1'` (the nginx ingress hop already in that
+  topology). Zero changes to `TenantRateLimitService`/`LoadSheddingService`/
+  `CircuitBreakerService`/`DbPoolExhaustionFilter` or any other existing
+  resilience/tenant-resolution logic — this step is additive
+  configuration and two new small app-side primitives, never a rewrite.
+
+- **6.3 verified — 2026-09-16.** 4 new `apps/api/test/edge-*.e2e-spec.ts`
+  files, **7 new tests, all green**: `edge-client-ip-trusted`/
+  `-untrusted.e2e-spec.ts` (1 test each — a declared trusted hop resolves
+  a forwarded IP into the real audit-log entry; the identical spoofed
+  header is ignored with none declared); `edge-cache-control.e2e-spec.ts`
+  (4 tests — the careers listing's exact public `Cache-Control`, the SAME
+  route's 404 keeping that public header, an authenticated tenant-scoped
+  read defaulting to `no-store`, and a 401 thrown before any route-scoped
+  interceptor runs ALSO carrying `no-store` — proving the middleware-based
+  default, not an interceptor, is what makes this hold universally);
+  `edge-ddos-flood.e2e-spec.ts` (1 test — a genuine ~60-request concurrent
+  burst against `/resilience/demo/low-priority` overlapping ~15 concurrent
+  `/resilience/demo/critical` requests: some low-priority requests shed,
+  some still admitted, every critical request succeeds throughout, clean
+  recovery after). Full `apps/api` suite: **72 suites, 685 tests**, all
+  green except the SAME single pre-existing `migration.e2e-spec.ts`
+  timing flake this suite has carried since 5.1 — confirmed unrelated
+  (10/10 clean on an isolated rerun). `@hrm/db` (37/37) and `@hrm/mobile`
+  (19/19) unaffected. Full-repo `pnpm build`/`pnpm lint` green across all
+  8 workspace tasks. `deploy/edge/waf/aws-waf-webacl.json` validated as
+  well-formed JSON (`python3 -m json.tool`); the two Terraform files were
+  NOT run through `terraform validate` — no `terraform` binary was
+  available in this environment, stated honestly rather than skipped
+  silently. **Phase 6 remaining: 6.4 incident response + chaos
+  engineering — the final step.**

@@ -112,6 +112,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/observability-load.md`](./docs/conventions/observability-load.md)           | Structured/correlated logging + PII redaction, the Sentry error-tracking seam, Prometheus metrics + Grafana dashboards/alerts (all verified against real instances), OpenTelemetry tracing, and k6 load testing — two real bugs found+fixed (a payroll N+1, a `DbPoolExhaustionFilter` gap) plus the honest 20M extrapolation. (5.4)                                                                        |
 | [`docs/conventions/privacy-residency.md`](./docs/conventions/privacy-residency.md)             | Data-subject export/erasure, the per-`DataCategory` erasure policy + the audit-log anonymize-within reconciliation, consent tracking + the processing register/sub-processor disclosure, retention enforcement building on 5.2's seam, and residency enforcement building on 5.3's seam. (6.1)                                                                                                              |
 | [`docs/conventions/security-hardening.md`](./docs/conventions/security-hardening.md)           | Secure headers + a real CORS allow-list, field-encryption key rotation + the secrets-provider seam, optional tenant MFA (reusing platform's TOTP util), auth/API-surface re-verification, the exhaustive cross-tenant isolation regression suite, CI dependency/secret scanning, WCAG 2.1 AA accessibility (axe-core + honest manual-audit gaps), and encrypted backups/DR with a real restore drill. (6.2) |
+| [`docs/conventions/edge-security.md`](./docs/conventions/edge-security.md)                     | WAF/DDoS/CDN config-as-code (`deploy/edge/`, provider-portable, honestly un-runnable here) + the edge-vs-app rate-limit interaction, the app-side trusted-proxy real-client-IP fix, the default-deny cache-control posture (a caching mistake = a cross-tenant leak), a real concurrent-flood graceful-degradation proof, and the header/TLS/residency responsibility split with the edge. (6.3)            |
 
 ## 5. Build log summary
 
@@ -784,6 +785,32 @@ top of every prior phase's foundation.
   integrity/RLS/`audit_log` immutability all survive. See
   [`docs/conventions/security-hardening.md`](./docs/conventions/security-hardening.md).
 
+- **6.3** — Edge security & DDoS / WAF / CDN (Phase 6's third slice):
+  edge infrastructure that lives at the HOSTING layer, in front of this
+  app, and genuinely cannot be run in this sandboxed environment (no
+  internet-facing deployment, no Cloudflare/AWS account) — real,
+  provider-portable configuration-as-code (`deploy/edge/waf/` — a
+  Terraform Cloudflare ruleset + an AWS WAFv2 WebACL JSON, the SAME OWASP-
+  style/bad-bot/request-size/rate-based rule catalog for both providers;
+  `deploy/edge/ddos/RUNBOOK.md` — edge absorbs volumetric, the EXISTING
+  0.10 chassis is the honest second line; `deploy/edge/cdn/` — cache
+  rules + residency/custom-domain-TLS notes) plus every piece of app-side
+  behavior a real edge deployment depends on, each backed by a real,
+  executed e2e test: `TRUSTED_PROXY_HOPS`
+  (`apps/api/src/security/trusted-proxy.ts`) makes `req.ip` resolve
+  correctly through a declared reverse-proxy chain while refusing to be
+  spoofed when none is declared; a new `Cache-Control: no-store` DEFAULT
+  (plain Express middleware, deliberately not a global interceptor — the
+  exact ordering hazard `resilience.md` already documents) with a single,
+  explicit `@CacheControlPublic()` opt-in for the public careers listing
+  routes (a caching mistake here is a cross-tenant data leak, not just
+  staleness); and a real concurrent-flood e2e proof that the EXISTING
+  0.10 resilience chassis alone degrades gracefully (critical protected,
+  non-critical shed, clean recovery) even before any edge layer helps.
+  Every claim marked verified-locally vs. verified-at-deploy, never
+  blurred. See
+  [`docs/conventions/edge-security.md`](./docs/conventions/edge-security.md).
+
 - [x] **3.5.1** Data migration & onboarding toolkit — see
       [`docs/conventions/data-migration.md`](./docs/conventions/data-migration.md).
 - [x] **3.5.2** Benefits administration — plan config, statutory schemes
@@ -895,9 +922,20 @@ observability/load testing (5.4).
       fixes + axe-core coverage on `apps/portal`/`apps/admin`, and an
       encrypted backup + ACTUALLY-RUN restore-drill mechanism for Postgres + object storage. See
       [`docs/conventions/security-hardening.md`](./docs/conventions/security-hardening.md).
-- [ ] **6.3** WAF / DDoS protection
+- [x] **6.3** Edge security & DDoS (WAF/CDN) — provider-portable
+      WAF/CDN configuration-as-code (`deploy/edge/`) + DDoS runbook for the
+      hosting-layer edge this sandboxed environment cannot itself run, and
+      the real, tested app-side half a genuine edge deployment depends on:
+      correct client-IP resolution through a declared trusted-proxy chain
+      (`TRUSTED_PROXY_HOPS`), a default-deny `Cache-Control: no-store`
+      posture with one explicit public-cache opt-in (a caching mistake
+      here is a cross-tenant leak), and a real concurrent-flood e2e proof
+      that the EXISTING 0.10 resilience chassis alone degrades gracefully
+      before any edge layer helps. See
+      [`docs/conventions/edge-security.md`](./docs/conventions/edge-security.md).
 - [ ] **6.4** Incident response + chaos engineering
 
-**Phase 6 is NOT yet complete** — 6.1 (data privacy & residency) and 6.2
-(security hardening + accessibility + backups/DR) are done; 6.3 (WAF/DDoS
-protection) and 6.4 (incident response + chaos engineering) remain.
+**Phase 6 is NOT yet complete** — 6.1 (data privacy & residency), 6.2
+(security hardening + accessibility + backups/DR), and 6.3 (edge security
+& DDoS / WAF/CDN) are done; 6.4 (incident response + chaos engineering)
+remains as Phase 6's final step.

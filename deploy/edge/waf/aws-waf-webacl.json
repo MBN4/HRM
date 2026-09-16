@@ -1,0 +1,168 @@
+{
+  "_comment": [
+    "Phase 6.3 (edge security) — the AWS WAFv2 equivalent of",
+    "cloudflare-waf-ruleset.tf, provider-portable per this step's own brief.",
+    "This is the `Rules` array of a `AWS::WAFv2::WebACL` (CloudFormation) /",
+    "aws wafv2 create-web-acl (CLI/SDK) request, scoped REGIONAL (attach to",
+    "the ALB/API Gateway in front of deploy/k8s/'s own ingress) or",
+    "CLOUDFRONT (attach to the CDN distribution — see ../cdn/README.md).",
+    "NOT applied anywhere: no AWS account/ALB exists in this environment.",
+    "Validate with `aws wafv2 check-capacity` and a real `put-web-acl` dry",
+    "run against your own account before relying on this.",
+    "See README.md in this directory for the full rule catalog and the",
+    "edge-vs-app rate-limit interaction this rule set is one half of."
+  ],
+  "Name": "hrm-web-acl",
+  "Scope": "REGIONAL",
+  "DefaultAction": { "Allow": {} },
+  "VisibilityConfig": {
+    "SampledRequestsEnabled": true,
+    "CloudWatchMetricsEnabled": true,
+    "MetricName": "hrmWebAcl"
+  },
+  "Rules": [
+    {
+      "Name": "AWS-AWSManagedRulesCommonRuleSet",
+      "Priority": 0,
+      "OverrideAction": { "Count": {} },
+      "_overrideActionNote": "COUNT (log-only) for the first deploy window — see README.md's 'roll out WAF rules in LOG mode first' note. Switch to `{}` (i.e. no override — let the managed group's own Block actions apply) once a real traffic sample has been reviewed.",
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesCommonRuleSet"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "hrmCommonRuleSet"
+      }
+    },
+    {
+      "Name": "AWS-AWSManagedRulesSQLiRuleSet",
+      "Priority": 1,
+      "OverrideAction": { "Count": {} },
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesSQLiRuleSet"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "hrmSqliRuleSet"
+      }
+    },
+    {
+      "Name": "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+      "Priority": 2,
+      "OverrideAction": { "Count": {} },
+      "_note": "Covers path-traversal-shaped and other known-bad-input signatures — the managed equivalent of cloudflare-waf-ruleset.tf's hand-written path-traversal custom rule.",
+      "Statement": {
+        "ManagedRuleGroupStatement": {
+          "VendorName": "AWS",
+          "Name": "AWSManagedRulesKnownBadInputsRuleSet"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "hrmKnownBadInputs"
+      }
+    },
+    {
+      "Name": "hrm-block-scanner-user-agents",
+      "Priority": 3,
+      "Action": { "Block": {} },
+      "_note": "AWS Managed Rules' Bot Control group is a real option here but is a separately-billed add-on this codebase's own docs deliberately don't assume is purchased — see README.md. This custom rule is the always-available fallback: block known scanner/exploit-tool User-Agents outright, the same list cloudflare-waf-ruleset.tf uses.",
+      "Statement": {
+        "OrStatement": {
+          "Statements": [
+            {
+              "ByteMatchStatement": {
+                "SearchString": "sqlmap",
+                "FieldToMatch": { "SingleHeader": { "Name": "user-agent" } },
+                "TextTransformations": [{ "Priority": 0, "Type": "LOWERCASE" }],
+                "PositionalConstraint": "CONTAINS"
+              }
+            },
+            {
+              "ByteMatchStatement": {
+                "SearchString": "nikto",
+                "FieldToMatch": { "SingleHeader": { "Name": "user-agent" } },
+                "TextTransformations": [{ "Priority": 0, "Type": "LOWERCASE" }],
+                "PositionalConstraint": "CONTAINS"
+              }
+            },
+            {
+              "ByteMatchStatement": {
+                "SearchString": "nmap",
+                "FieldToMatch": { "SingleHeader": { "Name": "user-agent" } },
+                "TextTransformations": [{ "Priority": 0, "Type": "LOWERCASE" }],
+                "PositionalConstraint": "CONTAINS"
+              }
+            },
+            {
+              "ByteMatchStatement": {
+                "SearchString": "masscan",
+                "FieldToMatch": { "SingleHeader": { "Name": "user-agent" } },
+                "TextTransformations": [{ "Priority": 0, "Type": "LOWERCASE" }],
+                "PositionalConstraint": "CONTAINS"
+              }
+            },
+            {
+              "SizeConstraintStatement": {
+                "FieldToMatch": { "SingleHeader": { "Name": "user-agent" } },
+                "ComparisonOperator": "EQ",
+                "Size": 0,
+                "TextTransformations": [{ "Priority": 0, "Type": "NONE" }]
+              }
+            }
+          ]
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "hrmBlockScannerUserAgents"
+      }
+    },
+    {
+      "Name": "hrm-request-size-limit",
+      "Priority": 4,
+      "Action": { "Block": {} },
+      "_note": "Matches deploy/k8s/base/ingress.yaml's own nginx.ingress.kubernetes.io/proxy-body-size: '10m' AND careers.controller.ts's MAX_RESUME_SIZE_BYTES (10MB) — never set lower than either, or a legitimate resume upload gets rejected at the edge before it ever reaches the app's own already-correct limit.",
+      "Statement": {
+        "SizeConstraintStatement": {
+          "FieldToMatch": { "Body": { "OversizeHandling": "CONTINUE" } },
+          "ComparisonOperator": "GT",
+          "Size": 10485760,
+          "TextTransformations": [{ "Priority": 0, "Type": "NONE" }]
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "hrmRequestSizeLimit"
+      }
+    },
+    {
+      "Name": "hrm-ip-rate-limit",
+      "Priority": 5,
+      "Action": { "Block": {} },
+      "_note": "The COARSE, IP-based volumetric layer — see README.md's 'edge vs app rate limiting' section. AWS WAFv2 rate-based rules count over a trailing 5-minute window natively; 2000/5min per source IP is deliberately generous and NOT tenant-aware — TenantRateLimitService (0.10) remains the precise, per-tenant/per-edition control at the app layer.",
+      "Statement": {
+        "RateBasedStatement": {
+          "Limit": 2000,
+          "AggregateKeyType": "IP"
+        }
+      },
+      "VisibilityConfig": {
+        "SampledRequestsEnabled": true,
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "hrmIpRateLimit"
+      }
+    }
+  ]
+}

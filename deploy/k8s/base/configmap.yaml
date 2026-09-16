@@ -32,6 +32,14 @@ data:
   # docs/conventions/deployment-scaling.md § Regional deployment. ---
   DEPLOYMENT_REGION: 'us-east-1'
 
+  # --- Edge security / WAF / CDN (6.3) — see docs/conventions/edge-security.md
+  # and deploy/edge/. `1` = trust exactly the nginx ingress hop in front of
+  # every pod in THIS manifest set (ingress.yaml). A deployment that ALSO
+  # places a CDN/WAF (deploy/edge/) in front of that ingress must bump this
+  # to `2` in its own overlay — never guess higher than the real hop count,
+  # see trusted-proxy.ts's own doc comment for why. ---
+  TRUSTED_PROXY_HOPS: '1'
+
   # --- Platform / vendor console (4.1) ---
   PLATFORM_MODE_ENABLED: 'true'
   PLATFORM_JWT_EXPIRES_IN: '30m'

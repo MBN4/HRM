@@ -7,6 +7,8 @@ import './tracing/init-tracing';
 import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import { PinoLoggerService } from './common/logging/pino-logger.service';
 import { requestIdMiddleware } from './common/logging/request-id.middleware';
@@ -14,6 +16,7 @@ import { createHttpMetricsMiddleware } from './metrics/http-metrics.middleware';
 import { MetricsService } from './metrics/metrics.service';
 import { ShutdownService } from './resilience/shutdown/shutdown.service';
 import { configureSecurity } from './security/configure-security';
+import { configureTrustedProxy } from './security/trusted-proxy';
 import { setupSwagger } from './swagger';
 
 /**
@@ -37,7 +40,7 @@ async function bootstrap() {
   // initialization, route mapping) are queued rather than dropped, then
   // flushed the instant `app.useLogger()` below installs the structured
   // logger, so even boot logs come out as consistent JSON.
-  const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true, bufferLogs: true });
 
   // Step 5.4 — replaces Nest's default console logger for the ENTIRE
   // process: every existing `new Logger('SomeContext')` call site
@@ -45,6 +48,14 @@ async function bootstrap() {
   // now emits structured JSON with zero call-site changes, because Nest's
   // `Logger` class delegates to one static, replaceable reference.
   app.useLogger(new PinoLoggerService({ serviceName: 'hrm-api' }));
+
+  // Step 6.3 — makes `req.ip` resolve the REAL client behind whatever edge
+  // (k8s ingress, and optionally a CDN/WAF in front of it) sits in front
+  // of this process, instead of that edge's own address — see
+  // docs/conventions/edge-security.md and trusted-proxy.ts's own doc
+  // comment. Must run before any request is handled; ordering relative to
+  // configureSecurity/Swagger below doesn't matter otherwise.
+  configureTrustedProxy(app, app.get(ConfigService));
 
   // Step 6.2 — secure headers (helmet, CSP tuned for /v1/docs) + a real
   // CORS allow-list, replacing the previous `app.enableCors()` with NO

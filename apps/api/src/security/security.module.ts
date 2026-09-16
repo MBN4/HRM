@@ -7,6 +7,14 @@ import { CorsOriginService } from './cors-origin.service';
  * callback runs as plain middleware) via `app.get(CorsOriginService)`, the
  * same "grab a singleton off the root injector at bootstrap" pattern
  * `main.ts` already uses for `MetricsService`/`ShutdownService`.
+ *
+ * `CacheControlInterceptor` (step 6.3) is deliberately NOT registered
+ * here as a global provider — it's used purely via
+ * `@UseInterceptors(CacheControlInterceptor)` at each cacheable route
+ * (see `CareersController`), the same "no explicit provider registration
+ * needed, `Reflector` is always globally resolvable" posture
+ * `PermissionsGuard` already establishes for itself (see
+ * `AuditModule`'s own doc comment contrasting the two).
  */
 @Global()
 @Module({
