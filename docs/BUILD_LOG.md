@@ -3941,3 +3941,126 @@ interceptor}.ts` + `configure-security.ts`'s new
   available in this environment, stated honestly rather than skipped
   silently. **Phase 6 remaining: 6.4 incident response + chaos
   engineering — the final step.**
+
+- **6.4 incident response, disaster recovery & chaos engineering — done —
+  2026-09-16.** Phase 6's FINAL slice, and the final step of the whole
+  build. Full design in
+  [`docs/conventions/incident-response-dr.md`](./conventions/incident-response-dr.md)
+  — summary: an incident response runbook (SEV1–4 severity, roles, a
+  detection table tying each real 5.4 Prometheus alert/metric to the
+  incident type it signals, mitigation via the REAL existing levers —
+  4.1's tenant suspend/resume + cross-tenant audit read,
+  `CircuitBreakerService.reset`, 5.3's HPA/KEDA — and a security-incident/
+  breach runbook with a data-breach notification checklist built on 6.1's
+  export/consent/processing-register machinery, naming Pakistan as the
+  concrete first-client jurisdiction alongside a general GDPR-style
+  reference, BOTH explicitly flagged for real legal counsel before relying
+  on any specific timeline); a DR plan (DB loss, region outage, ransomware,
+  bad deploy, data corruption — each with an honest RPO/RTO) that reuses
+  6.2's already-tested encrypted backup/restore, 5.2's archival, and 5.3's
+  regional-deployment seam ENTIRELY, never reimplementing any of them,
+  plus one new, genuinely locally-runnable verification script
+  (`ops/backup/verify-latest-backup.sh` — validates a real backup
+  artifact's structure via `pg_restore --list`, no scratch database
+  needed). The real core: FIVE new automated chaos experiments under
+  `apps/api/test/chaos/`, each a real Jest e2e test against the live local
+  stack asserting a concrete outcome:
+  - `chaos-redis-down.e2e-spec.ts` — a genuinely killed-and-restarted
+    private `redis-server` child process (SIGKILL, not a mock).
+  - `chaos-db-pool-exhaustion.e2e-spec.ts` — a re-verification, against a
+    real deliberately-undersized pool, that 5.4's `P2024`/`P2028`
+    `DbPoolExhaustionFilter` fix still holds (which of the two codes fires
+    is itself a genuine, confirmed-empirically race, not assumed).
+  - `chaos-queue-worker-kill.e2e-spec.ts` — the REAL payroll pipeline
+    (2.1), with the worker process itself "killed" partway through
+    `PayrollRunProcessor`'s own per-employee loop (escaping it uncaught —
+    a materially different, stronger failure shape than the existing
+    per-employee-failure resumability test in `payroll.e2e-spec.ts`),
+    then retried, proving zero double-apply via byte-identical
+    `computedAt` timestamps.
+  - `chaos-flood-critical-path.e2e-spec.ts` — extends 6.3's own
+    `edge-ddos-flood.e2e-spec.ts` flood proof onto the REAL
+    `POST /auth/login` route (not just the demo stand-in), proving it
+    stays up under genuine concurrent load-shedding pressure.
+  - `chaos-sigterm-drain.e2e-spec.ts` — the one experiment in this whole
+    build that spawns REAL, separate OS processes (`node dist/main.js`,
+    the exact artifact `deploy/k8s/base/api-deployment.yaml` runs) and
+    sends an ACTUAL `SIGTERM` to one mid-request, proving in-flight-
+    request drain and an untouched sibling instance staying up
+    throughout — `main.ts`'s own signal handler exercised for real, not
+    via an in-process stand-in the way 5.3's own statelessness suite
+    does.
+
+  **TWO OF THE FIVE FOUND AND FIXED A REAL WEAKNESS, IN TWO LAYERS** —
+  mirroring exactly how 5.4 found and fixed two real bugs. First found:
+  `TenantRateLimitService.enforce` (on the hot path of EVERY tenant-scoped
+  request, before the DB transaction even opens) had no error handling
+  around its Redis calls — an unreachable Redis turned into an uncaught
+  error and a raw `500` for the whole app. Fixing that surfaced a SECOND,
+  equally real instance of the identical gap one hop later, found by the
+  SAME test: 5.1's `PermissionsCacheService.getContext` ("THE hottest
+  resolve-fresh-every-request read in the whole system," per its own doc
+  comment) had the same missing error handling. A THIRD, compounding
+  factor made both worse: ioredis's own default behavior for a
+  disconnected client is to QUEUE commands and wait for reconnection
+  rather than reject promptly, so even a bare `try/catch` alone was
+  insufficient — the chaos test itself timed out against this before the
+  full fix landed. **The fix, three parts**: (1) `RedisModule`'s shared
+  `ioredis` client now sets a client-level `commandTimeout` (default
+  2000ms) bounding EVERY command uniformly — the same "fix it once at the
+  shared layer" reasoning `pool-config.ts`'s own `DB_POOL_TIMEOUT_SECONDS`
+  already applies to the DB pool; (2) `TenantRateLimitService.enforce` now
+  fails OPEN (serves the request unmetered) on a genuine Redis failure,
+  re-throwing a real `TooManyAttemptsException` untouched; (3)
+  `PermissionsCacheService.getContext` now fails OPEN too (computes fresh
+  from Postgres instead of caching — correctness is unaffected, only the
+  cache hit rate drops to zero for the outage's duration). Both (2) and
+  (3) increment a new Prometheus counter,
+  `hrm_redis_unavailable_fail_open_total{check="tenant-rate-limit"|
+"permissions-cache"}`, making the degradation a real, alertable signal.
+  The fix was iterated TWICE against the SAME real running chaos test —
+  `commandTimeout` alone was proven insufficient before the second gap was
+  found, not assumed from reading the code. The DB-pool-exhaustion and
+  BullMQ-resumability experiments confirmed their respective mechanisms
+  already held — a fully valid, honestly-reported outcome, since not
+  every chaos experiment needs to find a bug to be worth running.
+
+  Files: `docs/conventions/incident-response-dr.md`;
+  `apps/api/test/chaos/{chaos-redis-down,chaos-db-pool-exhaustion,
+chaos-queue-worker-kill,chaos-flood-critical-path,
+chaos-sigterm-drain}.e2e-spec.ts`;
+  `apps/api/src/resilience/rate-limit/tenant-rate-limit.service.ts`
+  (fail-open + timeout); `apps/api/src/auth/permissions-cache.service.ts`
+  (fail-open); `apps/api/src/redis/redis.module.ts` (`commandTimeout`);
+  `apps/api/src/metrics/metrics.service.ts`
+  (`hrm_redis_unavailable_fail_open_total`); `ops/backup/
+verify-latest-backup.sh`; `ops/backup/DR-RUNBOOK.md` (references the new
+  script).
+
+- **6.4 verified — 2026-09-16.** All 5 new
+  `apps/api/test/chaos/*.e2e-spec.ts` files, **10 new tests, all green**,
+  run BOTH standalone (individually, with `--forceExit` — ioredis's own
+  reconnect-retry timers against a deliberately killed dependency are a
+  real, expected reason a Jest process can outlive its tests without
+  actually hanging, the same class of "real open handle, not a bug"
+  `observability-load.md` already documents elsewhere) and together as
+  part of a genuine, fresh, FULL-suite run: `apps/api` **77 suites, 695
+  tests**, `@hrm/db` **6 suites, 37 tests**, `@hrm/mobile` **4 suites, 19
+  tests** — ALL GREEN, zero pre-existing failures, zero flakes observed.
+  Full-repo `pnpm build` (6/6 workspace tasks) and `pnpm lint` (8/8) both
+  green. **Local infrastructure note, stated honestly**: this session's
+  sandboxed environment had no Docker daemon available (the usual
+  `docker-compose.yml` path this repo's own e2e headers document could not
+  be used) — Postgres 16, Redis 7, a native PgBouncer (transaction-pooling
+  mode), and a genuine Postgres streaming read replica were instead
+  configured natively on the host, matching 5.1's docker-compose service
+  shapes exactly (proven by `packages/db`'s own `pgbouncer-rls.spec.ts`/
+  `read-replica.spec.ts` passing unmodified against them); MinIO itself
+  could not be installed (no apt package, binary download blocked by this
+  session's egress policy) and was stood in for by `s3rver`, a real
+  S3-API-compatible Node server (SigV4 request handling verified against
+  the actual `@aws-sdk/client-s3` client this codebase uses) — every OTHER
+  piece of infrastructure (Postgres, Redis, the replica, PgBouncer) is the
+  genuine service, natively installed, not mocked. **PHASE 6 COMPLETE.
+  ALL PHASES 0 THROUGH 6 ARE NOW COMPLETE** — see CLAUDE.md § 7 for the
+  full-build closing summary.

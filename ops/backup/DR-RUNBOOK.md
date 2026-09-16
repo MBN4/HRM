@@ -18,6 +18,15 @@ runs, in what order, and why the targets below are what they are.
 - `restore-drill.sh` — decrypts a backup, restores it into a throwaway
   scratch database, and proves data integrity + RLS + `audit_log`
   immutability survive the round trip.
+- `verify-latest-backup.sh` (Phase 6.4 — see
+  [`docs/conventions/incident-response-dr.md`](../../docs/conventions/incident-response-dr.md)
+  § 2.5) — a fast, NON-destructive companion: decrypts the latest artifact
+  and validates it's a structurally sound `pg_restore` archive (via
+  `pg_restore --list`, no database touched at all) — cheap enough to run
+  after every single backup, catching a silently truncated/corrupted
+  upload the same day it happens rather than only during a real restore.
+  Does not replace `restore-drill.sh`'s own full proof, which remains the
+  periodic, authoritative test.
 
 This does **not** duplicate 5.2's partition archival (aging out old
 partitions to cold storage) or 5.1's streaming read replica (near-zero-RPO

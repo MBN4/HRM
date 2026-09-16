@@ -1,9 +1,13 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { appPrisma } from '@hrm/db';
 import { DEFAULT_RATE_LIMITS, RateLimitConfig, TenantEditionKey } from '@hrm/shared';
-import { RateLimiterService } from '../../redis/rate-limiter.service';
+import { RateLimiterService, TooManyAttemptsException } from '../../redis/rate-limiter.service';
 import { REDIS_CLIENT } from '../../redis/redis.constants';
+import { MetricsService } from '../../metrics/metrics.service';
+
+/** See `enforce`'s own doc comment for why this bound exists. */
+const REDIS_UNAVAILABLE_TIMEOUT_MS = Number(process.env.REDIS_UNAVAILABLE_TIMEOUT_MS ?? 750);
 
 const OVERRIDE_KEY_PREFIX = 'ratelimit:tenant-override:';
 const EFFECTIVE_CACHE_PREFIX = 'ratelimit:tenant-effective:';
@@ -39,15 +43,82 @@ const EFFECTIVE_CACHE_TTL_SECONDS = 30;
  */
 @Injectable()
 export class TenantRateLimitService {
+  private readonly logger = new Logger(TenantRateLimitService.name);
+
   constructor(
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly rateLimiter: RateLimiterService,
+    private readonly metrics: MetricsService,
   ) {}
 
-  /** Throws `TooManyAttemptsException` (429) once the tenant's current effective limit is exceeded. */
+  /**
+   * Throws `TooManyAttemptsException` (429) once the tenant's current
+   * effective limit is exceeded. FAILS OPEN when Redis itself is
+   * unreachable — a real gap Phase 6.4's chaos testing found (see
+   * docs/conventions/incident-response-dr.md § Chaos experiments →
+   * "Redis down"): this runs on `TenantScopeInterceptor`'s hot path for
+   * EVERY tenant-scoped request, BEFORE the DB transaction even opens: an
+   * uncaught Redis connection error here previously surfaced as a raw,
+   * uninformative 500 for every single request the instant Redis became
+   * unreachable — a total outage caused by a DEGRADED (not even fully
+   * down, in a real deployment with a replica) dependency, exactly the
+   * single-point-of-failure this chassis's own "no layer trusted alone"
+   * posture argues against. A deliberate tradeoff, the same shape as
+   * load shedding's own per-instance `SystemLoadService` exception: rate
+   * limiting exists to protect shared capacity from a runaway tenant, not
+   * to protect the app from users when it's already unavailable — failing
+   * OPEN (unmetered, but still SERVED) beats failing the whole app CLOSED
+   * over a dependency this feature alone doesn't strictly need to
+   * function. `TooManyAttemptsException` (a real, intentional 429) is
+   * re-thrown untouched — only a genuine Redis-reachability failure is
+   * swallowed. Every fail-open event increments a dedicated metric (see
+   * `MetricsService.incRedisUnavailableFailOpen`) so it's a visible,
+   * alertable signal, never a silent gap.
+   *
+   * Bounded by `REDIS_UNAVAILABLE_TIMEOUT_MS`: ioredis's OWN default
+   * behavior for a disconnected client is to QUEUE commands and wait for
+   * reconnection (`enableOfflineQueue: true`) rather than reject
+   * immediately — a real gap this step's own chaos test caught, since a
+   * plain `try/catch` alone did nothing until ioredis's internal
+   * `maxRetriesPerRequest` budget was exhausted, which can take far
+   * longer than this request should ever wait. Racing against a short
+   * local timeout here (the SAME `Promise.race` idiom
+   * `CircuitBreakerService.withTimeout` already establishes) makes the
+   * fail-open behavior actually fail open QUICKLY, instead of merely
+   * eventually.
+   */
   async enforce(tenantId: string): Promise<void> {
-    const config = await this.resolveEffectiveLimit(tenantId);
-    await this.rateLimiter.consume(`tenant-quota:${tenantId}`, config.limit, config.windowSeconds);
+    try {
+      await this.withTimeout(
+        (async () => {
+          const config = await this.resolveEffectiveLimit(tenantId);
+          await this.rateLimiter.consume(`tenant-quota:${tenantId}`, config.limit, config.windowSeconds);
+        })(),
+      );
+    } catch (error) {
+      if (error instanceof TooManyAttemptsException) {
+        throw error;
+      }
+      this.logger.warn(`Rate limiting failed open for tenant ${tenantId} — Redis unreachable: ${(error as Error).message}`);
+      this.metrics.incRedisUnavailableFailOpen('tenant-rate-limit');
+    }
+  }
+
+  private withTimeout<T>(promise: Promise<T>): Promise<T> {
+    const timeoutMs = REDIS_UNAVAILABLE_TIMEOUT_MS;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Redis call exceeded ${timeoutMs}ms — treating as unreachable.`)), timeoutMs);
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
   }
 
   /** Platform-admin lever — set (or, with `config: null`, clear) a tenant's override. Invalidates the cached effective value so the change is live immediately. */

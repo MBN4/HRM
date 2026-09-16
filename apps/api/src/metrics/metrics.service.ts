@@ -84,6 +84,25 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  /**
+   * Phase 6.4 — a REAL gap this step's own chaos test found (see
+   * docs/conventions/incident-response-dr.md § Chaos experiments →
+   * "Redis down"): `TenantRateLimitService.enforce` runs on the hot path
+   * of EVERY tenant-scoped request, unguarded, before this fix — a
+   * genuinely unreachable Redis turned into an uncaught error and a raw
+   * 500 for every single request, not a clean degrade. The fix makes rate
+   * limiting FAIL OPEN (skip enforcement, let the request through) when
+   * Redis is unreachable, logging + incrementing this counter each time —
+   * so an operator sees "rate limiting is not being enforced right now"
+   * as a real, alertable signal, distinct from "some tenant got a 429."
+   */
+  private readonly redisUnavailableFailOpen = new Counter({
+    name: 'hrm_redis_unavailable_fail_open_total',
+    help: 'Times a Redis-dependent resilience check (per-tenant rate limiting) failed open because Redis was unreachable, by check name.',
+    labelNames: ['check'],
+    registers: [this.registry],
+  });
+
   constructor() {
     // Free, standard Node process metrics (event loop lag, heap, GC,
     // active handles) — prom-client's own well-known default collector,
@@ -124,6 +143,10 @@ export class MetricsService {
 
   incPoolExhaustion(): void {
     this.poolExhaustionRejections.inc();
+  }
+
+  incRedisUnavailableFailOpen(check: string): void {
+    this.redisUnavailableFailOpen.inc({ check });
   }
 
   async metricsText(): Promise<string> {
