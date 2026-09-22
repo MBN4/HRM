@@ -30,7 +30,7 @@ test.describe('Accessibility (axe-core, WCAG 2.1 A/AA)', () => {
   test('/login — the MFA challenge step (already-enrolled admin)', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Email').fill(fixtures.enrolledOwnerEmail);
-    await page.getByLabel('Password').fill(TEST_PASSWORD);
+    await page.getByLabel('Password', { exact: true }).fill(TEST_PASSWORD);
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByLabel('Code')).toBeVisible();
 

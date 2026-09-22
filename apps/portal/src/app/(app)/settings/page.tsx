@@ -7,8 +7,11 @@ import { apiChangePassword } from '../../../lib/api/auth';
 import { ApiError } from '../../../lib/api/client';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
-import { Input, Label } from '../../../components/ui/Field';
+import { Label, FieldError } from '../../../components/ui/Field';
+import { PasswordInput } from '../../../components/ui/PasswordInput';
 import { Alert } from '../../../components/ui/Alert';
+
+const MIN_PASSWORD_LENGTH = 8;
 
 export default function SettingsPage() {
   const { t, locale, setLocale } = useI18n();
@@ -16,19 +19,33 @@ export default function SettingsPage() {
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   async function handleChangePassword(e: FormEvent) {
     e.preventDefault();
-    setSaving(true);
     setError(null);
+    setValidationError(null);
     setSuccess(false);
+
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setValidationError(t('auth.resetPassword.tooShort'));
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setValidationError(t('auth.resetPassword.mismatch'));
+      return;
+    }
+
+    setSaving(true);
     try {
       await apiChangePassword(currentPassword, newPassword);
       setCurrentPassword('');
       setNewPassword('');
+      setConfirmNewPassword('');
       setSuccess(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('error.generic'));
@@ -62,14 +79,33 @@ export default function SettingsPage() {
           <CardTitle>{t('settings.changePassword')}</CardTitle>
         </CardHeader>
         <CardBody>
-          <form onSubmit={handleChangePassword} className="space-y-4">
+          <form onSubmit={handleChangePassword} noValidate className="space-y-4">
             <div>
               <Label htmlFor="currentPassword">{t('settings.currentPassword')}</Label>
-              <Input id="currentPassword" type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
+              <PasswordInput id="currentPassword" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required autoComplete="current-password" />
             </div>
             <div>
               <Label htmlFor="newPassword">{t('settings.newPassword')}</Label>
-              <Input id="newPassword" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required minLength={8} />
+              <PasswordInput
+                id="newPassword"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                minLength={MIN_PASSWORD_LENGTH}
+                autoComplete="new-password"
+              />
+            </div>
+            <div>
+              <Label htmlFor="confirmNewPassword">{t('settings.confirmNewPassword')}</Label>
+              <PasswordInput
+                id="confirmNewPassword"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                required
+                minLength={MIN_PASSWORD_LENGTH}
+                autoComplete="new-password"
+              />
+              <FieldError>{validationError}</FieldError>
             </div>
             {error && <Alert tone="error">{error}</Alert>}
             {success && <Alert tone="success">{t('settings.passwordChanged')}</Alert>}

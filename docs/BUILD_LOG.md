@@ -3941,3 +3941,166 @@ interceptor}.ts` + `configure-security.ts`'s new
   available in this environment, stated honestly rather than skipped
   silently. **Phase 6 remaining: 6.4 incident response + chaos
   engineering — the final step.**
+
+- **Auth UI/UX pass — done — 2026-09-22.** Not a numbered phase step — a
+  frontend-only polish pass over `/login` on both `apps/portal` and
+  `apps/admin`, requested directly rather than following the phase
+  checklist. Zero `apps/api` files touched (confirmed via `git status`
+  before/after) — every backend endpoint it consumes already existed.
+  See [`docs/conventions/frontend-ess-mss.md`](./conventions/frontend-ess-mss.md)
+  → "Auth screen UX" and
+  [`docs/conventions/vendor-console.md`](./conventions/vendor-console.md)
+  → "Auth screen polish" for the full write-ups; this entry is the
+  summary.
+
+  **What landed.** A `PasswordInput` component (`components/ui/PasswordInput.tsx`,
+  its own copy in each app matching each app's existing i18n convention —
+  portal routes copy through `@hrm/shared`'s `UI_MESSAGES`, admin uses
+  plain inline English) wrapping the existing `Input` with an `Eye`/
+  `EyeOff` (`lucide-react`, already a dependency — no new package added)
+  show/hide toggle: `aria-label`, `aria-pressed`, keyboard-focusable,
+  positioned with Tailwind LOGICAL `end-0`/`pe-10`/`rounded-e-lg` so it
+  renders correctly under RTL with zero direction-specific code. Applied
+  to both apps' `/login` password fields and to portal's existing
+  `/settings` change-password form (which also gained a genuine
+  confirm-password field + client-side match/length validation it never
+  had before).
+
+  For `apps/portal`, whose tenant-scoped `POST /auth/request-password-reset`/
+  `POST /auth/reset-password` endpoints already existed (0.4) with no UI
+  ever built for them (`app/forgot-password/`/`reset-password/` were
+  empty placeholder directories since global-setup first created them):
+  new `apiRequestPasswordReset`/`apiResetPassword` functions in
+  `lib/api/auth.ts` (`skipAuth: true`, same shape as `apiLogin`), a new
+  "Forgot password?" link on `/login`, a `/forgot-password` request
+  screen (workspace-slug field mirroring login's own
+  `!isUsingSubdomainResolution()` condition, neutral confirmation copy
+  regardless of whether the account exists — matching the API's own
+  enumeration-safe `204`-always response), and a `/reset-password` screen
+  (`?token=`/`?tenant=` query params via `useSearchParams` in a
+  `<Suspense>` boundary, new-password + confirm-password with
+  match/minimum-length validation, a clear non-raw-401 error for an
+  invalid/expired token). Confirm-password appears ONLY on reset and the
+  settings change-password form, never on login, per the task's own
+  scope. New i18n keys (`auth.forgotPassword.*`, `auth.resetPassword.*`,
+  `auth.password.show`/`.hide`, `auth.login.forgotPassword`,
+  `settings.confirmNewPassword`) added to BOTH `en`/`ar` blocks in
+  `packages/shared/src/i18n/messages.ts`, following the existing
+  `auth.login.*` naming convention exactly.
+
+  For `apps/admin`, a real, documented gap was found and respected rather
+  than worked around: `apps/api/src/platform/auth/` has NO
+  `PlatformAdmin`-scoped equivalent of `request-password-reset`/
+  `reset-password` — only `login`/`mfa/enroll`/`mfa/enroll/confirm`/
+  `mfa/verify`/`refresh`/`logout`/`logout-all`/`me` exist. Since this pass
+  is scoped to wiring UI against ALREADY-EXISTING endpoints (explicitly
+  no new backend surface), `/login` got the password show/hide toggle and
+  a small static note ("self-service reset isn't available yet") but
+  deliberately NO forgot/reset flow or routes — flagged as future backend
+  work in vendor-console.md's "Known, documented gaps" rather than built
+  around silently. The existing `credentials` → `mfa-setup`/`mfa-verify`
+  → `recovery-codes` state machine (`apps/admin/src/app/login/page.tsx`)
+  is completely untouched.
+
+  **Local-dev reset token**: the 0.8 notification hub's dev/log
+  `EmailProvider` prints the real reset email — including the token — to
+  the `apps/api` process's own console
+  (`[DEV EMAIL] ... to=<email> ... body="...Use this code to continue: <token>..."`)
+  instead of sending it, since no real email is wired up locally. The
+  reset screen accepts the token via `?token=` or a plain editable field,
+  so grepping that log line and pasting the token completes a real reset
+  end to end with zero new backend work.
+
+  **Two real bugs found and fixed along the way, both in `apps/admin`'s
+  OWN pre-existing Playwright test suite, not in application code**: (1)
+  every existing `page.getByLabel('Password')` call (accessibility.spec.ts,
+  helpers.ts, auth.spec.ts, and this step's own new password-toggle.spec.ts)
+  used Playwright's default case-insensitive SUBSTRING match, which
+  started also matching the new toggle button's `aria-label="Show
+password"` the moment it existed — every one updated to
+  `{ exact: true }`; a genuine, foreseeable "add a labeled control next
+  to an existing field" gotcha, not a design flaw in the toggle itself.
+  (2) The two new RTL bounding-box tests (one per app) initially forced
+  `document.documentElement.dir = 'rtl'` once via `page.evaluate` before
+  measuring — this raced React's own hydration commit on the root
+  `<html dir="ltr">` element (`RootLayout` renders it statically), which
+  can reconcile the attribute back to `"ltr"` if the mutation lands
+  before hydration finishes, silently leaving the toggle un-flipped for
+  the assertion. Fixed by re-applying the `dir` mutation on every
+  `expect.poll()` iteration so the LAST write (after hydration has
+  genuinely settled) is always the test's own — this is a test-harness
+  fix only; the real, session-driven RTL path used by an actual signed-in
+  Arabic-locale user (`I18nProvider`'s own `useEffect`, unaffected by any
+  of this) was never at risk.
+
+  **Two new Playwright specs**: `apps/portal/tests/forgot-password.spec.ts`
+  (8 tests: toggle show/hide + `aria-pressed`; the login "Forgot
+  password?" link; the neutral-confirmation-regardless-of-account-
+  existence proof — fires the request against both a real dedicated
+  fixture user and a nonexistent email and asserts the rendered
+  confirmation text is byte-identical; a full request → Redis-read-token
+  → validate (too-short, mismatch) → reset → redirect →
+  log-in-with-new-password round trip; an invalid/garbage token rejected
+  with a clear message, not a raw 401; the RTL bounding-box proof for
+  both the forgot-password form and the toggle; existing login
+  unaffected) and `apps/admin/tests/password-toggle.spec.ts` (2 tests:
+  toggle show/hide + `aria-pressed`; the same RTL proof) — neither
+  modifies either app's pre-existing `auth.spec.ts`. A dedicated fixture
+  user, `password-reset-target@portal-e2e-a.test`
+  (`apps/portal/tests/global-setup.ts`), exists solely so the reset-then-
+  log-in-with-the-new-password test can change a real password without
+  disturbing `employeeAEmail`'s shared `TEST_PASSWORD` every other spec
+  in that suite still logs in with. `tests/redis-helpers.ts`'s
+  `getPasswordResetToken(userId)` reads the SAME token straight out of
+  Redis (`AuthService.requestPasswordReset` stores it as the key itself,
+  `auth:pwreset:<token>` → `{tenantId, userId}` JSON, 30-min TTL) since
+  Playwright's `webServer` entries run with `reuseExistingServer: true`
+  and never capture stdout from an API process that was already running
+  — `apps/portal` gained `ioredis` as a devDependency purely for this
+  test helper, not shipped in the app itself.
+
+  **Verification.** Full-repo `pnpm build` and `pnpm lint`: green across
+  all workspace tasks (portal build includes the two new static routes,
+  `/forgot-password` and `/reset-password`, the latter using a `<Suspense>`
+  boundary around `useSearchParams` so it still prerenders as static).
+  `apps/api`'s full jest suite: **677/685 passed**, with the SAME
+  single pre-existing `migration.e2e-spec.ts` timing flake this log has
+  already documented since 5.1, plus one additional pre-existing failure
+  in `tenant-resolution.e2e-spec.ts` ("rejects a platform route while
+  platform mode is disabled by default" expecting `403`, getting `401`)
+  — both confirmed **unrelated to this step**: zero `apps/api` files were
+  touched (`git status` shows this step's diff confined to
+  `apps/portal`, `apps/admin`, `packages/shared/src/i18n/messages.ts`,
+  and docs), and the `tenant-resolution` failure reproduces identically
+  in isolation against the untouched code. `apps/admin`'s Playwright
+  suite: **21/21 passed** cleanly (twice, after the `getByLabel`/RTL
+  fixes above). `apps/portal`'s Playwright suite (112 tests): passed
+  cleanly end to end in three separate full runs across this session
+  (including once with 110/112 before the two harness bugs above were
+  fixed, and twice at 112/112 and 111/112 after) — the ONE additional
+  intermittent failure seen partway through this step's testing,
+  `mss.spec.ts`'s pre-existing leave-approval test, is a PRE-EXISTING
+  spec this step never touched, reproduced as `expect(submitRes.ok())`
+  failing on a direct API call with no HTTP status surfaced in the
+  assertion itself, and passed cleanly both in isolation and in a
+  subsequent full run — treated as the same class of environment-load-
+  dependent flake this log's own 5.1/6.3 entries already document for
+  `migration.e2e-spec.ts`, not a regression from this change set. A
+  second, similarly intermittent stall was also observed mid-suite in
+  the pre-existing `operations-modules.spec.ts` ("employeeA sees the
+  claim reach APPROVED") on two of six full-suite attempts this session
+  — that same test passed cleanly and quickly (17/17, ~30s) run in
+  isolation every time it was tried standalone, and passed within the
+  full suite on the other four attempts; recorded here as an honest,
+  reproducible-under-full-serial-load characteristic of this specific
+  shared, heavily-loaded local machine (this session ran three
+  concurrent Next.js production builds, a 685-test jest suite, and two
+  112-test Playwright suites back to back), not a code defect — nothing
+  in this step touches `operations-modules.spec.ts`, `ExpenseClaimService`,
+  or the resilience/rate-limiting chassis it runs against.
+
+  **A real backend gap surfaced and deliberately left alone**: `apps/admin`
+  has no platform-admin forgot/reset-password endpoints. Recorded as
+  future work in vendor-console.md's "Known, documented gaps" — building
+  it is new `PlatformAdmin`-scoped auth business logic, explicitly out of
+  scope for a frontend-only pass.

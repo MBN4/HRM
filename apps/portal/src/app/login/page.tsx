@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
@@ -9,6 +10,7 @@ import { getStoredTenantSlug, isUsingSubdomainResolution } from '../../lib/tenan
 import { ApiError } from '../../lib/api/client';
 import { Button } from '../../components/ui/Button';
 import { Input, Label } from '../../components/ui/Field';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 import { Alert } from '../../components/ui/Alert';
 import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
 
@@ -101,10 +103,14 @@ export default function LoginPage() {
               />
             </div>
             <div>
-              <Label htmlFor="password">{t('auth.login.password')}</Label>
-              <Input
+              <div className="flex items-baseline justify-between gap-2">
+                <Label htmlFor="password">{t('auth.login.password')}</Label>
+                <Link href="/forgot-password" className="text-xs font-medium text-brand-600 hover:text-brand-700 hover:underline">
+                  {t('auth.login.forgotPassword')}
+                </Link>
+              </div>
+              <PasswordInput
                 id="password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

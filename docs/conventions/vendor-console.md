@@ -407,6 +407,31 @@ anyway).
   `countryPackConfigSchema` validation either way. A deliberate
   "functional over fancy" choice for an authoring surface used by a
   handful of vendor ops staff, not a tenant-facing form.
+- **Auth screen polish (an auth-UX pass, frontend-only).** `/login`'s
+  credentials-step password field gained a show/hide toggle
+  (`components/ui/PasswordInput.tsx` — its own copy of `apps/portal`'s
+  component, same `Eye`/`EyeOff` `lucide-react` icons, inline English
+  `aria-label`s ("Show password"/"Hide password") rather than a
+  `UI_MESSAGES` lookup, matching this app's own plain-inline-copy
+  convention above) with correct `aria-pressed` state and Tailwind LOGICAL
+  positioning (`end-0`) so it renders correctly under a forced `dir="rtl"`
+  too. **No forgot/reset-password UI was added here — there is currently
+  no backend endpoint to wire it to.** `apps/api/src/platform/auth/`
+  (`platform-auth.controller.ts`/`platform-auth.service.ts`) only exposes
+  `login`/`mfa/enroll`/`mfa/enroll/confirm`/`mfa/verify`/`refresh`/
+  `logout`/`logout-all`/`me` — no `PlatformAdmin`-scoped equivalent of the
+  tenant side's `request-password-reset`/`reset-password` exists, and
+  adding one is new backend/auth-business-logic work, out of scope for a
+  frontend-only pass. The password field instead carries a small static
+  note ("self-service reset isn't available yet") pointing at the real
+  current workaround — another platform owner resets the account, or a
+  direct DB update — until that backend work is scoped as its own step.
+  The existing `credentials` → `mfa-setup`/`mfa-verify` → `recovery-codes`
+  state machine is untouched by any of this — see
+  [frontend-ess-mss.md](./frontend-ess-mss.md)'s own "Auth screen UX"
+  section for the full write-up shared with `apps/portal`'s side of this
+  same pass (which DID get a full forgot/reset flow, since that backend
+  already existed).
 
 ## 11. Testing
 
@@ -471,4 +496,13 @@ step 4.3 — see [white-label.md](./white-label.md) — and reuses this
 step's own dual-audit pattern (`AuditRecordService.recordForTenant` +
 `PlatformAuditRecordService`) for its own branding/domain oversight
 actions; the vendor console gained a cross-tenant `/branding` overview
-and a per-tenant branding card as part of that step.
+and a per-tenant branding card as part of that step. An auth-UX pass (see
+§ 10) added a password show/hide toggle to `/login` but deliberately did
+NOT add a platform-admin forgot/reset-password flow — no backend endpoint
+for it exists (`platform-auth.controller.ts` has no
+`request-password-reset`/`reset-password` route). Building one is future
+work: a `PlatformAdmin`-scoped pair of endpoints mirroring
+`AuthService.requestPasswordReset`/`resetPassword` almost exactly (own
+Redis key namespace, own rate limiting, the same generic-response/no-
+enumeration posture), plus the corresponding `apps/admin` UI § 10 already
+anticipates.

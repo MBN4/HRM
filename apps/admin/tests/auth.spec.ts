@@ -10,7 +10,7 @@ test.describe('mandatory MFA — the real enrollment + login UI', () => {
   test('a fresh admin must complete MFA enrollment before reaching the console', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Email').fill(fixtures.freshOwnerEmail);
-    await page.getByLabel('Password').fill(TEST_PASSWORD);
+    await page.getByLabel('Password', { exact: true }).fill(TEST_PASSWORD);
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await expect(page.getByText('Set up two-factor authentication')).toBeVisible();
@@ -44,7 +44,7 @@ test.describe('mandatory MFA — the real enrollment + login UI', () => {
   test('rejects a wrong password with a generic error', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Email').fill(fixtures.enrolledOwnerEmail);
-    await page.getByLabel('Password').fill('definitely-the-wrong-password');
+    await page.getByLabel('Password', { exact: true }).fill('definitely-the-wrong-password');
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('alert')).toBeVisible();
     await expect(page).toHaveURL(/\/login/);

@@ -29,6 +29,8 @@ export interface PortalTestFixtures {
   seededApplicationId: string;
   seededPostingId: string;
   offboardingTargetEmployeeId: string;
+  passwordResetTargetEmail: string;
+  passwordResetTargetUserId: string;
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

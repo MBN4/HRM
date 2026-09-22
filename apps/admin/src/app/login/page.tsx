@@ -7,6 +7,7 @@ import { usePlatformAuth } from '../../lib/auth/PlatformAuthContext';
 import { ApiError } from '../../lib/api/client';
 import { Button } from '../../components/ui/Button';
 import { Input, Label } from '../../components/ui/Field';
+import { PasswordInput } from '../../components/ui/PasswordInput';
 import { Alert } from '../../components/ui/Alert';
 
 type Step =
@@ -113,14 +114,21 @@ export default function LoginPage() {
                 </div>
                 <div>
                   <Label htmlFor="password">Password</Label>
-                  <Input
+                  <PasswordInput
                     id="password"
-                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
                     autoComplete="current-password"
                   />
+                  {/* No self-service password reset exists for platform admins yet —
+                      see docs/conventions/vendor-console.md → "Auth screen polish"
+                      for the documented backend gap. Contact another owner-level
+                      admin, or reset the password directly in the database, until
+                      that flow is built. */}
+                  <p className="mt-1.5 text-xs text-ink-400">
+                    Forgot your password? Ask another platform owner to reset it — self-service reset isn&apos;t available yet.
+                  </p>
                 </div>
                 {error && <Alert tone="error">{error}</Alert>}
                 <Button type="submit" className="w-full" loading={submitting}>

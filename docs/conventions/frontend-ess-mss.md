@@ -98,6 +98,127 @@ other backend changes.
   only shows the "Workspace" field when `isUsingSubdomainResolution()` is
   false, so a real subdomain-served tenant never even sees it.
 
+### Auth screen UX — password show/hide, forgot/reset password (2.4-adjacent, an auth-UX polish pass)
+
+A later, UX-focused pass over `/login` (and the two auth screens it
+anticipated but never built) — pure frontend wiring against endpoints
+0.4/auth-rbac.md already shipped; no API/auth business logic changed.
+
+- **Password show/hide toggle — `components/ui/PasswordInput.tsx`.** A thin
+  wrapper around `Field.tsx`'s `Input` (never a change to `Input` itself,
+  which is used for every non-password field too): local `visible` state
+  toggles `type="password"`/`type="text"`, an inline icon button
+  (`Eye`/`EyeOff` from `lucide-react` — already the house icon library,
+  see `Button.tsx`/`Alert.tsx`; no new dependency added) with
+  `aria-label` (`t('auth.password.show')`/`t('auth.password.hide')`) and
+  `aria-pressed` reflecting the current state. Positioned with the
+  Tailwind LOGICAL inset `end-0` (not `right-0`) and `pe-10`/`rounded-e-lg`
+  on the input/button so it lands on the correct side under both LTR and
+  RTL with zero direction-specific code — proven in
+  `forgot-password.spec.ts`'s own RTL test, which forces `dir="rtl"` and
+  asserts the toggle's bounding box stays on the (now-left) logical end.
+  Used on `/login`, `/forgot-password`'s n/a (no password field there),
+  `/reset-password`'s new-password + confirm-password fields, and
+  `/settings`' existing change-password form.
+- **Forgot / reset password — wired to endpoints that already existed.**
+  `POST /auth/request-password-reset` and `POST /auth/reset-password`
+  (see docs/conventions/auth-rbac.md) had no UI at all before this pass —
+  `apps/portal/src/app/forgot-password/` and `reset-password/` existed
+  only as empty placeholder directories. New:
+  - `lib/api/auth.ts` gained `apiRequestPasswordReset(email)` and
+    `apiResetPassword(token, newPassword)`, both `skipAuth: true` (same
+    shape as `apiLogin`/`bootstrapSession` — these are `@AllowAnonymous()`
+    routes with no access token to attach).
+  - `/forgot-password`: email (+ the "Workspace" slug field, shown under
+    the identical `!isUsingSubdomainResolution()` condition `/login`
+    already uses — reset is tenant-scoped exactly like login, and a
+    device that's never logged in yet has no stored slug to fall back
+    on). Calling `apiRequestPasswordReset` always shows the SAME
+    confirmation copy (`auth.forgotPassword.confirmation`) whether or not
+    the account exists — matching the API's own enumeration-safe `204`-
+    always response; only a genuine transport/server failure produces an
+    error state. `forgot-password.spec.ts` proves this directly: it fires
+    the request against a real account AND a nonexistent one and asserts
+    the rendered confirmation text is byte-identical.
+  - `/reset-password`: reads `?token=` (and optionally `?tenant=`) from
+    the URL via `useSearchParams` (wrapped in a `<Suspense>` boundary —
+    Next.js App Router's requirement for that hook — confirmed the route
+    still prerenders as static in `next build`'s output), but the token
+    field is also a plain editable input, so pasting a token by hand
+    works identically. New password + confirm password (both
+    `PasswordInput`), client-side match + minimum-length (8) validation
+    before the request ever fires, then `POST /auth/reset-password`. A
+    `401` from that call (the API's own generic "Invalid or expired reset
+    token." — never distinguishing WHY) renders as
+    `auth.resetPassword.invalidOrExpired`. Success shows a confirmation
+    and a link back to `/login`.
+  - **Confirm-password only appears on reset (and the existing
+    `/settings` change-password form) — never on `/login`,** per this
+    pass's own scope: a login field re-typed twice would just be
+    friction, not a safety check; a NEW password being set is where a
+    typo is expensive enough to guard against.
+  - **LOCAL-DEV TOKEN — there is no real email locally.** The 0.8
+    notification hub's dev/log provider (`LogEmailProvider`) prints the
+    reset email to the `apps/api` process's own console instead of
+    sending it:
+    `[DEV EMAIL] ... to=<email> ... body="...Use this code to continue: <token>..."`.
+    To complete a reset locally by hand: trigger `/forgot-password`, then
+    grep the running `apps/api` server's stdout for `[DEV EMAIL]` and
+    copy the token out of the body text; paste it into `/reset-password`'s
+    "Reset code" field (or visit `/reset-password?token=<token>`
+    directly). **Playwright can't rely on scraping that log** — both
+    `playwright.config.ts`'s `webServer` entries run with
+    `reuseExistingServer: true`, so when the API is already running
+    (the normal shared-dev-server setup this suite's own config comments
+    describe), Playwright never captures its stdout. `tests/redis-helpers.ts`'s
+    `getPasswordResetToken(userId)` instead reads the SAME token straight
+    out of Redis — `AuthService.requestPasswordReset` stores it as the
+    key itself, `auth:pwreset:<token>` → `{tenantId, userId}` JSON, 30-min
+    TTL (`apps/api/src/auth/auth.service.ts`) — by scanning for the key
+    whose stored `userId` matches the fixture user, which is exactly as
+    reliable as reading the log by hand without depending on process
+    stdout capture. `apps/portal` gained `ioredis` as a devDependency
+    purely for this test helper (not shipped in the app itself).
+  - A dedicated fixture user, `password-reset-target@portal-e2e-a.test`
+    (`tests/global-setup.ts`), exists ONLY for
+    `forgot-password.spec.ts`'s own reset-then-log-in-with-the-new-
+    password test — so that test can actually change a real password
+    without disturbing `employeeAEmail`'s `TEST_PASSWORD`, which every
+    other spec in this suite still logs in with.
+- **`apps/admin` (vendor console) gets the SAME password show/hide
+  component and nothing else auth-flow-wise.** There is currently no
+  `PlatformAdmin` equivalent of `request-password-reset`/`reset-password`
+  anywhere in `apps/api/src/platform/auth/` — confirmed by reading
+  `platform-auth.controller.ts`/`platform-auth.service.ts` directly, not
+  assumed from a doc. Since this pass is scoped to frontend wiring against
+  ALREADY-EXISTING endpoints (no new backend surface), `/login` in
+  `apps/admin` gets `PasswordInput` (its own copy —
+  `apps/admin/src/components/ui/PasswordInput.tsx`, inline English strings
+  like the rest of that login page, no `UI_MESSAGES` catalog — see
+  docs/conventions/vendor-console.md's own note on why admin copy isn't
+  routed through that catalog) plus a small static note under the
+  password field ("self-service reset isn't available yet"), but
+  deliberately NO "Forgot password?" link or `/forgot-password`/
+  `reset-password` routes — a real self-service flow for platform admins
+  is future backend work (a new `PlatformAdmin`-scoped pair of endpoints
+  mirroring the tenant ones), tracked in
+  docs/conventions/vendor-console.md, not built here. The existing
+  4-step MFA state machine in `apps/admin/src/app/login/page.tsx`
+  (`credentials` → `mfa-setup`/`mfa-verify` → `recovery-codes`) is
+  completely untouched — the toggle only touches the `credentials` step's
+  password `<Input>` itself.
+- **Tests**: `apps/portal/tests/forgot-password.spec.ts` (toggle
+  show/hide + `aria-pressed`; the login "Forgot password?" link; the
+  neutral-confirmation-regardless-of-account-existence proof; a full
+  request → Redis-read-token → validate (too-short, mismatch) → reset →
+  redirect → log-in-with-new-password round trip; an invalid/garbage
+  token rejected with a clear, non-raw-401 message; a plain RTL
+  bounding-box proof for both the toggle and the forgot-password form;
+  existing login still works) and `apps/admin/tests/password-toggle.spec.ts`
+  (toggle show/hide + `aria-pressed`; the same RTL bounding-box proof) —
+  neither modifies `auth.spec.ts` in either app, so the pre-existing login/
+  MFA/sign-out coverage is untouched, just re-run alongside the new specs.
+
 ### The i18n/RTL client pattern — the first REAL use of the authoritative signal
 
 - `apps/portal/src/i18n/I18nProvider.tsx` itself is **untouched** — its own

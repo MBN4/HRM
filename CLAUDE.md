@@ -935,6 +935,22 @@ observability/load testing (5.4).
       [`docs/conventions/edge-security.md`](./docs/conventions/edge-security.md).
 - [ ] **6.4** Incident response + chaos engineering
 
+**Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
+frontend-only polish pass over `/login` on both `apps/portal` and
+`apps/admin`: a password show/hide toggle (`components/ui/PasswordInput.tsx`
+in each app, `lucide-react`'s existing `Eye`/`EyeOff` icons, no new
+dependency), and — for `apps/portal` only, since the tenant-scoped
+`/auth/request-password-reset`/`/auth/reset-password` endpoints already
+existed (0.4) — a full forgot/reset-password UI wired to them (neutral,
+enumeration-safe confirmation; confirm-password validation on reset only;
+the local-dev token retrieval documented). `apps/admin` deliberately did
+NOT get a forgot/reset flow — no `PlatformAdmin`-scoped equivalent
+endpoint exists yet, a real backend gap documented in
+[`docs/conventions/vendor-console.md`](./docs/conventions/vendor-console.md)'s
+"Known, documented gaps" rather than silently built around. See
+[`docs/conventions/frontend-ess-mss.md`](./docs/conventions/frontend-ess-mss.md)'s
+"Auth screen UX" section for the full write-up.
+
 **Phase 6 is NOT yet complete** — 6.1 (data privacy & residency), 6.2
 (security hardening + accessibility + backups/DR), and 6.3 (edge security
 & DDoS / WAF/CDN) are done; 6.4 (incident response + chaos engineering)

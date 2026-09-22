@@ -204,6 +204,14 @@ export default async function globalSetup(): Promise<void> {
     },
   });
 
+  // A DEDICATED user for forgot-password.spec.ts's own reset-completes-and-
+  // logs-in-with-the-new-password proof — never used by any other spec, so
+  // that test can actually CHANGE this user's password (via a real
+  // `/auth/reset-password` call) without disturbing employeeA's password,
+  // which every other spec in this suite still logs in with via
+  // `TEST_PASSWORD`.
+  const passwordResetTargetUser = await makeUser(tenantA.id, 'password-reset-target@portal-e2e-a.test', employeeRoleA.id);
+
   const employeeBUser = await makeUser(tenantB.id, 'employee@portal-e2e-b.test', employeeRoleB.id);
   await prisma.employee.create({
     data: {
@@ -549,6 +557,8 @@ export default async function globalSetup(): Promise<void> {
     seededApplicationId: seededApplication.id,
     seededPostingId: seededPosting.id,
     offboardingTargetEmployeeId: offboardingTargetEmployee.id,
+    passwordResetTargetEmail: 'password-reset-target@portal-e2e-a.test',
+    passwordResetTargetUserId: passwordResetTargetUser.id,
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 

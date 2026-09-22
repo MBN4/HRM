@@ -41,3 +41,17 @@ export function apiLogoutAll(): Promise<void> {
 export function apiChangePassword(currentPassword: string, newPassword: string): Promise<void> {
   return apiFetch('/auth/change-password', { method: 'POST', body: { currentPassword, newPassword } });
 }
+
+/**
+ * Always resolves — the API responds `204` unconditionally (whether or not
+ * the account exists) to avoid user enumeration; see
+ * docs/conventions/auth-rbac.md and docs/conventions/frontend-ess-mss.md →
+ * "Forgot / reset password".
+ */
+export function apiRequestPasswordReset(email: string): Promise<void> {
+  return apiFetch('/auth/request-password-reset', { method: 'POST', body: { email }, skipAuth: true });
+}
+
+export function apiResetPassword(token: string, newPassword: string): Promise<void> {
+  return apiFetch('/auth/reset-password', { method: 'POST', body: { token, newPassword }, skipAuth: true });
+}
