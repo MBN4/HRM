@@ -78,7 +78,7 @@ export default function StatutoryReportsPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('statutoryReports.title')}</h1>
+      <h1 className="page-title">{t('statutoryReports.title')}</h1>
       <p className="text-sm text-ink-500">{t('statutoryReports.subtitle')}</p>
       <Alert tone="info" data-testid="statutory-reports-compliance-notice">
         {t('statutoryReports.complianceNotice')}

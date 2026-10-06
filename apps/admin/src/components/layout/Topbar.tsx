@@ -23,12 +23,12 @@ export function Topbar() {
   }
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-ink-100 bg-white px-6">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-ink-100 bg-surface/85 px-6 backdrop-blur">
       <div />
       <div className="flex items-center gap-4">
         {me && (
           <>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-700">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700">
               <ShieldCheck className="h-4 w-4" aria-hidden />
               MFA verified
             </span>

@@ -35,6 +35,7 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
 import { useBranding } from '../../lib/branding/BrandingProvider';
 import { PERMISSIONS } from '@hrm/shared';
+import { Wordmark } from '../brand/Wordmark';
 
 interface NavItem {
   href: string;
@@ -140,34 +141,24 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-e border-ink-100 bg-white">
-      <div className="flex h-16 items-center gap-2 px-5">
-        {logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- a tenant-branded logo is an arbitrary uploaded image, not a build-time static asset next/image can optimize.
-          <img src={logoUrl} alt={branding.productName} className="h-8 w-8 rounded-lg object-contain" data-testid="branding-logo" />
-        ) : (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-            {branding.productName.charAt(0).toUpperCase()}
-          </div>
-        )}
-        <span className="text-base font-semibold text-ink-900" data-testid="branding-product-name">
-          {branding.productName}
-        </span>
+    <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col bg-sidebar text-sidebar-fg">
+      <div className="flex h-16 items-center px-5">
+        <Wordmark name={branding.productName} logoUrl={logoUrl} tone="light" tint={branding.primaryColor} />
       </div>
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4 scrollbar-thin">
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4 scrollbar-thin" aria-label="Primary">
         <NavGroup items={essItems} pathname={pathname} />
         <div>
-          <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">{t('nav.team')}</p>
+          <p className="eyebrow px-3 pb-2 text-sidebar-fg/80">{t('nav.team')}</p>
           <NavGroup items={mssItems} pathname={pathname} />
         </div>
         {adminItems.length > 0 && (
           <div>
-            <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-ink-400">{t('nav.admin')}</p>
+            <p className="eyebrow px-3 pb-2 text-sidebar-fg/80">{t('nav.admin')}</p>
             <NavGroup items={adminItems} pathname={pathname} />
           </div>
         )}
       </nav>
-      <div className="border-t border-ink-100 p-3">
+      <div className="border-t border-white/10 p-3">
         <NavGroup items={[{ href: '/settings', label: t('nav.settings'), icon: Settings }]} pathname={pathname} />
       </div>
     </aside>
@@ -184,11 +175,13 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string | nu
           <li key={item.href}>
             <Link
               href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                active ? 'bg-brand-50 text-brand-800' : 'text-ink-600 hover:bg-sand-100 hover:text-ink-900'
+              aria-current={active ? 'page' : undefined}
+              className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                active ? 'bg-white/[0.12] text-white' : 'text-sidebar-fg hover:bg-white/[0.07] hover:text-white'
               }`}
             >
-              <Icon className="h-4 w-4 shrink-0" aria-hidden />
+              {active && <span className="absolute inset-y-1.5 start-0 w-1 rounded-full bg-accent-400" aria-hidden />}
+              <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-accent-300' : 'text-sidebar-fg/80 group-hover:text-accent-300'}`} aria-hidden />
               {item.label}
             </Link>
           </li>

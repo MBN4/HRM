@@ -41,7 +41,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 data-testid="dashboard-heading" className="text-xl font-semibold text-ink-900">
+        <h1 data-testid="dashboard-heading" className="page-title">
           Platform overview
         </h1>
         <p className="text-sm text-ink-500">Cross-tenant health at a glance — precomputed, cheap reads only.</p>

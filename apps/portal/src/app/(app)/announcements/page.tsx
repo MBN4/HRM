@@ -76,7 +76,7 @@ export default function AnnouncementsPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('announcements.title')}</h1>
+      <h1 className="page-title">{t('announcements.title')}</h1>
 
       <Card>
         <CardHeader>

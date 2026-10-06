@@ -8,7 +8,9 @@
     "prettier.js",
     "tsconfig.base.json",
     "tsconfig.nestjs.json",
-    "tsconfig.nextjs.json"
+    "tsconfig.nextjs.json",
+    "tailwind-preset.js",
+    "design-tokens.css"
   ],
   "dependencies": {
     "@typescript-eslint/eslint-plugin": "^8.18.0",

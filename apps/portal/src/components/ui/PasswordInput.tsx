@@ -25,7 +25,7 @@ export const PasswordInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HT
           onClick={() => setVisible((v) => !v)}
           aria-label={visible ? t('auth.password.hide') : t('auth.password.show')}
           aria-pressed={visible}
-          className="absolute inset-y-0 end-0 flex w-10 items-center justify-center text-ink-400 hover:text-ink-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 rounded-e-lg"
+          className="absolute inset-y-0 end-0 flex w-10 items-center justify-center text-ink-400 hover:text-ink-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 rounded-e-lg"
         >
           {visible ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
         </button>

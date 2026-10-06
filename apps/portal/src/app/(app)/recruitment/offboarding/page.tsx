@@ -100,7 +100,7 @@ export default function OffboardingPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('offboarding.processes')}</h1>
+        <h1 className="page-title">{t('offboarding.processes')}</h1>
         <div className="flex items-center gap-2">
           {canManage && (
             <Button data-testid="refresh-button" variant="secondary" size="sm" aria-label={t('common.refresh')} onClick={() => reload()}>

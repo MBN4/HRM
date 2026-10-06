@@ -47,8 +47,8 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 p-4" role="dialog" aria-modal="true" aria-labelledby={titleId}>
-      <div ref={panelRef} tabIndex={-1} className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white shadow-soft outline-none">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-sidebar/60 p-4 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={panelRef} tabIndex={-1} className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-surface-raised shadow-pop outline-none">
         <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
           <h2 id={titleId} className="text-sm font-semibold text-ink-900">
             {title}

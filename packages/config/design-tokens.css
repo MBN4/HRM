@@ -1,0 +1,184 @@
+/*
+ * MBN design tokens — the ONE place every color in apps/portal and
+ * apps/admin comes from (see docs/conventions/design-system.md).
+ *
+ * Each token is a space-separated RGB triplet so Tailwind's opacity
+ * modifiers (`bg-brand-600/10`) keep working — the Tailwind side lives in
+ * ./tailwind-preset.js, which maps `brand-600` -> `rgb(var(--c-brand-600) / <alpha-value>)`.
+ *
+ * Dark mode is `prefers-color-scheme` driven (the apps' existing
+ * `darkMode: 'media'`). The ramps are FLIPPED in dark, not just darkened:
+ * `ink-900` (body text) becomes near-white, `sand-50` (page background)
+ * becomes near-black, `brand-50`/`brand-100` (tinted backgrounds) become
+ * dark tints and `brand-700`/`brand-800` (tinted-surface text) become light
+ * greens — so every existing `text-ink-900 bg-sand-50` / `bg-brand-50
+ * text-brand-800` pairing keeps its contrast with ZERO per-page dark rules.
+ * Solid fills that must stay dark under white text (buttons, active nav)
+ * therefore use the non-flipping `primary` / `danger` tokens instead of a
+ * brand shade.
+ *
+ * Palette anchors: BOTTLE GREEN primary (brand-600/700 ~ #0e6b52/#0b5d46)
+ * + SEA GREEN accent (accent-400/500 ~ #3fb890/#2e9e7e). Contrast is
+ * verified for the pairings the components use (WCAG 2.1 AA, >= 4.5:1
+ * text, >= 3:1 UI) — see the doc's contrast table.
+ */
+:root {
+  color-scheme: light;
+  /* Brand-surface tokens that must NOT flip in dark mode (the login backdrop is a deep-green scene in both modes). */
+  --c-auth-base: 3 34 26;
+  --c-auth-top: 7 59 46;
+  --c-glow-a: 46 158 126;
+  --c-glow-b: 27 127 103;
+  --c-brand-50: 236 247 243;
+  --c-brand-100: 211 237 228;
+  --c-brand-200: 168 218 201;
+  --c-brand-300: 117 192 169;
+  --c-brand-400: 63 159 135;
+  --c-brand-500: 27 127 103;
+  --c-brand-600: 14 107 82;
+  --c-brand-700: 11 93 70;
+  --c-brand-800: 9 74 56;
+  --c-brand-900: 7 59 46;
+  --c-brand-950: 3 34 26;
+  --c-accent-50: 236 250 245;
+  --c-accent-100: 208 243 230;
+  --c-accent-200: 163 231 206;
+  --c-accent-300: 111 213 178;
+  --c-accent-400: 63 184 144;
+  --c-accent-500: 46 158 126;
+  --c-accent-600: 35 128 101;
+  --c-accent-700: 31 103 83;
+  --c-accent-800: 28 83 68;
+  --c-accent-900: 25 68 57;
+  --c-sand-50: 245 248 247;
+  --c-sand-100: 237 242 240;
+  --c-sand-200: 224 231 228;
+  --c-sand-300: 203 213 209;
+  --c-sand-400: 169 182 177;
+  --c-sand-500: 134 148 142;
+  --c-ink-50: 244 247 246;
+  --c-ink-100: 228 234 232;
+  --c-ink-200: 206 214 212;
+  --c-ink-300: 163 174 171;
+  --c-ink-400: 98 112 107;
+  --c-ink-500: 85 98 94;
+  --c-ink-600: 65 76 73;
+  --c-ink-700: 49 58 56;
+  --c-ink-800: 33 41 40;
+  --c-ink-900: 19 25 24;
+  --c-ink-950: 10 14 13;
+  --c-amber-50: 253 246 231;
+  --c-amber-100: 250 235 196;
+  --c-amber-200: 244 213 138;
+  --c-amber-400: 233 169 44;
+  --c-amber-500: 212 143 23;
+  --c-amber-600: 143 90 10;
+  --c-amber-700: 116 71 8;
+  --c-amber-800: 91 56 6;
+  --c-coral-50: 253 240 238;
+  --c-coral-100: 250 220 215;
+  --c-coral-200: 244 185 175;
+  --c-coral-300: 236 148 136;
+  --c-coral-400: 229 114 98;
+  --c-coral-500: 212 80 63;
+  --c-coral-600: 178 58 43;
+  --c-coral-700: 143 46 33;
+  --c-sky-50: 236 245 250;
+  --c-sky-100: 212 232 243;
+  --c-sky-200: 174 210 231;
+  --c-sky-400: 74 160 207;
+  --c-sky-500: 43 134 184;
+  --c-sky-600: 32 104 143;
+  --c-sky-700: 27 85 118;
+  --c-primary: 14 107 82;
+  --c-primary-hover: 11 93 70;
+  --c-danger: 184 58 43;
+  --c-danger-hover: 159 47 34;
+  --c-surface: 255 255 255;
+  --c-surface-raised: 255 255 255;
+  --c-sidebar-fg: 195 217 209;
+  --c-chart-1: 27 127 103;
+  --c-chart-2: 63 184 144;
+  --c-chart-3: 212 143 23;
+  --c-chart-4: 43 134 184;
+  --c-chart-5: 212 80 63;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --c-brand-50: 15 43 36;
+    --c-brand-100: 18 56 48;
+    --c-brand-200: 24 74 62;
+    --c-brand-300: 31 101 83;
+    --c-brand-400: 46 138 114;
+    --c-brand-500: 63 184 144;
+    --c-brand-600: 92 201 166;
+    --c-brand-700: 125 214 184;
+    --c-brand-800: 163 228 205;
+    --c-brand-900: 201 240 225;
+    --c-brand-950: 230 248 241;
+    --c-accent-50: 15 43 38;
+    --c-accent-100: 19 58 51;
+    --c-accent-200: 26 79 69;
+    --c-accent-300: 35 105 92;
+    --c-accent-400: 53 163 137;
+    --c-accent-500: 76 196 162;
+    --c-accent-600: 111 213 185;
+    --c-accent-700: 147 224 203;
+    --c-accent-800: 181 235 220;
+    --c-accent-900: 211 244 234;
+    --c-sand-50: 12 17 16;
+    --c-sand-100: 24 32 30;
+    --c-sand-200: 35 45 42;
+    --c-sand-300: 49 61 57;
+    --c-sand-400: 74 90 85;
+    --c-sand-500: 104 121 111;
+    --c-ink-50: 24 32 30;
+    --c-ink-100: 38 48 45;
+    --c-ink-200: 54 66 64;
+    --c-ink-300: 107 122 117;
+    --c-ink-400: 151 165 159;
+    --c-ink-500: 169 181 176;
+    --c-ink-600: 190 200 196;
+    --c-ink-700: 208 216 213;
+    --c-ink-800: 226 232 230;
+    --c-ink-900: 240 244 242;
+    --c-ink-950: 250 252 251;
+    --c-amber-50: 44 35 17;
+    --c-amber-100: 59 46 21;
+    --c-amber-200: 89 67 29;
+    --c-amber-400: 233 169 44;
+    --c-amber-500: 240 184 74;
+    --c-amber-600: 242 196 107;
+    --c-amber-700: 245 210 142;
+    --c-amber-800: 248 224 176;
+    --c-coral-50: 51 26 24;
+    --c-coral-100: 71 36 32;
+    --c-coral-200: 106 50 43;
+    --c-coral-300: 141 66 56;
+    --c-coral-400: 229 114 98;
+    --c-coral-500: 238 133 118;
+    --c-coral-600: 242 154 141;
+    --c-coral-700: 246 179 169;
+    --c-sky-50: 17 39 57;
+    --c-sky-100: 23 52 73;
+    --c-sky-200: 31 74 102;
+    --c-sky-400: 92 179 222;
+    --c-sky-500: 109 191 230;
+    --c-sky-600: 138 204 240;
+    --c-sky-700: 169 219 245;
+    --c-primary: 20 121 95;
+    --c-primary-hover: 26 138 110;
+    --c-danger: 200 71 58;
+    --c-danger-hover: 214 90 77;
+    --c-surface: 20 27 25;
+    --c-surface-raised: 26 34 32;
+    --c-sidebar-fg: 195 217 209;
+    --c-chart-1: 76 196 162;
+    --c-chart-2: 125 214 184;
+    --c-chart-3: 240 184 74;
+    --c-chart-4: 109 191 230;
+    --c-chart-5: 238 133 118;
+  }
+}

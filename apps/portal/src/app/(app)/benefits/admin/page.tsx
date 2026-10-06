@@ -61,7 +61,7 @@ export default function BenefitsAdminPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('benefits.admin.title')}</h1>
+      <h1 className="page-title">{t('benefits.admin.title')}</h1>
 
       <Card>
         <CardHeader>

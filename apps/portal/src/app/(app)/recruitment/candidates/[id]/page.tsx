@@ -141,7 +141,7 @@ export default function CandidateDetailPage({ params }: { params: { id: string }
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink-900">
+        <h1 className="page-title">
           {candidate.firstName} {candidate.lastName}
         </h1>
         <p className="text-sm text-ink-500">{candidate.email}</p>

@@ -68,7 +68,7 @@ export default function ImportBatchDetailPage() {
     <div className="max-w-3xl space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink-900">{t(`migration.entityType.${batch.entityType}`)}</h1>
+          <h1 className="page-title">{t(`migration.entityType.${batch.entityType}`)}</h1>
           <p className="text-sm text-ink-500">{batch.fileName}</p>
         </div>
         <StatusBadge status={batch.status} label={t(`migration.status.${batch.status}`)} />

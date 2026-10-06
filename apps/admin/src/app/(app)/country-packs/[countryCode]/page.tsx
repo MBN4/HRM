@@ -52,7 +52,7 @@ export default function CountryPackDetailPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{params.countryCode}</h1>
+        <h1 className="page-title">{params.countryCode}</h1>
         {canManage && <Button onClick={handleNewVersion}>New draft version</Button>}
       </div>
 
@@ -144,7 +144,7 @@ function EditVersionModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-white p-5 shadow-soft">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-surface p-5 shadow-soft">
         <h2 className="mb-3 text-sm font-semibold text-ink-900">
           Edit {countryCode} v{version.version} (draft)
         </h2>

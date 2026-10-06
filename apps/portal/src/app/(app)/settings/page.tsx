@@ -56,7 +56,7 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('settings.title')}</h1>
+      <h1 className="page-title">{t('settings.title')}</h1>
 
       <Card>
         <CardHeader>

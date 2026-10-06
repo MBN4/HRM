@@ -30,7 +30,7 @@ export default function AssetsPage() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('assets.title')}</h1>
+      <h1 className="page-title">{t('assets.title')}</h1>
 
       <Card>
         <CardHeader>

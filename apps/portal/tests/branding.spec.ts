@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { FIXTURES_PATH, type PortalTestFixtures } from './fixtures';
 import { login } from './helpers';
+import { BRAND_NAME } from '@hrm/shared';
 
 const fixtures: PortalTestFixtures = JSON.parse(readFileSync(FIXTURES_PATH, 'utf-8'));
 
@@ -42,7 +43,7 @@ test.describe('white-label / branding — the settings UI, cross-tenant isolatio
 
   test('a DIFFERENT tenant never sees tenant A branding — isolation holds', async ({ page }) => {
     await login(page, fixtures.tenantBSlug, fixtures.employeeBEmail);
-    await expect(page.getByTestId('branding-product-name')).toHaveText('HRM');
+    await expect(page.getByTestId('branding-product-name')).toHaveText(BRAND_NAME);
     await expect(page.getByTestId('branding-logo')).toHaveCount(0);
   });
 

@@ -1,10 +1,14 @@
 import type { Metadata } from 'next';
+import { Inter } from 'next/font/google';
 import { I18nProvider } from '../i18n/I18nProvider';
 import { PlatformAuthProvider } from '../lib/auth/PlatformAuthContext';
+import { CONSOLE_TITLE } from '../lib/brand';
 import './globals.css';
 
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
+
 export const metadata: Metadata = {
-  title: 'HRM Vendor Console',
+  title: CONSOLE_TITLE,
   description: 'Vendor super-admin console — platform-wide, cross-tenant operations',
 };
 
@@ -17,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // tenant-facing portal does (no per-tenant locale exists to resolve),
   // only the same locale-toggle proof-of-concept 0.9 already wired up.
   return (
-    <html lang="en" dir="ltr">
+    <html lang="en" dir="ltr" className={inter.variable}>
       <body>
         <PlatformAuthProvider>
           <I18nProvider>{children}</I18nProvider>

@@ -2,11 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { fetchBrandingImage, getPublicBranding } from '../api/branding';
+import { BRAND_NAME } from '../brand';
 import { useAuth } from '../auth/AuthContext';
 import type { PublicBranding } from '../api/types';
 
 const DEFAULT_BRANDING: PublicBranding = {
-  productName: 'HRM',
+  productName: BRAND_NAME,
   hasLogo: false,
   hasFavicon: false,
   primaryColor: null,

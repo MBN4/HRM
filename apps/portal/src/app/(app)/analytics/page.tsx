@@ -45,6 +45,14 @@ function KpiTile({ label, value, hint, testId }: { label: string; value: string;
   );
 }
 
+/** Theme-aware tooltip surface (recharts draws it with inline styles, so Tailwind classes can't reach it). */
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: 'rgb(var(--c-surface-raised))',
+  border: '1px solid rgb(var(--c-ink-200))',
+  borderRadius: 8,
+  color: 'rgb(var(--c-ink-900))',
+} as const;
+
 export default function AnalyticsPage() {
   const { t, locale } = useI18n();
   const { can } = useAuth();
@@ -74,7 +82,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="max-w-6xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('analytics.title')}</h1>
+      <h1 className="page-title">{t('analytics.title')}</h1>
 
       <div className="flex flex-wrap items-end gap-4">
         <div className="w-56">
@@ -95,7 +103,7 @@ export default function AnalyticsPage() {
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900"
+            className="rounded-lg border border-ink-200 bg-surface px-3 py-2 text-sm text-ink-900"
           />
         </div>
         <div>
@@ -105,7 +113,7 @@ export default function AnalyticsPage() {
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            className="rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900"
+            className="rounded-lg border border-ink-200 bg-surface px-3 py-2 text-sm text-ink-900"
           />
         </div>
       </div>
@@ -143,11 +151,11 @@ export default function AnalyticsPage() {
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={dashboard.headcount.byBranch.map((r) => ({ ...r, label: branchName(branches, r.branchId) }))}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                        <Tooltip formatter={(value) => formatNumber(Number(value), locale)} />
-                        <Bar dataKey="count" fill="#0d9488" radius={[4, 4, 0, 0]} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgb(var(--c-ink-100))" />
+                        <XAxis dataKey="label" tick={{ fontSize: 12, fill: "rgb(var(--c-ink-500))" }} stroke="rgb(var(--c-ink-200))" />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "rgb(var(--c-ink-500))" }} stroke="rgb(var(--c-ink-200))" />
+                        <Tooltip formatter={(value) => formatNumber(Number(value), locale)} contentStyle={CHART_TOOLTIP_STYLE} />
+                        <Bar dataKey="count" fill="rgb(var(--c-chart-1))" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -166,13 +174,13 @@ export default function AnalyticsPage() {
                   <div className="h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={dashboard.attendance.trend.map((r) => ({ ...r, label: formatDate(r.date, locale) }))}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                        <Tooltip formatter={(value) => formatNumber(Number(value), locale)} />
-                        <Line type="monotone" dataKey="presentCount" name={t('analytics.attendance.present')} stroke="#0d9488" dot={false} />
-                        <Line type="monotone" dataKey="absentCount" name={t('analytics.attendance.absent')} stroke="#e11d48" dot={false} />
-                        <Line type="monotone" dataKey="lateCount" name={t('analytics.attendance.late')} stroke="#d97706" dot={false} />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgb(var(--c-ink-100))" />
+                        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "rgb(var(--c-ink-500))" }} stroke="rgb(var(--c-ink-200))" />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "rgb(var(--c-ink-500))" }} stroke="rgb(var(--c-ink-200))" />
+                        <Tooltip formatter={(value) => formatNumber(Number(value), locale)} contentStyle={CHART_TOOLTIP_STYLE} />
+                        <Line type="monotone" dataKey="presentCount" name={t('analytics.attendance.present')} stroke="rgb(var(--c-chart-1))" dot={false} />
+                        <Line type="monotone" dataKey="absentCount" name={t('analytics.attendance.absent')} stroke="rgb(var(--c-chart-5))" dot={false} />
+                        <Line type="monotone" dataKey="lateCount" name={t('analytics.attendance.late')} stroke="rgb(var(--c-chart-3))" dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>

@@ -30,6 +30,7 @@ import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import type IORedis from 'ioredis';
 import { appPrisma, prisma, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '@hrm/db';
+import { DEFAULT_PRODUCT_NAME } from '@hrm/shared';
 import { AppModule } from '../src/app.module';
 import { REDIS_CLIENT } from '../src/redis/redis.constants';
 import { createTestPlatformAdmin, cleanupTestPlatformAdmins } from './helpers/platform-test-auth';
@@ -184,7 +185,7 @@ describe('white-label / branding (e2e)', () => {
   describe('public resolution + defaults', () => {
     it('a tenant with no branding row resolves plain product defaults', async () => {
       const res = await get('/branding', hostFor(TENANT_B_SLUG)).expect(200);
-      expect(res.body).toMatchObject({ productName: 'HRM', hasLogo: false, hasFavicon: false, showPoweredBy: true });
+      expect(res.body).toMatchObject({ productName: DEFAULT_PRODUCT_NAME, hasLogo: false, hasFavicon: false, showPoweredBy: true });
     });
   });
 
@@ -206,7 +207,7 @@ describe('white-label / branding (e2e)', () => {
 
     it('cross-tenant isolation: tenant B never sees tenant A branding', async () => {
       const res = await get('/branding', hostFor(TENANT_B_SLUG)).expect(200);
-      expect(res.body.productName).toBe('HRM');
+      expect(res.body.productName).toBe(DEFAULT_PRODUCT_NAME);
       expect(res.body.primaryColor).toBeNull();
     });
 
@@ -364,7 +365,7 @@ describe('white-label / branding (e2e)', () => {
       await platformDelete(`/platform/branding/tenants/${tenantAId}/reset`, platformOwnerToken).expect(204);
 
       const res = await get('/branding', hostFor(TENANT_A_SLUG)).expect(200);
-      expect(res.body.productName).toBe('HRM');
+      expect(res.body.productName).toBe(DEFAULT_PRODUCT_NAME);
     });
 
     it('no token at all is rejected on every platform branding route', async () => {

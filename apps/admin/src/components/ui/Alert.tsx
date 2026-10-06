@@ -11,7 +11,7 @@ const TONE_STYLES: Record<Tone, { wrap: string; icon: typeof Info }> = {
 export function Alert({ tone = 'info', children }: { tone?: Tone; children: React.ReactNode }) {
   const { wrap, icon: Icon } = TONE_STYLES[tone];
   return (
-    <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${wrap}`} role={tone === 'error' ? 'alert' : 'status'}>
+    <div className={`flex items-start gap-2 rounded-xl border px-3.5 py-3 text-sm ${wrap}`} role={tone === 'error' ? 'alert' : 'status'}>
       <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
       <span>{children}</span>
     </div>

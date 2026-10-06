@@ -4104,3 +4104,58 @@ password"` the moment it existed — every one updated to
   future work in vendor-console.md's "Known, documented gaps" — building
   it is new `PlatformAdmin`-scoped auth business logic, explicitly out of
   scope for a frontend-only pass.
+
+## Branding + visual design pass — MBN (2026-10-06)
+
+A VISUAL/UX-only pass across `apps/portal` and `apps/admin`: no business
+logic, API call, auth flow, routing or i18n-key-meaning change. Full design
+write-up in [`conventions/design-system.md`](./conventions/design-system.md).
+
+**What landed**
+- **Brand constant** — `BRAND_NAME = 'MBN'` in `packages/shared/src/constants/branding.ts`;
+  `DEFAULT_PRODUCT_NAME`, `DEFAULT_EMAIL_FROM_NAME`, the UI catalog's `app.name`/
+  `branding.poweredBy`/`branding.productNamePlaceholder`, both apps' tab titles and
+  the portal's runtime default all derive from it. This DOES change the API's
+  default `TenantBranding.productName` (it reads the same shared constant), so
+  four literal `'HRM'` assertions in `apps/api/test/white-label.e2e-spec.ts` and one
+  in `apps/portal/tests/branding.spec.ts` now assert against the constant.
+- **Shared design system** — new `packages/config/design-tokens.css` (RGB-triplet
+  CSS variables, light + `prefers-color-scheme: dark`) and
+  `packages/config/tailwind-preset.js` (token→Tailwind mapping + a base/component
+  plugin: table styling, `.page-title`, `.auth-backdrop`, …). Both
+  `tailwind.config.ts` files collapsed to the preset. Bottle-green primary +
+  sea-green accent, full 50–950 ramps, neutrals, semantic colors, chart tokens.
+- **Dark mode** — the apps previously declared `darkMode: 'media'` but had **zero**
+  `dark:` styles and `color-scheme: light`, so dark mode didn't actually exist.
+  It now does, via flipped ramps (no per-page dark rules) — see the doc's §2.
+- **Components** — `components/ui/*` restyled in both apps; `bg-white` → `bg-surface`
+  everywhere (one deliberate exception: the signature-pad canvas); every `<h1>`
+  → `.page-title`; analytics charts read `--c-chart-*` + themed tooltip/axes.
+- **Shell + auth** — new `Wordmark`/`BrandMark` lockup; deep-green sticky portal
+  sidebar and near-black admin sidebar (distinguishable on purpose) with an
+  accent active-bar; sticky translucent top bars; branded login/forgot/reset
+  screens (portal) and login + MFA steps (admin) on `.auth-backdrop`; admin gets
+  Inter. Portal dashboard: date subtitle + an icon stat tile.
+- **Docs** — new `conventions/design-system.md`; CLAUDE.md index/summary rows.
+
+**Bugs caught by reviewing the result, not by tests**
+- The login backdrop first used the flipping `brand-950` token → pale mint in
+  dark mode. Fixed with dedicated non-flipping `auth-*`/`glow-*` tokens.
+- The `Wordmark` light-tone tile used `text-brand-700`, which flips to near-white
+  in dark mode on its white tile → hard-coded `#0b5d46`.
+- The bulk `bg-white`→`bg-surface` rewrite also hit the `Wordmark` tile and the
+  e-signature canvas (dark strokes on a dark canvas) → both reverted by hand.
+- Tailwind plugin `theme('colors.x')` leaks the `<alpha-value>` placeholder into
+  raw CSS → plugin uses a local alpha-less `c()` helper instead.
+- `require('tailwindcss/plugin')` can't resolve from `packages/config` under pnpm
+  → plugin written as a plain `{ handler }` object.
+
+**Verification** — both apps' production builds succeed; `apps/admin` Playwright
+**21/21**, `apps/portal` Playwright **112/112** (both include the axe-core WCAG
+specs, run against the new palette); `apps/api` `white-label.e2e-spec.ts`
+**21/21** (`--runInBand`; the only API test touched). Screenshot review of
+login + dashboard + several list/admin/analytics pages in light/dark × LTR/RTL
+for both apps (portal RTL via a Qatar-branch user — see the design-system doc's
+RTL caveat). Not done: a full API jest run (no API source changed beyond the
+shared constant's value), and the mobile app was not touched.
+

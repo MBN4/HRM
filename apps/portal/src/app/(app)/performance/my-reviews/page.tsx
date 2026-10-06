@@ -29,7 +29,7 @@ export default function MyReviewsPage() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('performance.myReviews')}</h1>
+      <h1 className="page-title">{t('performance.myReviews')}</h1>
 
       <Card>
         <CardBody>

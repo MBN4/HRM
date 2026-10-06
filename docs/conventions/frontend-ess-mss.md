@@ -1,5 +1,7 @@
 # Employee/Manager self-service UI (ESS/MSS)
 
+> **Visual design superseded (Branding pass, 2026-10-06):** the palette/token descriptions below predate the shared MBN design system — colors, fonts, base styles and the `ui/*` kit are now defined once in `packages/config` and shared with the other app. See [`design-system.md`](./design-system.md). Everything about behavior, RTL logic and testing below is unchanged.
+
 [← Back to CLAUDE.md](../../CLAUDE.md) · [Build log](../BUILD_LOG.md)
 
 Defined in step 1.4 (Phase 1) — `apps/portal` (Next.js 14 App Router, tenant

@@ -48,7 +48,7 @@ export default function TeamPage() {
 
   return (
     <div className="max-w-5xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('nav.team')}</h1>
+      <h1 className="page-title">{t('nav.team')}</h1>
 
       <div className="flex items-end gap-4">
         <div>

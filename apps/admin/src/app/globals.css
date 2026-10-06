@@ -1,17 +1,21 @@
+@import '@hrm/config/design-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  html {
-    color-scheme: light;
-  }
+/*
+ * Colors/typography/base element styles come from the shared MBN preset
+ * (packages/config/tailwind-preset.js + design-tokens.css) — see
+ * docs/conventions/design-system.md. Only app-specific tokens live here.
+ */
+:root {
+  /* Near-black green — the vendor console shares the brand but is instantly distinguishable from the tenant portal (the more dangerous, cross-tenant surface). */
+  --c-sidebar: 11 21 19;
+}
 
-  body {
-    @apply bg-sand-50 text-ink-900 antialiased;
-  }
-
-  :focus-visible {
-    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-sand-50;
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
   }
 }

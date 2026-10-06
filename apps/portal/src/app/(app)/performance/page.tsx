@@ -66,7 +66,7 @@ export default function PerformancePage() {
   return (
     <div className="max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('performance.title')}</h1>
+        <h1 className="page-title">{t('performance.title')}</h1>
         <div className="flex items-center gap-2">
           {canReview && (
             <Button variant="secondary" data-testid="my-reviews-link" onClick={() => router.push('/performance/my-reviews')}>

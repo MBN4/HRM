@@ -87,7 +87,7 @@ export default function RecruitmentPage() {
   return (
     <div className="max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('nav.recruitment')}</h1>
+        <h1 className="page-title">{t('nav.recruitment')}</h1>
         <div className="flex items-center gap-2">
           <Button
             data-testid="refresh-button"

@@ -1,7 +1,7 @@
 import { HTMLAttributes } from 'react';
 
 export function Card({ className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={`rounded-xl2 border border-ink-100 bg-white shadow-card ${className}`} {...rest} />;
+  return <div className={`rounded-xl2 border border-ink-100 bg-surface shadow-card ${className}`} {...rest} />;
 }
 
 export function CardHeader({ className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
@@ -9,9 +9,9 @@ export function CardHeader({ className = '', ...rest }: HTMLAttributes<HTMLDivEl
 }
 
 export function CardTitle({ className = '', ...rest }: HTMLAttributes<HTMLHeadingElement>) {
-  return <h2 className={`text-sm font-semibold text-ink-900 ${className}`} {...rest} />;
+  return <h2 className={`text-sm font-semibold tracking-tight text-ink-900 ${className}`} {...rest} />;
 }
 
 export function CardBody({ className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={`px-5 py-4 ${className}`} {...rest} />;
+  return <div className={`px-5 py-5 ${className}`} {...rest} />;
 }

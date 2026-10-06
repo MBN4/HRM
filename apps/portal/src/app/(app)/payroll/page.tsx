@@ -48,7 +48,7 @@ export default function PayrollPage() {
   return (
     <div className="max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('payroll.title')}</h1>
+        <h1 className="page-title">{t('payroll.title')}</h1>
         {canCreate && (
           <Button data-testid="new-run-button" onClick={() => setCreating(true)}>
             <Plus className="h-4 w-4" aria-hidden />

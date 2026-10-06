@@ -41,7 +41,7 @@ export default function AttendancePage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('attendance.title')}</h1>
+        <h1 className="page-title">{t('attendance.title')}</h1>
         {employee && (
           <Button variant="secondary" onClick={() => setRegularizing(true)}>
             <Wrench className="h-4 w-4" aria-hidden />

@@ -12,6 +12,7 @@ import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Ca
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { formatDate, formatDateTime } from '../../../lib/format';
+import { ClipboardCheck } from 'lucide-react';
 
 export default function DashboardPage() {
   const { t, locale } = useI18n();
@@ -25,9 +26,10 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 data-testid="dashboard-greeting" className="text-xl font-semibold text-ink-900">
+        <h1 data-testid="dashboard-greeting" className="page-title">
           {t('dashboard.greeting', { name: employee ? employee.firstName : '' })}
         </h1>
+        <p className="page-subtitle">{formatDate(new Date().toISOString(), locale)}</p>
       </div>
 
       {!employeeLoading && !employee && (
@@ -51,7 +53,7 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t('dashboard.leaveBalance.title')}</CardTitle>
-            <Link href="/leave" className="text-xs font-medium text-brand-700 hover:underline">
+            <Link href="/leave" className="text-xs font-semibold text-brand-700 hover:underline">
               {t('common.viewAll')}
             </Link>
           </CardHeader>
@@ -74,12 +76,17 @@ export default function DashboardPage() {
         <Card>
           <CardHeader>
             <CardTitle>{t('dashboard.pendingApprovals.title')}</CardTitle>
-            <Link href="/approvals" className="text-xs font-medium text-brand-700 hover:underline">
+            <Link href="/approvals" className="text-xs font-semibold text-brand-700 hover:underline">
               {t('common.viewAll')}
             </Link>
           </CardHeader>
           <CardBody>
-            <p className="text-3xl font-semibold text-ink-900">{pendingApprovals?.length ?? 0}</p>
+            <div className="flex items-center gap-4">
+              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                <ClipboardCheck className="h-6 w-6" aria-hidden />
+              </span>
+              <p className="text-4xl font-bold tracking-tight text-ink-900">{pendingApprovals?.length ?? 0}</p>
+            </div>
           </CardBody>
         </Card>
       </div>
@@ -88,7 +95,7 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>{t('dashboard.notifications.title')}</CardTitle>
-            <Link href="/notifications" className="text-xs font-medium text-brand-700 hover:underline">
+            <Link href="/notifications" className="text-xs font-semibold text-brand-700 hover:underline">
               {t('common.viewAll')}
             </Link>
           </CardHeader>

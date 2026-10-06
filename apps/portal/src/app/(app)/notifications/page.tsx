@@ -15,7 +15,7 @@ export default function NotificationsPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('notifications.title')}</h1>
+      <h1 className="page-title">{t('notifications.title')}</h1>
       <Card>
         <CardBody>
           {loading ? (

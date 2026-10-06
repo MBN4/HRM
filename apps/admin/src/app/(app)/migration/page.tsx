@@ -114,7 +114,7 @@ export default function PlatformMigrationPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink-900">Onboarding data import</h1>
+        <h1 className="page-title">Onboarding data import</h1>
         <p className="text-sm text-ink-500">Run or oversee a data import on a tenant&apos;s behalf during onboarding.</p>
       </div>
 

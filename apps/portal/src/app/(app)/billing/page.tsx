@@ -98,7 +98,7 @@ export default function BillingPage() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('billing.title')}</h1>
+      <h1 className="page-title">{t('billing.title')}</h1>
 
       {error && <Alert tone="error">{error}</Alert>}
       {prorationMessage && <Alert tone="info">{prorationMessage}</Alert>}

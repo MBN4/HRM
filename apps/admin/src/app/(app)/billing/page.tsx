@@ -23,7 +23,7 @@ export default function BillingOverviewPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink-900">Billing</h1>
+        <h1 className="page-title">Billing</h1>
         <p className="text-sm text-ink-500">Every tenant&apos;s subscription state — open a tenant to manage invoices or trigger AMC billing.</p>
       </div>
 

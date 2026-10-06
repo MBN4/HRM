@@ -42,7 +42,7 @@ export default function CandidatePipelinePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('recruitment.pipeline')}</h1>
+      <h1 className="page-title">{t('recruitment.pipeline')}</h1>
 
       {loading ? (
         <PageSpinner />

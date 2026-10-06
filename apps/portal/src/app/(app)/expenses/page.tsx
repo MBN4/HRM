@@ -32,7 +32,7 @@ export default function ExpensesPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('expenses.title')}</h1>
+        <h1 className="page-title">{t('expenses.title')}</h1>
         <Button data-testid="new-expense-claim-button" onClick={() => setCreating(true)}>
           <Plus className="h-4 w-4" aria-hidden />
           {t('expenses.newClaim')}

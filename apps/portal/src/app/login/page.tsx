@@ -12,6 +12,7 @@ import { Button } from '../../components/ui/Button';
 import { Input, Label } from '../../components/ui/Field';
 import { PasswordInput } from '../../components/ui/PasswordInput';
 import { Alert } from '../../components/ui/Alert';
+import { Wordmark } from '../../components/brand/Wordmark';
 import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
 
 export default function LoginPage() {
@@ -53,27 +54,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-900 via-brand-800 to-ink-900 px-4">
+    <div className="auth-backdrop flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
-        <div className="mb-8 flex items-center justify-center gap-2">
-          {logoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- a tenant-branded logo is an arbitrary uploaded image, not a build-time static asset next/image can optimize.
-            <img src={logoUrl} alt={branding.productName} className="h-10 w-10 rounded-xl object-contain" data-testid="branding-logo" />
-          ) : (
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-lg font-bold text-brand-700"
-              style={branding.primaryColor ? { color: branding.primaryColor } : undefined}
-              data-testid="branding-badge"
-            >
-              {branding.productName.charAt(0).toUpperCase()}
-            </div>
-          )}
-          <span className="text-xl font-semibold text-white" data-testid="branding-product-name">
-            {branding.productName}
-          </span>
+        <div className="mb-8 flex justify-center">
+          <Wordmark name={branding.productName} logoUrl={logoUrl} tint={branding.primaryColor} tone="light" size="lg" />
         </div>
-        <div className="rounded-xl2 bg-white p-8 shadow-soft">
-          <h1 className="text-lg font-semibold text-ink-900">{branding.loginHeadline || t('auth.login.title')}</h1>
+        <div className="auth-card">
+          <h1 className="text-xl font-semibold tracking-tight text-ink-900">{branding.loginHeadline || t('auth.login.title')}</h1>
           <p className="mt-1 text-sm text-ink-500">{branding.loginSubtext || t('auth.login.subtitle')}</p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">

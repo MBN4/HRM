@@ -83,7 +83,7 @@ export default function PrivacyPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('privacy.title')}</h1>
+      <h1 className="page-title">{t('privacy.title')}</h1>
       <p className="text-sm text-ink-500">{t('privacy.subtitle')}</p>
 
       <Card>

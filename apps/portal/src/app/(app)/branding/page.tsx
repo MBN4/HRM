@@ -185,7 +185,7 @@ export default function BrandingPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink-900">{t('branding.title')}</h1>
+        <h1 className="page-title">{t('branding.title')}</h1>
         <p className="mt-1 text-sm text-ink-500">{t('branding.subtitle')}</p>
       </div>
 

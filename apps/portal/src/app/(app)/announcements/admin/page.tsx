@@ -48,7 +48,7 @@ export default function AnnouncementsAdminPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <h1 className="text-xl font-semibold text-ink-900">{t('announcements.admin.title')}</h1>
+      <h1 className="page-title">{t('announcements.admin.title')}</h1>
 
       {canManageAnnouncements && (
         <Card>

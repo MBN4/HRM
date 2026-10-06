@@ -9,6 +9,7 @@ import { Button } from '../../components/ui/Button';
 import { Input, Label } from '../../components/ui/Field';
 import { PasswordInput } from '../../components/ui/PasswordInput';
 import { Alert } from '../../components/ui/Alert';
+import { Wordmark } from '../../components/brand/Wordmark';
 
 type Step =
   | { name: 'credentials' }
@@ -96,16 +97,15 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-ink-950 via-ink-900 to-brand-950 px-4">
+    <div className="auth-backdrop flex min-h-screen items-center justify-center px-4 py-10">
       <div className="w-full max-w-md">
-        <div className="mb-8 flex items-center justify-center gap-2">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500 text-lg font-bold text-white">V</div>
-          <span className="text-xl font-semibold text-white">HRM Vendor Console</span>
+        <div className="mb-8 flex justify-center">
+          <Wordmark tone="light" size="lg" suffix="Vendor Console" />
         </div>
-        <div className="rounded-xl2 bg-white p-8 shadow-soft">
+        <div className="auth-card">
           {step.name === 'credentials' && (
             <>
-              <h1 className="text-lg font-semibold text-ink-900">Platform admin sign in</h1>
+              <h1 className="text-xl font-semibold tracking-tight text-ink-900">Platform admin sign in</h1>
               <p className="mt-1 text-sm text-ink-500">Cross-tenant access — MFA is required for every account.</p>
               <form onSubmit={handleCredentials} className="mt-6 space-y-4">
                 <div>
@@ -140,7 +140,7 @@ export default function LoginPage() {
 
           {step.name === 'mfa-setup' && (
             <>
-              <h1 className="flex items-center gap-2 text-lg font-semibold text-ink-900">
+              <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-ink-900">
                 <ShieldCheck className="h-5 w-5 text-brand-600" aria-hidden />
                 Set up two-factor authentication
               </h1>
@@ -149,7 +149,7 @@ export default function LoginPage() {
               </p>
               <div className="mt-4 space-y-2 rounded-lg border border-ink-100 bg-sand-50 p-4">
                 <p className="text-xs font-medium text-ink-500">1. Add this secret to an authenticator app (Google Authenticator, 1Password, ...)</p>
-                <p data-testid="mfa-secret" className="select-all break-all rounded-md bg-white px-3 py-2 font-mono text-sm text-ink-900">
+                <p data-testid="mfa-secret" className="select-all break-all rounded-md bg-surface px-3 py-2 font-mono text-sm text-ink-900">
                   {step.secret}
                 </p>
                 <p className="text-xs text-ink-400">Or import this URL directly: <span className="break-all">{step.otpauthUrl}</span></p>
@@ -178,7 +178,7 @@ export default function LoginPage() {
 
           {step.name === 'mfa-verify' && (
             <>
-              <h1 className="flex items-center gap-2 text-lg font-semibold text-ink-900">
+              <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-ink-900">
                 <ShieldCheck className="h-5 w-5 text-brand-600" aria-hidden />
                 Enter your authentication code
               </h1>
@@ -216,7 +216,7 @@ function RecoveryCodesStep({ codes, onContinue }: { codes: string[]; onContinue:
   const [acknowledged, setAcknowledged] = useState(false);
   return (
     <>
-      <h1 className="text-lg font-semibold text-ink-900">Save your recovery codes</h1>
+      <h1 className="text-xl font-semibold tracking-tight text-ink-900">Save your recovery codes</h1>
       <p className="mt-1 text-sm text-ink-500">
         Each code works once, if you ever lose access to your authenticator app. They are shown only this one time.
       </p>

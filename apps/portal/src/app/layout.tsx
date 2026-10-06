@@ -3,13 +3,14 @@ import { Inter, Noto_Kufi_Arabic } from 'next/font/google';
 import { I18nProvider } from '../i18n/I18nProvider';
 import { AuthProvider } from '../lib/auth/AuthContext';
 import { BrandingProvider } from '../lib/branding/BrandingProvider';
+import { PORTAL_TITLE } from '../lib/brand';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
 const notoKufiArabic = Noto_Kufi_Arabic({ subsets: ['arabic'], variable: '--font-noto-kufi', display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'HRM Portal',
+  title: PORTAL_TITLE,
   description: 'Tenant organization portal',
 };
 

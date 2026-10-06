@@ -101,7 +101,7 @@ export default function AppraisalCycleDetailPage({ params }: { params: { id: str
   return (
     <div className="max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('performance.title')}</h1>
+        <h1 className="page-title">{t('performance.title')}</h1>
         <Button data-testid="refresh-button" variant="secondary" size="sm" onClick={refreshAll}>
           <RefreshCw className="h-4 w-4" aria-hidden />
           {t('performance.refresh')}

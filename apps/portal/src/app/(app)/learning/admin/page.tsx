@@ -36,7 +36,7 @@ export default function LearningAdminPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{t('lms.admin.title')}</h1>
+        <h1 className="page-title">{t('lms.admin.title')}</h1>
         {canManage && (
           <Link href="/learning/admin/compliance" className="text-sm font-medium text-brand-700 hover:underline">
             {t('lms.admin.compliance')}

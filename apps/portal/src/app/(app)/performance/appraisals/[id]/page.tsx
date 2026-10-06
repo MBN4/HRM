@@ -61,7 +61,7 @@ export default function AppraisalDetailPage({ params }: { params: { id: string }
   return (
     <div className="max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">
+        <h1 className="page-title">
           {appraisal.employee.firstName} {appraisal.employee.lastName} ({appraisal.employee.employeeCode})
         </h1>
         <Button data-testid="refresh-button" variant="secondary" size="sm" onClick={() => reload()}>

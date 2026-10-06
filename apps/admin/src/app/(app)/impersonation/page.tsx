@@ -42,7 +42,7 @@ export default function ImpersonationPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink-900">Impersonation sessions</h1>
+          <h1 className="page-title">Impersonation sessions</h1>
           <p className="text-sm text-ink-500">Every support impersonation session, across every tenant — loudly audited.</p>
         </div>
         <label className="flex items-center gap-2 text-sm text-ink-700">

@@ -1,3 +1,4 @@
+import { BRAND_NAME } from '../constants/branding';
 import { interpolateTemplate } from './interpolate';
 
 /**
@@ -29,7 +30,7 @@ export type MessageKey = keyof typeof UI_MESSAGES.en;
 
 export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
   en: {
-    'app.name': 'HRM',
+    'app.name': BRAND_NAME,
     'nav.dashboard': 'Dashboard',
     'nav.profile': 'My profile',
     'nav.leave': 'Leave',
@@ -791,7 +792,7 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'branding.title': 'Branding',
     'branding.subtitle': 'Customize how this workspace looks for your organization.',
     'branding.productName': 'Product name',
-    'branding.productNamePlaceholder': 'HRM',
+    'branding.productNamePlaceholder': BRAND_NAME,
     'branding.logo': 'Logo',
     'branding.favicon': 'Favicon',
     'branding.upload': 'Upload',
@@ -831,7 +832,7 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'branding.fullRebrandNotEntitled': 'Full rebrand is an Enterprise / lifetime-license capability — contact your account team to enable it.',
     'branding.fullRebrandEnabled': 'Full rebrand enabled.',
     'branding.fullRebrandDisabled': 'Full rebrand disabled.',
-    'branding.poweredBy': 'Powered by HRM',
+    'branding.poweredBy': `Powered by ${BRAND_NAME}`,
 
     // Vendor console branding oversight (apps/admin) — same key
     // namespace, shared per this catalog's existing convention.
@@ -1132,7 +1133,7 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'privacy.subProcessors': 'Sub-processors',
   },
   ar: {
-    'app.name': 'نظام الموارد البشرية',
+    'app.name': BRAND_NAME,
     'nav.dashboard': 'لوحة التحكم',
     'nav.profile': 'ملفي الشخصي',
     'nav.leave': 'الإجازات',
@@ -1889,7 +1890,7 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'branding.title': 'الهوية التجارية',
     'branding.subtitle': 'خصّص شكل مساحة العمل هذه لمؤسستك.',
     'branding.productName': 'اسم المنتج',
-    'branding.productNamePlaceholder': 'HRM',
+    'branding.productNamePlaceholder': BRAND_NAME,
     'branding.logo': 'الشعار',
     'branding.favicon': 'أيقونة الموقع',
     'branding.upload': 'رفع',
@@ -1929,7 +1930,7 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
     'branding.fullRebrandNotEntitled': 'إعادة العلامة التجارية الكاملة قدرة خاصة بخطة Enterprise أو الترخيص الدائم — تواصل مع فريق حسابك لتفعيلها.',
     'branding.fullRebrandEnabled': 'تم تفعيل إعادة العلامة التجارية الكاملة.',
     'branding.fullRebrandDisabled': 'تم إيقاف إعادة العلامة التجارية الكاملة.',
-    'branding.poweredBy': 'مدعوم بواسطة HRM',
+    'branding.poweredBy': `مدعوم بواسطة ${BRAND_NAME}`,
 
     'admin.branding.title': 'الهوية التجارية',
     'admin.branding.subtitle': 'راقب الهوية التجارية لكل مستأجر وأدر تهيئة النطاقات المخصصة.',

@@ -1,15 +1,15 @@
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 const TONE_CLASSES: Record<Tone, string> = {
-  neutral: 'bg-ink-100 text-ink-700',
-  success: 'bg-brand-100 text-brand-800',
-  warning: 'bg-amber-50 text-amber-600',
-  danger: 'bg-coral-50 text-coral-600',
-  info: 'bg-sky-50 text-sky-700',
+  neutral: 'bg-ink-100 text-ink-700 ring-ink-200',
+  success: 'bg-brand-50 text-brand-700 ring-brand-200',
+  warning: 'bg-amber-50 text-amber-600 ring-amber-200',
+  danger: 'bg-coral-50 text-coral-600 ring-coral-200',
+  info: 'bg-sky-50 text-sky-700 ring-sky-200',
 };
 
 export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: React.ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${TONE_CLASSES[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${TONE_CLASSES[tone]}`}>{children}</span>;
 }
 
 const STATUS_TONE: Record<string, Tone> = {

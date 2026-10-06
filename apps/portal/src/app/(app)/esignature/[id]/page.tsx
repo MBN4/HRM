@@ -57,7 +57,7 @@ export default function EsignatureDetailPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-ink-900">{request.title}</h1>
+        <h1 className="page-title">{request.title}</h1>
         <StatusBadge status={request.status} label={request.status} />
       </div>
 

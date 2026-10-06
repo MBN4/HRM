@@ -50,7 +50,7 @@ export default function CountryPacksPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink-900">Country packs</h1>
+          <h1 className="page-title">Country packs</h1>
           <p className="text-sm text-ink-500">The saleable-asset workshop — legal/cultural config per country, versioned.</p>
         </div>
         {canManage && (

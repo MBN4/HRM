@@ -42,7 +42,7 @@ export default function AuditPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-xl font-semibold text-ink-900">Cross-tenant audit trail</h1>
+        <h1 className="page-title">Cross-tenant audit trail</h1>
         <p className="text-sm text-ink-500">The single most sensitive read in this system — every read here is itself audited.</p>
       </div>
 

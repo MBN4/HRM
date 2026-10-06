@@ -38,7 +38,7 @@ export default function AdminsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-ink-900">Platform admins</h1>
+          <h1 className="page-title">Platform admins</h1>
           <p className="text-sm text-ink-500">Vendor operations staff — a separate identity space from tenant users.</p>
         </div>
         <Button onClick={() => setShowCreate(true)}>
