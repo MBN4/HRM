@@ -27,6 +27,7 @@ import { PageSpinner } from '../../../components/ui/Spinner';
 import { CreateRequisitionForm } from '../../../components/recruitment/CreateRequisitionForm';
 import { CreatePostingForm } from '../../../components/recruitment/CreatePostingForm';
 import { WorkflowStatusPanel } from '../../../components/workflow/WorkflowStatusPanel';
+import { Tabs } from '../../../components/ui/Tabs';
 
 type Tab = 'requisitions' | 'postings';
 
@@ -122,24 +123,15 @@ export default function RecruitmentPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 border-b border-ink-100">
-        <button
-          type="button"
-          data-testid="requisitions-tab"
-          onClick={() => setTab('requisitions')}
-          className={`px-3 py-2 text-sm font-medium ${tab === 'requisitions' ? 'border-b-2 border-brand-600 text-brand-700' : 'text-ink-500 hover:text-ink-800'}`}
-        >
-          {t('recruitment.requisitions')}
-        </button>
-        <button
-          type="button"
-          data-testid="postings-tab"
-          onClick={() => setTab('postings')}
-          className={`px-3 py-2 text-sm font-medium ${tab === 'postings' ? 'border-b-2 border-brand-600 text-brand-700' : 'text-ink-500 hover:text-ink-800'}`}
-        >
-          {t('recruitment.postings')}
-        </button>
-      </div>
+      <Tabs
+        label={t('nav.recruitment')}
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { value: 'requisitions', label: t('recruitment.requisitions'), testId: 'requisitions-tab' },
+          { value: 'postings', label: t('recruitment.postings'), testId: 'postings-tab' },
+        ]}
+      />
 
       {actionError && <Alert tone="error">{actionError}</Alert>}
 

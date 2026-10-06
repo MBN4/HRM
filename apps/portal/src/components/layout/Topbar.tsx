@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Bell, ChevronDown, LogOut } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
 import { useSession } from '../../lib/session/SessionProvider';
@@ -52,6 +53,8 @@ export function Topbar() {
         >
           {locale === 'en' ? 'العربية' : 'English'}
         </button>
+
+        <ThemeToggle />
 
         <Link
           href="/notifications"

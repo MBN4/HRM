@@ -34,7 +34,7 @@ test.describe('tenant lifecycle', () => {
     await expect(page.getByText(/tenant is SUSPENDED/i)).not.toBeVisible();
 
     // Edit edition
-    await page.getByLabel('Edition', { exact: true }).selectOption('ENTERPRISE');
+    await page.locator('select').and(page.getByLabel('Edition', { exact: true })).selectOption('ENTERPRISE');
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Saved.')).toBeVisible();
 
@@ -55,7 +55,7 @@ test.describe('tenant lifecycle', () => {
 
     await page.goto(`/tenants/${fixtures.seededTenantId}`);
     await page.getByRole('button', { name: 'Impersonate a user' }).click();
-    await page.getByLabel('Target user').selectOption(fixtures.seededTenantUserId);
+    await page.locator('select').and(page.getByLabel('Target user')).selectOption(fixtures.seededTenantUserId);
     await page.getByLabel(/Reason/).fill('verifying the impersonation UI end to end');
     await page.getByRole('button', { name: 'Start impersonation' }).click();
 

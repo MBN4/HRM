@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import { I18nProvider } from '../i18n/I18nProvider';
 import { PlatformAuthProvider } from '../lib/auth/PlatformAuthContext';
 import { CONSOLE_TITLE } from '../lib/brand';
+import { ThemeProvider, THEME_INIT_SCRIPT } from '../lib/theme/ThemeProvider';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
@@ -21,11 +22,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // tenant-facing portal does (no per-tenant locale exists to resolve),
   // only the same locale-toggle proof-of-concept 0.9 already wired up.
   return (
-    <html lang="en" dir="ltr" className={inter.variable}>
+    <html lang="en" dir="ltr" suppressHydrationWarning className={inter.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body>
+        <ThemeProvider>
         <PlatformAuthProvider>
           <I18nProvider>{children}</I18nProvider>
         </PlatformAuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

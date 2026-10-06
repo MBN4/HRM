@@ -1,4 +1,4 @@
-import { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes, forwardRef } from 'react';
+import { InputHTMLAttributes, TextareaHTMLAttributes, forwardRef } from 'react';
 
 const baseClasses =
   'w-full rounded-lg border border-ink-200 bg-surface px-3 py-2.5 text-sm text-ink-900 shadow-sm transition-colors placeholder:text-ink-400 hover:border-ink-300 focus:border-accent-500 disabled:bg-sand-100 disabled:text-ink-400';
@@ -13,12 +13,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
 ));
 Textarea.displayName = 'Textarea';
 
-export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(({ className = '', children, ...rest }, ref) => (
-  <select ref={ref} className={`${baseClasses} ${className}`} {...rest}>
-    {children}
-  </select>
-));
-Select.displayName = 'Select';
+// The styled listbox dropdown lives in ./Select (a native-<select>-compatible API) — re-exported so every existing import keeps working.
+export { Select } from './Select';
 
 export function Label({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
   return (

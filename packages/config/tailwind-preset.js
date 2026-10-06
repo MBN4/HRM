@@ -19,7 +19,8 @@ const ramp = (name, shades) => Object.fromEntries(shades.map((s) => [s, v(`${nam
 const FULL = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
 
 module.exports = {
-  darkMode: 'media',
+  // No `dark:` utilities are used anywhere (dark is a pure token swap) — this only makes any future one follow the toggle.
+  darkMode: ['selector', "[data-theme='dark']"],
   theme: {
     extend: {
       colors: {
@@ -44,6 +45,15 @@ module.exports = {
         arabic: ['var(--font-noto-kufi)', 'var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       borderRadius: { xl2: '1rem' },
+      keyframes: {
+        'pop-in': { from: { opacity: '0', transform: 'translateY(-4px) scale(0.98)' }, to: { opacity: '1', transform: 'none' } },
+        'fade-up': { from: { opacity: '0', transform: 'translateY(6px)' }, to: { opacity: '1', transform: 'none' } },
+        shimmer: { '100%': { transform: 'translateX(100%)' } },
+      },
+      animation: {
+        'pop-in': 'pop-in 120ms ease-out',
+        'fade-up': 'fade-up 280ms ease-out both',
+      },
       boxShadow: {
         card: '0 1px 2px rgb(10 14 13 / 0.05), 0 1px 3px rgb(10 14 13 / 0.04)',
         soft: '0 1px 2px rgb(10 14 13 / 0.05), 0 12px 32px -12px rgb(10 14 13 / 0.18)',
@@ -83,6 +93,30 @@ module.exports = {
         'table tbody tr': { transition: 'background-color 120ms ease' },
         'table tbody tr:hover': { backgroundColor: c('sand-100') },
         'input[type=checkbox], input[type=radio]': { accentColor: c('brand-600') },
+        // Native file inputs: restyle the button part so uploads match the kit (the ::file-selector-button is the only styleable piece).
+        'input[type=file]::file-selector-button': {
+          marginInlineEnd: '0.75rem',
+          cursor: 'pointer',
+          borderRadius: '0.5rem',
+          border: `1px solid ${c('ink-200')}`,
+          backgroundColor: c('surface'),
+          padding: '0.375rem 0.75rem',
+          fontSize: '0.75rem',
+          fontWeight: '600',
+          color: c('ink-700'),
+          transition: 'background-color 120ms ease, border-color 120ms ease',
+        },
+        'input[type=file]::file-selector-button:hover': { backgroundColor: c('sand-100'), borderColor: c('ink-300') },
+        // Native date/time pickers: a pointer on the calendar glyph; its colour follows `color-scheme` (set by the tokens) so it is legible in dark.
+        'input[type=date], input[type=datetime-local], input[type=month], input[type=time]': { minHeight: '2.5rem', fontVariantNumeric: 'tabular-nums' },
+        'input::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: '0.65' },
+        'input::-webkit-calendar-picker-indicator:hover': { opacity: '1' },
+        textarea: { resize: 'vertical' },
+        // Slim, themed scrollbars (popovers, tables, modals).
+        '*': { scrollbarColor: `${c('ink-300')} transparent` },
+        '*::-webkit-scrollbar': { width: '10px', height: '10px' },
+        '*::-webkit-scrollbar-thumb': { backgroundColor: c('ink-200'), borderRadius: '9999px', border: '2px solid transparent', backgroundClip: 'content-box' },
+        '*::-webkit-scrollbar-thumb:hover': { backgroundColor: c('ink-300'), backgroundClip: 'content-box' },
       });
 
       addComponents({

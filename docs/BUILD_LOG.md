@@ -4112,6 +4112,7 @@ logic, API call, auth flow, routing or i18n-key-meaning change. Full design
 write-up in [`conventions/design-system.md`](./conventions/design-system.md).
 
 **What landed**
+
 - **Brand constant** — `BRAND_NAME = 'MBN'` in `packages/shared/src/constants/branding.ts`;
   `DEFAULT_PRODUCT_NAME`, `DEFAULT_EMAIL_FROM_NAME`, the UI catalog's `app.name`/
   `branding.poweredBy`/`branding.productNamePlaceholder`, both apps' tab titles and
@@ -4139,6 +4140,7 @@ write-up in [`conventions/design-system.md`](./conventions/design-system.md).
 - **Docs** — new `conventions/design-system.md`; CLAUDE.md index/summary rows.
 
 **Bugs caught by reviewing the result, not by tests**
+
 - The login backdrop first used the flipping `brand-950` token → pale mint in
   dark mode. Fixed with dedicated non-flipping `auth-*`/`glow-*` tokens.
 - The `Wordmark` light-tone tile used `text-brand-700`, which flips to near-white
@@ -4159,3 +4161,35 @@ for both apps (portal RTL via a Qatar-branch user — see the design-system doc'
 RTL caveat). Not done: a full API jest run (no API source changed beyond the
 shared constant's value), and the mobile app was not touched.
 
+## Dashboards, form-kit polish & theme toggle (2026-10-06) — not a numbered phase step
+
+UI/UX + light data-viz over BOTH `apps/portal` and `apps/admin`. No business
+logic, API contract, auth or RLS change. Detail lives in
+`docs/conventions/design-system.md` §§ 7–10.
+
+- **Theme toggle** — `ThemeProvider`/`ThemeToggle` per app; `data-theme` on
+  `<html>` + `localStorage['mbn.theme']`, "system" default, pre-paint init
+  script; `design-tokens.css` dark ramp now exists as a media block (unless
+  `data-theme='light'`) AND an explicit `[data-theme='dark']` block.
+- **Select** — styled listbox combobox with a mirrored hidden native
+  `<select>` (all ~60 call sites + Playwright `selectOption` untouched).
+  Also `Tabs`, `SegmentedControl`, `Pagination`, `Tooltip`; preset base styles
+  for file/date inputs, textarea, scrollbars.
+- **Charts + dashboards** — shared Recharts kit (`components/charts`), rebuilt
+  portal `/analytics` + `/dashboard` and admin `/dashboard` (KPI trends vs the
+  previous period, area/bar/donut, skeleton + empty states, branch/range
+  filters that refetch). `recharts` added to `apps/admin`.
+- **Dev-only demo data** — `apps/api/scripts/seed-demo-data.ts`
+  (`seed:demo`) + `demo-rollup.ts` (`demo:rollup`); idempotent (re-run
+  verified: counts unchanged).
+- i18n: new `theme.*`, `ui.*`, `analytics.chart/range/kpi/empty.*`,
+  `dashboard.workforce.*` keys (en + ar).
+
+**Bugs caught by looking at the result**: Recharts draws nothing on a
+`reversed` axis while its animation runs → RTL charts blank (fixed:
+`isAnimationActive={!rtl}`); `getByLabel` ambiguity between the hidden select
+and the trigger (two admin tenant-spec locators scoped to `select`).
+**Gaps**: no department chart/filter (no department-name endpoint); admin
+window filter is client-side; mobile untouched; multi-select not built.
+**Verification**: see the run summary in the PR/hand-off notes (Playwright
+suites listed there).

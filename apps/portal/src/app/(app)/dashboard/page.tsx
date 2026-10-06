@@ -1,27 +1,44 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo } from 'react';
+import { PERMISSIONS } from '@hrm/shared';
 import { useI18n } from '../../../i18n/I18nProvider';
+import { useAuth } from '../../../lib/auth/AuthContext';
 import { useSession } from '../../../lib/session/SessionProvider';
 import { useAsync } from '../../../lib/useAsync';
 import { getLeaveBalances } from '../../../lib/api/leave';
 import { getMyPendingApprovals } from '../../../lib/api/workflow';
 import { listNotifications } from '../../../lib/api/notifications';
 import { listMyAnnouncements } from '../../../lib/api/announcements';
+import { getAnalyticsDashboard } from '../../../lib/api/analytics';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
 import { EmptyState } from '../../../components/ui/EmptyState';
-import { formatDate, formatDateTime } from '../../../lib/format';
-import { ClipboardCheck } from 'lucide-react';
+import { formatDate, formatDateTime, formatPercent, formatNumber } from '../../../lib/format';
+import { CalendarCheck, ClipboardCheck, Users } from 'lucide-react';
+import { ChartCard, KpiCard, TrendAreaChart } from '../../../components/charts';
 
 export default function DashboardPage() {
   const { t, locale } = useI18n();
   const { employee, employeeLoading } = useSession();
+  const { can } = useAuth();
+  const canAnalytics = can(PERMISSIONS.ANALYTICS_READ);
 
   const { data: balances } = useAsync(() => (employee ? getLeaveBalances({ employeeId: employee.id }) : Promise.resolve([])), [employee?.id]);
   const { data: pendingApprovals } = useAsync(() => getMyPendingApprovals(), []);
   const { data: notifications } = useAsync(() => listNotifications(), []);
   const { data: announcements } = useAsync(() => listMyAnnouncements(), []);
+  // Manager+ only: a compact slice of the SAME precomputed-rollup endpoint /analytics reads (default = last 30 days).
+  const { data: workforce, loading: workforceLoading } = useAsync(
+    () => (canAnalytics ? getAnalyticsDashboard().catch(() => null) : Promise.resolve(null)),
+    [canAnalytics],
+  );
+  const workforceTrend = useMemo(
+    () => (workforce?.attendance.trend ?? []).map((r) => ({ ...r, label: formatDate(r.date, locale) })),
+    [workforce, locale],
+  );
+  const workforceHasData = !!workforce && (workforce.headcount.total > 0 || workforce.attendance.employeeDays > 0);
 
   return (
     <div className="space-y-6">
@@ -61,13 +78,29 @@ export default function DashboardPage() {
             {!balances || balances.length === 0 ? (
               <p className="text-sm text-ink-400">{t('common.noData')}</p>
             ) : (
-              <ul className="space-y-2">
-                {balances.map((b) => (
-                  <li key={b.leaveType} className="flex items-center justify-between text-sm">
-                    <span className="text-ink-600">{t(`leave.type.${b.leaveType}`)}</span>
-                    <span className="font-semibold text-ink-900">{b.availableDays}</span>
-                  </li>
-                ))}
+              <ul className="space-y-4">
+                {balances.map((b) => {
+                  const total = b.entitledDays + b.accruedDays + b.carriedOverDays;
+                  const pct = total > 0 ? Math.min(100, (b.usedDays / total) * 100) : 0;
+                  return (
+                    <li key={b.leaveType} className="text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-ink-600">{t(`leave.type.${b.leaveType}`)}</span>
+                        <span className="font-semibold text-ink-900">{b.availableDays}</span>
+                      </div>
+                      <div
+                        role="progressbar"
+                        aria-label={t(`leave.type.${b.leaveType}`)}
+                        aria-valuemin={0}
+                        aria-valuemax={total}
+                        aria-valuenow={b.usedDays}
+                        className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sand-200"
+                      >
+                        <div className="h-full rounded-full bg-chart-1 transition-all duration-500" style={{ width: `${pct}%` }} />
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardBody>
@@ -90,6 +123,50 @@ export default function DashboardPage() {
           </CardBody>
         </Card>
       </div>
+
+      {canAnalytics && (workforceLoading || workforceHasData) && (
+        <div data-testid="workforce-snapshot" className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-1">
+            <KpiCard
+              loading={workforceLoading}
+              icon={Users}
+              label={t('dashboard.workforce.headcount')}
+              value={workforce ? formatNumber(workforce.headcount.total, locale) : ''}
+              hint={t('analytics.headcount.total')}
+            />
+            <KpiCard
+              index={1}
+              loading={workforceLoading}
+              icon={CalendarCheck}
+              label={t('dashboard.workforce.attendance')}
+              value={workforce ? formatPercent(workforce.attendance.attendanceRate, locale) : ''}
+              hint={t('dashboard.workforce.last30')}
+            />
+          </div>
+          <ChartCard
+            className="lg:col-span-2"
+            title={t('analytics.chart.attendanceTrend')}
+            subtitle={t('dashboard.workforce.last30')}
+            loading={workforceLoading}
+            height={200}
+            actions={
+              <Link href="/analytics" className="text-xs font-semibold text-brand-700 hover:underline">
+                {t('dashboard.workforce.openAnalytics')}
+              </Link>
+            }
+          >
+            <TrendAreaChart
+              height={200}
+              data={workforceTrend}
+              xKey="label"
+              series={[
+                { key: 'presentCount', label: t('analytics.attendance.present'), color: 0 },
+                { key: 'absentCount', label: t('analytics.attendance.absent'), color: 4 },
+              ]}
+            />
+          </ChartCard>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

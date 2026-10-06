@@ -6,8 +6,9 @@
  * modifiers (`bg-brand-600/10`) keep working — the Tailwind side lives in
  * ./tailwind-preset.js, which maps `brand-600` -> `rgb(var(--c-brand-600) / <alpha-value>)`.
  *
- * Dark mode is `prefers-color-scheme` driven (the apps' existing
- * `darkMode: 'media'`). The ramps are FLIPPED in dark, not just darkened:
+ * Dark mode: `prefers-color-scheme` by default, overridden by the in-app
+ * toggle's `data-theme="light|dark"` attribute on <html> (see
+ * docs/conventions/design-system.md § Theme toggle). The ramps are FLIPPED in dark, not just darkened:
  * `ink-900` (body text) becomes near-white, `sand-50` (page background)
  * becomes near-black, `brand-50`/`brand-100` (tinted backgrounds) become
  * dark tints and `brand-700`/`brand-800` (tinted-surface text) become light
@@ -104,8 +105,9 @@
   --c-chart-5: 212 80 63;
 }
 
+/* System preference — applies unless the user explicitly chose light via the in-app toggle (data-theme="light"). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     color-scheme: dark;
     --c-brand-50: 15 43 36;
     --c-brand-100: 18 56 48;
@@ -181,4 +183,82 @@
     --c-chart-4: 109 191 230;
     --c-chart-5: 238 133 118;
   }
+}
+
+/* Explicit in-app choice (ThemeProvider sets data-theme on <html>). Must stay an exact copy of the block above. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-brand-50: 15 43 36;
+  --c-brand-100: 18 56 48;
+  --c-brand-200: 24 74 62;
+  --c-brand-300: 31 101 83;
+  --c-brand-400: 46 138 114;
+  --c-brand-500: 63 184 144;
+  --c-brand-600: 92 201 166;
+  --c-brand-700: 125 214 184;
+  --c-brand-800: 163 228 205;
+  --c-brand-900: 201 240 225;
+  --c-brand-950: 230 248 241;
+  --c-accent-50: 15 43 38;
+  --c-accent-100: 19 58 51;
+  --c-accent-200: 26 79 69;
+  --c-accent-300: 35 105 92;
+  --c-accent-400: 53 163 137;
+  --c-accent-500: 76 196 162;
+  --c-accent-600: 111 213 185;
+  --c-accent-700: 147 224 203;
+  --c-accent-800: 181 235 220;
+  --c-accent-900: 211 244 234;
+  --c-sand-50: 12 17 16;
+  --c-sand-100: 24 32 30;
+  --c-sand-200: 35 45 42;
+  --c-sand-300: 49 61 57;
+  --c-sand-400: 74 90 85;
+  --c-sand-500: 104 121 111;
+  --c-ink-50: 24 32 30;
+  --c-ink-100: 38 48 45;
+  --c-ink-200: 54 66 64;
+  --c-ink-300: 107 122 117;
+  --c-ink-400: 151 165 159;
+  --c-ink-500: 169 181 176;
+  --c-ink-600: 190 200 196;
+  --c-ink-700: 208 216 213;
+  --c-ink-800: 226 232 230;
+  --c-ink-900: 240 244 242;
+  --c-ink-950: 250 252 251;
+  --c-amber-50: 44 35 17;
+  --c-amber-100: 59 46 21;
+  --c-amber-200: 89 67 29;
+  --c-amber-400: 233 169 44;
+  --c-amber-500: 240 184 74;
+  --c-amber-600: 242 196 107;
+  --c-amber-700: 245 210 142;
+  --c-amber-800: 248 224 176;
+  --c-coral-50: 51 26 24;
+  --c-coral-100: 71 36 32;
+  --c-coral-200: 106 50 43;
+  --c-coral-300: 141 66 56;
+  --c-coral-400: 229 114 98;
+  --c-coral-500: 238 133 118;
+  --c-coral-600: 242 154 141;
+  --c-coral-700: 246 179 169;
+  --c-sky-50: 17 39 57;
+  --c-sky-100: 23 52 73;
+  --c-sky-200: 31 74 102;
+  --c-sky-400: 92 179 222;
+  --c-sky-500: 109 191 230;
+  --c-sky-600: 138 204 240;
+  --c-sky-700: 169 219 245;
+  --c-primary: 20 121 95;
+  --c-primary-hover: 26 138 110;
+  --c-danger: 200 71 58;
+  --c-danger-hover: 214 90 77;
+  --c-surface: 20 27 25;
+  --c-surface-raised: 26 34 32;
+  --c-sidebar-fg: 195 217 209;
+  --c-chart-1: 76 196 162;
+  --c-chart-2: 125 214 184;
+  --c-chart-3: 240 184 74;
+  --c-chart-4: 109 191 230;
+  --c-chart-5: 238 133 118;
 }

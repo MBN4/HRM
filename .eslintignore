@@ -5,3 +5,7 @@ load/
 # Standalone scripts outside src/test aren't in tsconfig's include, so the
 # type-aware parser can't lint them; they're dev utilities, not app code.
 apps/api/scripts/
+
+# Tailwind config files (plain TS config, not app source — not in tsconfig's
+# include, and reference rules the project-aware parser doesn't load).
+**/tailwind.config.ts

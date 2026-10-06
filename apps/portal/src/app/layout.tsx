@@ -4,6 +4,7 @@ import { I18nProvider } from '../i18n/I18nProvider';
 import { AuthProvider } from '../lib/auth/AuthContext';
 import { BrandingProvider } from '../lib/branding/BrandingProvider';
 import { PORTAL_TITLE } from '../lib/brand';
+import { ThemeProvider, THEME_INIT_SCRIPT } from '../lib/theme/ThemeProvider';
 import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
@@ -23,13 +24,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   // real locale/rtl (see (app)/layout.tsx + lib/session/SessionProvider) —
   // this outer one only ever governs the (unauthenticated) /login screen.
   return (
-    <html lang="en" dir="ltr" className={`${inter.variable} ${notoKufiArabic.variable}`}>
+    <html lang="en" dir="ltr" suppressHydrationWarning className={`${inter.variable} ${notoKufiArabic.variable}`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body>
+        <ThemeProvider>
         <AuthProvider>
           <BrandingProvider>
             <I18nProvider>{children}</I18nProvider>
           </BrandingProvider>
         </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
