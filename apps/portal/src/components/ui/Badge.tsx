@@ -113,6 +113,12 @@ const STATUS_TONE: Record<string, Tone> = {
   // not already covered above (PENDING/COMPLETED/FAILED are reused as-is)
   // — additive only.
   GENERATING: 'info',
+  // Attendance day-status classification (step 8.1 Part 2/3) — DayStatus
+  // (GREEN/YELLOW/RED/NEUTRAL/IN_PROGRESS reused as-is above) — additive only.
+  GREEN: 'success',
+  YELLOW: 'warning',
+  RED: 'danger',
+  NEUTRAL: 'neutral',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

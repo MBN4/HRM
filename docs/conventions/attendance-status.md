@@ -4,8 +4,9 @@
 
 Pure backend logic: `apps/api/src/attendance/status/`. Classifies each attendance
 day GREEN / YELLOW / RED / NEUTRAL / IN_PROGRESS against the Part-1
-[working-hours policy](./working-hours.md). **No UI** (Part 3 = live clock +
-monthly graph, Part 4 = leave allocation). Builds on
+[working-hours policy](./working-hours.md). **No UI** — the live clock +
+monthly graph that consume this endpoint are
+[Part 3](./attendance-ui.md) (Part 4 = leave allocation). Builds on
 [attendance.md](./attendance.md) (records, branch-timezone handling, weekend/holiday
 derivation) and `WorkingHoursResolverService`; changes none of them.
 
@@ -92,16 +93,14 @@ FUTURE, NOT_CLOCKED_IN, CLOCKED_IN` (exported as `DAY_STATUSES`/`DAY_REASONS`).
 actor, {employeeId?, from, to}, now?)` — exported from `AttendanceModule`),
 `attendance-status.controller.ts`. `attendanceStatusQuerySchema` in `@hrm/shared`.
 
-## How Part 3 (clock + monthly graph) should consume it
+## Part 3 (clock + monthly graph) — now built
 
-- **Monthly graph**: one `GET /attendance/status?from=<first>&to=<last>` (≤ 93 days →
-  up to 3 months per call); colour by `status`, tooltip from `reason`/`minutesLate`/
-  `hoursWorked`/`requiredHours`; `NEUTRAL` is grey/hatched. Use `summary` for the legend counts.
-- **Live clock**: poll/refresh `from=to=today`; `IN_PROGRESS` + running `hoursWorked`
-  (and `policy.startTime`/`requiredHours` for a "9h goal" ring). After clock-in/out,
-  re-fetch the day — nothing is cached/stored.
-- **Server-side reuse**: inject `AttendanceStatusService` (or `classifyDay` directly)
-  rather than re-implementing any rule; pass `now` for deterministic tests.
+See [attendance-ui.md](./attendance-ui.md) for the full write-up. In short:
+one `GET /attendance/status?from=<first>&to=<last>` per visible month,
+colored by `status` with a reason tooltip and a `summary`-driven legend; the
+live clock queries a `[yesterday,today,tomorrow]` window and re-fetches on
+every clock-in/out plus a plain interval — nothing is cached client-side
+either. Neither consumer re-implements any rule; both render this response.
 
 ## Honest gaps / decisions
 

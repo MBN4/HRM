@@ -117,7 +117,8 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/user-management.md`](./docs/conventions/user-management.md)                   | Tenant user/team access management (`/users`, `user.manage`), HR-generated one-time temp passwords, the server-enforced forced first-login password change (`mustChangePassword` + `@AllowPasswordChangePending()`), the privilege-escalation guards, and the privacy-policy template page. (7.1)                                                                                                           |
 | [`docs/conventions/team-hierarchy-approvals.md`](./docs/conventions/team-hierarchy-approvals.md) | The management chain (`User.managerId`) driving approvals: the extended `MANAGER` rule (direct manager → escalate past unavailable → CEO), the new CEO role + CEO-approves-anything, HR hard-excluded from approving, no self-approval, cycle guard, live re-routing on deactivate/reassign, and the `/hierarchy` org-chart UI. (7.2)                                                                       |
 | [`docs/conventions/working-hours.md`](./docs/conventions/working-hours.md)                       | Configurable working-hours policy (company → team/department → member, Country Pack fallback), the resolver service + `/working-hours/effective`, `working_hours.manage`, and the `/working-hours` admin screen — Part 1 of the attendance-classification series. (8.1)                                                                                                                                     |
-| [`docs/conventions/attendance-status.md`](./docs/conventions/attendance-status.md)               | Attendance day-status classification (GREEN/YELLOW/RED/NEUTRAL/IN_PROGRESS) computed on read from the working-hours policy + records, the reason values, `GET /attendance/status`, and how Part 3 consumes it. (8.1 Part 2)                                                                                                                                                                                 |
+| [`docs/conventions/attendance-status.md`](./docs/conventions/attendance-status.md)               | Attendance day-status classification (GREEN/YELLOW/RED/NEUTRAL/IN_PROGRESS) computed on read from the working-hours policy + records, the reason values, `GET /attendance/status`. (8.1 Part 2)                                                                                                                                                                                 |
+| [`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md)                       | The live analog clock + goal ring (`ClockWidget`) and the color-coded monthly attendance calendar (`MonthlyAttendanceGraph`, RTL-correct, reason tooltips, manager/HR picker) — a pure frontend consumer of `GET /attendance/status`. (8.1 Part 3)                                                                                                                                                          |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                           |
 
 ## 5. Build log summary
@@ -1003,6 +1004,14 @@ each day classified GREEN / YELLOW / RED / NEUTRAL / IN_PROGRESS against the Par
 working-hours policy, computed on read (nothing stored), via `GET /attendance/status`
 and the exported `AttendanceStatusService`. See
 [`docs/conventions/attendance-status.md`](./docs/conventions/attendance-status.md).
+
+**8.1 Part 3 — Live clock + monthly attendance graph (2026-10-09)** — frontend only,
+consuming Part 2's endpoint as-is: `ClockWidget` (shared by `/dashboard` and
+`/attendance`) shows a ticking analog clock + goal ring while clocked in, driven by the
+server's own `clockIn` instant; `MonthlyAttendanceGraph` (new, on `/attendance`) is a
+color-coded calendar with a legend, reason tooltips, month nav, and a manager/HR member
+picker — RTL-correct (weekends read from the server, never hardcoded by position). See
+[`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

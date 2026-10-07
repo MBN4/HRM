@@ -564,6 +564,182 @@ export default async function globalSetup(): Promise<void> {
     },
   });
 
+  // Step 8.1 Part 3 (attendance-ui.spec.ts) — see docs/conventions/attendance-ui.md.
+  // A deterministic, fully-PAST calendar month (the one before whenever this
+  // runs) so every day's classification is unambiguous (no "today"/"future"
+  // edge cases): employeeA (US HQ, America/New_York, the default COUNTRY_PACK
+  // policy — no working-hours override exists for her — resolves to 09:00
+  // start / 8h work + 1h break = 9h required / 15m grace / 4.5h half-day) gets
+  // a colourful mix of GREEN/YELLOW/RED(late/early-out/half-day/absent)/
+  // NEUTRAL(weekend+one approved leave); qaEmployeeA (Doha, Asia/Qatar, the QA
+  // pack's own 9.6h required) gets a smaller GREEN/YELLOW/RED mix with its OWN
+  // weekend (Fri/Sat) for the RTL mirroring proof. Computed/duplicated here
+  // (not imported from apps/api) exactly like `attendance-timezone.util.ts`'s
+  // own doc comment describes the technique it implements — these two pure
+  // functions have no NestJS dependency.
+  const DAY_MS = 86_400_000;
+  function toBranchLocal(instant: Date, timeZone: string): { calendarDate: Date; minutesOfDay: number } {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).formatToParts(instant);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+    const year = get('year');
+    const month = get('month');
+    const day = get('day');
+    let hour = get('hour');
+    const minute = get('minute');
+    if (hour === 24) hour = 0;
+    return { calendarDate: new Date(Date.UTC(year, month - 1, day)), minutesOfDay: hour * 60 + minute };
+  }
+  function branchLocalToUtc(calendarDate: Date, hhmm: string, timeZone: string): Date {
+    const [hour, minute] = hhmm.split(':').map(Number);
+    const targetDayMinutes = Date.UTC(calendarDate.getUTCFullYear(), calendarDate.getUTCMonth(), calendarDate.getUTCDate()) / 60_000;
+    const targetTotalMinutes = targetDayMinutes + hour * 60 + minute;
+    let guess = Date.UTC(calendarDate.getUTCFullYear(), calendarDate.getUTCMonth(), calendarDate.getUTCDate(), hour, minute);
+    for (let i = 0; i < 2; i++) {
+      const local = toBranchLocal(new Date(guess), timeZone);
+      const diffMinutes = targetTotalMinutes - (local.calendarDate.getTime() / 60_000 + local.minutesOfDay);
+      if (diffMinutes === 0) break;
+      guess += diffMinutes * 60_000;
+    }
+    return new Date(guess);
+  }
+
+  const attNow = new Date();
+  const prevMonthFirst = new Date(Date.UTC(attNow.getUTCFullYear(), attNow.getUTCMonth() - 1, 1));
+  const prevMonthLast = new Date(Date.UTC(attNow.getUTCFullYear(), attNow.getUTCMonth(), 0));
+  const allDaysOfPrevMonth: Date[] = [];
+  for (let d = prevMonthFirst; d.getTime() <= prevMonthLast.getTime(); d = new Date(d.getTime() + DAY_MS)) allDaysOfPrevMonth.push(d);
+
+  // Explicit MEMBER-scoped working-hours overrides for every employee this
+  // spec seeds attendance against — a MEMBER row unconditionally outranks
+  // COMPANY/TEAM (see docs/conventions/working-hours.md's precedence), which
+  // insulates these fixed scenario clock-in/out times from `working-hours.spec.ts`
+  // leaving its own COMPANY policy row behind (that spec's `afterAll` only
+  // deletes TEAM/MEMBER rows, by design — see its own file). Without this,
+  // this spec's classification would depend on OTHER specs' run order.
+  for (const [empId, v] of [
+    [employeeAEmployee.id, { startTime: '09:00', workHours: 8, breakHours: 1, graceMinutes: 15 }],
+    [qaEmployeeAEmployee.id, { startTime: '09:00', workHours: 9.6, breakHours: 1, graceMinutes: 15 }],
+  ] as const) {
+    await prisma.workingHoursPolicy.create({
+      data: { tenantId: tenantA.id, scope: 'MEMBER', targetKey: empId, employeeId: empId, halfDayThresholdHours: null, ...v },
+    });
+  }
+
+  const US_TZ = 'America/New_York';
+  const usWeekdays = allDaysOfPrevMonth.filter((d) => d.getUTCDay() !== 0 && d.getUTCDay() !== 6);
+  const usWeekends = allDaysOfPrevMonth.length - usWeekdays.length;
+  const US_SCENARIOS: Record<string, [string, string]> = {
+    G: ['08:50', '18:00'], // on time, 9h10
+    Y: ['09:10', '18:20'], // 10m late (<=15 grace), 9h10
+    RL: ['09:45', '18:50'], // 45m late (>15 grace) -> LATE_BEYOND_GRACE
+    RE: ['08:55', '15:00'], // 6h05 worked (<9h required), left before 18:00 -> EARLY_OUT
+    RH: ['09:00', '12:00'], // 3h worked (<4.5h half-day) -> HALF_DAY
+  };
+  const US_PATTERN = ['G', 'G', 'Y', 'RL', 'G', 'RE', 'G', 'RH', 'G', 'Y'];
+  const US_ABSENT_INDEX = 2;
+  const US_LEAVE_INDEX = 6;
+  const attendanceEmployeeACounts = { GREEN: 0, YELLOW: 0, RED: 0, NEUTRAL: usWeekends, IN_PROGRESS: 0 };
+  const attendanceEmployeeASampleDates: Record<string, string> = {};
+  for (let i = 0; i < usWeekdays.length; i += 1) {
+    const d = usWeekdays[i];
+    const dateStr = d.toISOString().slice(0, 10);
+    if (i === US_LEAVE_INDEX) {
+      await prisma.leaveRequest.create({
+        data: { tenantId: tenantA.id, employeeId: employeeAEmployee.id, leaveType: 'ANNUAL', startDate: d, endDate: d, days: 1, status: 'APPROVED', reason: '[e2e] attendance-ui month' },
+      });
+      attendanceEmployeeASampleDates.leave = dateStr;
+      attendanceEmployeeACounts.NEUTRAL += 1;
+      continue;
+    }
+    const kind = i === US_ABSENT_INDEX ? 'ABSENT' : US_PATTERN[i % US_PATTERN.length];
+    if (kind === 'ABSENT') {
+      attendanceEmployeeASampleDates.absent = dateStr;
+      attendanceEmployeeACounts.RED += 1;
+      continue;
+    }
+    const [inAt, outAt] = US_SCENARIOS[kind];
+    await prisma.attendanceRecord.create({
+      data: {
+        tenantId: tenantA.id, employeeId: employeeAEmployee.id, branchId: branchAUs.id, workDate: d,
+        clockInAt: branchLocalToUtc(d, inAt, US_TZ), clockInSource: 'WEB',
+        clockOutAt: branchLocalToUtc(d, outAt, US_TZ), clockOutSource: 'WEB', status: 'CLOSED',
+      },
+    });
+    if (kind === 'G') {
+      attendanceEmployeeACounts.GREEN += 1;
+      attendanceEmployeeASampleDates.green ??= dateStr;
+    } else if (kind === 'Y') {
+      attendanceEmployeeACounts.YELLOW += 1;
+      attendanceEmployeeASampleDates.yellow ??= dateStr;
+    } else {
+      attendanceEmployeeACounts.RED += 1;
+      attendanceEmployeeASampleDates.red ??= dateStr;
+    }
+  }
+
+  // qaEmployeeA — Doha, Asia/Qatar, Fri/Sat weekend (the OPPOSITE of US HQ's
+  // Sat/Sun): the RTL mirroring + "weekends come from the server, never
+  // hardcoded" proof. QA pack fallback policy: 09:00 start, 48/5=9.6 work +
+  // 1h break = 10.6h required, 15m grace (WORKING_HOURS_DEFAULTS).
+  const QA_TZ = 'Asia/Qatar';
+  const qaWeekdays = allDaysOfPrevMonth.filter((d) => d.getUTCDay() !== 5 && d.getUTCDay() !== 6).slice(0, 8);
+  const QA_SCENARIOS: Record<string, [string, string]> = {
+    G: ['08:50', '19:40'], // on time, 10h50 >= 10.6h required
+    Y: ['09:10', '19:55'], // 10m late (<=15 grace), 10h45 >= required
+    RL: ['09:45', '20:00'], // 45m late (>15 grace) -> LATE_BEYOND_GRACE
+  };
+  const QA_PATTERN = ['G', 'G', 'Y', 'RL', 'G', 'Y', 'G', 'G'];
+  let qaAttendanceGreenDate = '';
+  for (let i = 0; i < qaWeekdays.length; i += 1) {
+    const d = qaWeekdays[i];
+    const kind = QA_PATTERN[i % QA_PATTERN.length];
+    const [inAt, outAt] = QA_SCENARIOS[kind];
+    await prisma.attendanceRecord.create({
+      data: {
+        tenantId: tenantA.id, employeeId: qaEmployeeAEmployee.id, branchId: branchAQa.id, workDate: d,
+        clockInAt: branchLocalToUtc(d, inAt, QA_TZ), clockInSource: 'WEB',
+        clockOutAt: branchLocalToUtc(d, outAt, QA_TZ), clockOutSource: 'WEB', status: 'CLOSED',
+      },
+    });
+    if (kind === 'G' && !qaAttendanceGreenDate) qaAttendanceGreenDate = d.toISOString().slice(0, 10);
+  }
+
+  // A DEDICATED employee for the LIVE CLOCK test — never used by any other
+  // spec, so clocking it in/out through the real UI doesn't disturb
+  // employeeA's own attendance state (which the monthly-graph test above
+  // asserts exact counts against).
+  const attendanceLiveUser = await makeUser(tenantA.id, 'attendance-live@portal-e2e-a.test', employeeRoleA.id);
+  const attendanceLiveEmployee = await prisma.employee.create({
+    data: {
+      tenantId: tenantA.id,
+      userId: attendanceLiveUser.id,
+      employeeCode: 'PE-LIVE-1',
+      firstName: 'Lara',
+      lastName: 'Live',
+      branchId: branchAUs.id,
+      employmentType: 'FULL_TIME',
+      joinDate: new Date('2022-01-01'),
+      statutoryFields: { SSN: '000-00-0099', W4: 'on-file' },
+    },
+  });
+  // Same MEMBER-override insulation as above — the 4.5h-derived half-day
+  // threshold is what makes the live-clock test's near-instant clock-in/out
+  // deterministically HALF_DAY regardless of what time of day it runs.
+  await prisma.workingHoursPolicy.create({
+    data: {
+      tenantId: tenantA.id, scope: 'MEMBER', targetKey: attendanceLiveEmployee.id, employeeId: attendanceLiveEmployee.id,
+      startTime: '09:00', workHours: 8, breakHours: 1, graceMinutes: 15, halfDayThresholdHours: null,
+    },
+  });
+
   const fixtures = {
     tenantASlug: TENANT_A_SLUG,
     tenantBSlug: TENANT_B_SLUG,
@@ -613,6 +789,12 @@ export default async function globalSetup(): Promise<void> {
     whDepartmentName: whDepartment.name,
     whEmployeeCode: 'PE-WH-1',
     whEmployeeName: 'Wanda Hours',
+    attendancePrevMonthFirst: prevMonthFirst.toISOString().slice(0, 10),
+    attendanceEmployeeACounts,
+    attendanceEmployeeASampleDates,
+    qaAttendanceGreenDate,
+    attendanceLiveEmail: 'attendance-live@portal-e2e-a.test',
+    attendanceLiveEmployeeId: attendanceLiveEmployee.id,
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 
