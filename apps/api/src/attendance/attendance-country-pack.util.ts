@@ -6,6 +6,8 @@ import { CountryPackNotFoundError } from '../country-packs/country-pack-resoluti
 
 export interface EffectiveAttendancePackConfig {
   weekendDays: Weekday[];
+  /** `workingTime.standardWeeklyHours` — the working-hours policy resolver's (8.1) last-resort fallback. */
+  standardWeeklyHours: number;
   publicHolidays: PublicHolidaysCalendar;
   overtimeRules: OvertimeRules;
 }
@@ -69,6 +71,7 @@ export async function resolveAttendancePackConfig(
 
   return {
     weekendDays: effective.workingTime.weekendDays,
+    standardWeeklyHours: effective.workingTime.standardWeeklyHours,
     publicHolidays: effective.publicHolidays,
     overtimeRules: effective.workingTime.overtimeRules,
   };

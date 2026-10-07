@@ -46,6 +46,7 @@ import { StorageModule } from './storage/storage.module';
 import { TenancyModule } from './tenancy/tenancy.module';
 import { UsersModule } from './users/users.module';
 import { WorkflowModule } from './workflow/workflow.module';
+import { WorkingHoursModule } from './working-hours/working-hours.module';
 
 @Module({
   imports: [
@@ -86,6 +87,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     EmployeesModule,
     LeaveModule,
     AttendanceModule,
+    WorkingHoursModule,
     AnalyticsModule,
     PayrollModule,
     PerformanceModule,

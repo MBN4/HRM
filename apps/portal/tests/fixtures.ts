@@ -42,6 +42,9 @@ export interface PortalTestFixtures {
   hierarchyLeadUserId: string;
   hierarchyInternUserId: string;
   hierarchyPeerUserId: string;
+  whDepartmentName: string;
+  whEmployeeCode: string;
+  whEmployeeName: string;
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

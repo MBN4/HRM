@@ -147,6 +147,13 @@ export const PERMISSIONS = {
   // policy work, matching this project's existing "who owns this
   // territory" reasoning).
   PRIVACY_MANAGE: 'privacy.manage',
+  // Step 8.1 (working-hours policy) — setting the expected schedule (start time,
+  // work/break hours, grace, half-day threshold) at company / team / member
+  // scope, and reading ANY member's effective policy. HR administers the
+  // schedule (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER explicitly);
+  // deliberately NOT MANAGER/EMPLOYEE. A member may always read their OWN
+  // effective policy without it. See docs/conventions/working-hours.md.
+  WORKING_HOURS_MANAGE: 'working_hours.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -226,6 +233,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.ESIGNATURE_SIGN,
     PERMISSIONS.STATUTORY_REPORT_GENERATE,
     PERMISSIONS.STATUTORY_REPORT_READ,
+    PERMISSIONS.WORKING_HOURS_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

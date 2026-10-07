@@ -56,3 +56,4 @@ export * from './validators/benefits.validator';
 export * from './validators/esignature.validator';
 export * from './validators/statutory-reporting.validator';
 export * from './validators/privacy.validator';
+export * from './validators/working-hours.validator';

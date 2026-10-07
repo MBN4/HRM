@@ -164,6 +164,24 @@ export default async function globalSetup(): Promise<void> {
     },
   });
 
+  // Step 8.1 (working-hours.spec.ts) — a department + a member in it, so the
+  // spec can prove Member -> Team -> Company precedence through the UI.
+  // (Tenant rows are recreated every run, so no policy cleanup is needed here.)
+  const whDepartment = await prisma.department.create({ data: { tenantId: tenantA.id, branchId: branchAUs.id, name: 'WH Engineering' } });
+  await prisma.employee.create({
+    data: {
+      tenantId: tenantA.id,
+      employeeCode: 'PE-WH-1',
+      firstName: 'Wanda',
+      lastName: 'Hours',
+      branchId: branchAUs.id,
+      departmentId: whDepartment.id,
+      employmentType: 'FULL_TIME',
+      joinDate: new Date('2022-01-01'),
+      statutoryFields: { SSN: '000-00-0090', W4: 'on-file' },
+    },
+  });
+
   const branchRestrictedManagerUser = await makeUser(tenantA.id, 'branch-restricted-manager@portal-e2e-a.test', managerRoleA.id);
   await prisma.userBranch.create({ data: { tenantId: tenantA.id, userId: branchRestrictedManagerUser.id, branchId: branchAUs.id } });
   await prisma.employee.create({
@@ -592,6 +610,9 @@ export default async function globalSetup(): Promise<void> {
     hierarchyLeadUserId: hierarchyLeadUser.id,
     hierarchyInternUserId: hierarchyInternUser.id,
     hierarchyPeerUserId: hierarchyPeerUser.id,
+    whDepartmentName: whDepartment.name,
+    whEmployeeCode: 'PE-WH-1',
+    whEmployeeName: 'Wanda Hours',
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 

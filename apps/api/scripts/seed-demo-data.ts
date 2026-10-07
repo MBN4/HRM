@@ -415,6 +415,27 @@ async function main() {
     await prisma.workflowStep.create({ data: { tenantId, templateId: tpl.id, name: 'Manager approval', order: 1, approverRule: { type: 'MANAGER' } } });
   }
 
+  // ---- working-hours policy (step 8.1, Part 1) ---------------------------------
+  // Three layers so precedence is demonstrable on /working-hours: a company
+  // default (09:00, 8 work + 1 break, 15m grace), a TEAM override for the US
+  // "Engineering" department (10:00 start, 10m grace), and a MEMBER override for
+  // the demo intern (flexible 07:30, 7 work + 1 break, 30m grace, 4h half-day).
+  // Everyone else resolves to the company default; with all three removed the
+  // Country Pack's workingTime decides (US 8h, Doha 9.6h).
+  const whAdmin = await prisma.user.findUniqueOrThrow({ where: { tenantId_email: { tenantId, email: 'hr@acme-demo.local' } } });
+  const whUpsert = (scope: 'COMPANY' | 'TEAM' | 'MEMBER', targetKey: string, target: { departmentId?: string; employeeId?: string }, v: { startTime: string; workHours: number; breakHours: number; graceMinutes: number; halfDayThresholdHours: number | null }) =>
+    prisma.workingHoursPolicy.upsert({
+      where: { tenantId_scope_targetKey: { tenantId, scope, targetKey } },
+      update: { ...v, updatedByUserId: whAdmin.id },
+      create: { tenantId, scope, targetKey, ...target, ...v, updatedByUserId: whAdmin.id },
+    });
+  await whUpsert('COMPANY', 'company', {}, { startTime: '09:00', workHours: 8, breakHours: 1, graceMinutes: 15, halfDayThresholdHours: 4.5 });
+  const usHq = await prisma.branch.findUnique({ where: { tenantId_name: { tenantId, name: 'Acme US HQ' } } });
+  const engineering = usHq ? await prisma.department.findUnique({ where: { tenantId_branchId_name: { tenantId, branchId: usHq.id, name: 'Engineering' } } }) : null;
+  if (engineering) await whUpsert('TEAM', engineering.id, { departmentId: engineering.id }, { startTime: '10:00', workHours: 8, breakHours: 1, graceMinutes: 10, halfDayThresholdHours: null });
+  const internEmp = await prisma.employee.findUnique({ where: { tenantId_employeeCode: { tenantId, employeeCode: 'CHAIN-INTERN' } } });
+  if (internEmp) await whUpsert('MEMBER', internEmp.id, { employeeId: internEmp.id }, { startTime: '07:30', workHours: 7, breakHours: 1, graceMinutes: 30, halfDayThresholdHours: 4 });
+
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------
   const extra = [
     { slug: 'demo-globex', name: 'Globex Industries (demo)', edition: 'ENTERPRISE' as const, status: 'ACTIVE' as const, sub: 'ACTIVE' as const, seats: 250, ago: 160, country: 'US' },
@@ -441,6 +462,7 @@ async function main() {
   console.log('Demo logins (password for both:', `${DEMO_PASSWORD}):`);
   for (const l of demoLogins) console.log(`  ${l.email}  — ${l.branch}`);
   console.log('Approval chain (step 7.2), password', DEMO_PASSWORD + ': intern@ -> lead@ -> pm@ -> (top) -> ceo@acme-demo.local ; hr@acme-demo.local is HR (never approves).');
+  console.log('Working hours (/working-hours, sign in as hr@acme-demo.local or ceo@): company 09:00 8+1; Engineering (US HQ) team 10:00; Ivy Intern member 07:30 7+1.');
   console.log('Team-access demo users (/users):');
   for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);
   console.log('Next: pnpm --filter @hrm/api run demo:rollup');

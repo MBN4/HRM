@@ -116,6 +116,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/edge-security.md`](./docs/conventions/edge-security.md)                       | WAF/DDoS/CDN config-as-code (`deploy/edge/`, provider-portable, honestly un-runnable here) + the edge-vs-app rate-limit interaction, the app-side trusted-proxy real-client-IP fix, the default-deny cache-control posture (a caching mistake = a cross-tenant leak), a real concurrent-flood graceful-degradation proof, and the header/TLS/residency responsibility split with the edge. (6.3)            |
 | [`docs/conventions/user-management.md`](./docs/conventions/user-management.md)                   | Tenant user/team access management (`/users`, `user.manage`), HR-generated one-time temp passwords, the server-enforced forced first-login password change (`mustChangePassword` + `@AllowPasswordChangePending()`), the privilege-escalation guards, and the privacy-policy template page. (7.1)                                                                                                           |
 | [`docs/conventions/team-hierarchy-approvals.md`](./docs/conventions/team-hierarchy-approvals.md) | The management chain (`User.managerId`) driving approvals: the extended `MANAGER` rule (direct manager → escalate past unavailable → CEO), the new CEO role + CEO-approves-anything, HR hard-excluded from approving, no self-approval, cycle guard, live re-routing on deactivate/reassign, and the `/hierarchy` org-chart UI. (7.2)                                                                       |
+| [`docs/conventions/working-hours.md`](./docs/conventions/working-hours.md)                       | Configurable working-hours policy (company → team/department → member, Country Pack fallback), the resolver service + `/working-hours/effective`, `working_hours.manage`, and the `/working-hours` admin screen — Part 1 of the attendance-classification series. (8.1)                                                                                                                                     |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                           |
 
 ## 5. Build log summary
@@ -988,6 +989,13 @@ that had HR/self approve were updated to a second approver. See
 drag-to-resize (persisted in `localStorage`), mobile drawer, full RTL/dark/
 reduced-motion support. Nav items and RBAC gating untouched. See
 [`docs/conventions/design-system.md`](./docs/conventions/design-system.md) § 11.
+
+**8.1 — Working-hours policy, Part 1 (2026-10-09)** — start time, work+break
+hours, grace and half-day threshold settable at company / team (department) /
+member scope with Country Pack `workingTime` as the final fallback; a reusable
+`WorkingHoursResolverService`, `working_hours.manage`, and a `/working-hours`
+admin screen. Policy only — day-status classification, clock, graph and leave
+are later parts. See [`docs/conventions/working-hours.md`](./docs/conventions/working-hours.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

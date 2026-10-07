@@ -4321,3 +4321,30 @@ RTL-correct handle/drag/keys/tooltip. Both apps: `transpilePackages` + Tailwind
 `content` + `@hrm/ui` dependency; `Wordmark markOnly`; tailwind-preset gained the
 tooltip keyframes; `sidebar.*` strings (en+ar). See
 [`conventions/design-system.md`](./conventions/design-system.md) § 11.
+
+## 8.1 — Working-hours policy, Part 1 of 4 (2026-10-09)
+
+Policy + resolution + admin UI only (no day-status classification, clock, graph
+or leave — later parts consume the resolver). Full design:
+[`conventions/working-hours.md`](./conventions/working-hours.md).
+
+**DB**: migration `20261009090000_add_working_hours_policy` — enum
+`WorkingHoursScope`, table `working_hours_policies` (composite FKs to
+`Department`/`Employee`, derived never-null `targetKey` + `@@unique(tenantId,
+scope, targetKey)`), RLS `tenant_isolation`, and a backfill of the new
+`working_hours.manage` permission (TENANT_ADMIN/CEO/HR_MANAGER) for existing tenants.
+**Shared**: `PERMISSIONS.WORKING_HOURS_MANAGE`, `working-hours.validator.ts`
+(zod + `requiredHoursOf`/`defaultHalfDayThreshold`/`WORKING_HOURS_DEFAULTS`).
+**API** (`apps/api/src/working-hours`): `WorkingHoursResolverService` (member ??
+team (nearest ancestor dept) ?? company ?? Country Pack — `workHours =
+standardWeeklyHours/(7−weekend days)`), `WorkingHoursService` (CRUD, branch-scope
+guards), controller (`/working-hours/{policies,targets,effective,company,teams/:id,
+members/:id}`, audited `SET_*`/`REMOVE_*`). One additive field on the 1.3 attendance
+pack util (`standardWeeklyHours`). **Portal**: `/working-hours` (company form, team
+and member override tables + searchable-select modals, Effective-policy card with
+source badge + precedence strip), `working_hours.manage`-gated nav, en+ar.
+**Demo**: `seed:demo` adds company / Engineering-team / Ivy-Intern-member policies.
+
+**Verification**: `working-hours.e2e-spec.ts` **23/23** (each precedence layer, QA vs
+US pack fallback, CRUD, 10 validation rejects, audit, RBAC incl. own-vs-other
+effective read, branch-restricted HR, cross-tenant). Playwright `working-hours.spec.ts` **6/6** (company default, validation, Member→Team→Company precedence via add/remove, modal error, axe light/dark/modal, no-access for a plain employee). Also green: auth-rbac, user-management, attendance, tenant-isolation-exhaustive, employees, team-hierarchy API suites. Full API suite not re-run.

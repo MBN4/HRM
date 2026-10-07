@@ -23,6 +23,7 @@ import {
   Settings,
   ShieldCheck,
   Target,
+  Clock3,
   Upload,
   User,
   UserCog,
@@ -136,6 +137,10 @@ export function Sidebar() {
     adminItems.push({ href: '/users', label: t('nav.users'), icon: UserCog });
     // Step 7.2 — hierarchical approvals: the reporting tree (NOT the employee /org-chart).
     adminItems.push({ href: '/hierarchy', label: t('nav.hierarchy'), icon: GitFork });
+  }
+  // Working hours (step 8.1) — see docs/conventions/.
+  if (can(PERMISSIONS.WORKING_HOURS_MANAGE)) {
+    adminItems.push({ href: '/working-hours', label: t('nav.workingHours'), icon: Clock3 });
   }
   // Data privacy & residency (step 6.1) — see docs/conventions/privacy-residency.md.
   if (can(PERMISSIONS.PRIVACY_MANAGE)) {
