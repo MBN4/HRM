@@ -142,6 +142,12 @@ on [tenant-resolution.md](./tenant-resolution.md).
   posture `/auth/me` already takes for reading the caller's own context.
   Feeds the notification hub's `PUSH` channel — see
   [notifications-queues.md](./notifications-queues.md) → Provider seam.
+- **Forced first-login password change (step 7.1).** `User.mustChangePassword`
+  (set for HR-issued temporary passwords) is enforced in
+  `TenantScopeInterceptor.authenticate()`: such a user gets `403
+PASSWORD_CHANGE_REQUIRED` on every authenticated route except those marked
+  `@AllowPasswordChangePending()` (`POST /auth/first-login/password`, `GET
+/auth/me`, logout). See [user-management.md](./user-management.md).
 - Verified end-to-end over real HTTP by `apps/api/test/auth-rbac.e2e-spec.ts`
   (18 tests: login incl. no-enumeration, refresh rotation + reuse
   revoking the whole family, logout vs. logout-all, RBAC permit/deny,

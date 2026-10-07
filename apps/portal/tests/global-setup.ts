@@ -71,6 +71,7 @@ export default async function globalSetup(): Promise<void> {
   const managerRoleA = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantA.id, name: SYSTEM_ROLES.MANAGER } } });
   const employeeRoleA = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantA.id, name: SYSTEM_ROLES.EMPLOYEE } } });
   const employeeRoleB = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantB.id, name: SYSTEM_ROLES.EMPLOYEE } } });
+  const adminRoleB = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantB.id, name: SYSTEM_ROLES.TENANT_ADMIN } } });
 
   const hashedPassword = await hash(TEST_PASSWORD, { algorithm: ARGON2ID });
 
@@ -212,6 +213,8 @@ export default async function globalSetup(): Promise<void> {
   // `TEST_PASSWORD`.
   const passwordResetTargetUser = await makeUser(tenantA.id, 'password-reset-target@portal-e2e-a.test', employeeRoleA.id);
 
+  // Step 7.1 — a tenant-B admin, for user-management.spec.ts's cross-tenant UI check.
+  await makeUser(tenantB.id, 'admin@portal-e2e-b.test', adminRoleB.id);
   const employeeBUser = await makeUser(tenantB.id, 'employee@portal-e2e-b.test', employeeRoleB.id);
   await prisma.employee.create({
     data: {
@@ -540,6 +543,7 @@ export default async function globalSetup(): Promise<void> {
     employeeAUserId: employeeAUser.id,
     employeeASalary,
     employeeBEmail: 'employee@portal-e2e-b.test',
+    adminBEmail: 'admin@portal-e2e-b.test',
     branchAUsId: branchAUs.id,
     branchAQaId: branchAQa.id,
     branchAPkId: branchAPk.id,

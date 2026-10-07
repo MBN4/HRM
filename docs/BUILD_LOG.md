@@ -4193,3 +4193,73 @@ and the trigger (two admin tenant-spec locators scoped to `select`).
 window filter is client-side; mobile untouched; multi-select not built.
 **Verification**: see the run summary in the PR/hand-off notes (Playwright
 suites listed there).
+
+## 7.1 — Tenant user / team access management + forced first-login password change + privacy-policy page (2026-10-07)
+
+Not part of the original Phase 0–6 roadmap: closes a real gap — the system
+managed employees and had a full RBAC engine, but a tenant admin had **no way
+to manage who can log in**. Detail: `docs/conventions/user-management.md`.
+
+**Backend** (`apps/api/src/users`, new): `GET /users` (paginated/searchable/
+status-filtered, with roles, branch scope, `lastLoginAt`, `mustChangePassword`,
+per-row `manageable`), `GET /users/assignable-roles`, `POST /users` (HR enters
+email + roles + optional branch scope; a CSPRNG temp password is generated,
+argon2id-hashed via the existing `PasswordService`, user created `ACTIVE` with
+`mustChangePassword=true`, plaintext returned **once**), `PATCH /users/:id/access`,
+`POST /users/:id/{deactivate,reactivate,regenerate-temp-password}`. No DELETE.
+`user.manage` was already in the 0.4 catalog (seeded to TENANT_ADMIN +
+HR_MANAGER) but unenforced — now every route requires it. Audited
+(`@AuditLog('User', …)`; the existing redaction regex stores the temp password
+as `[REDACTED]`). Guards: no self-deactivate/self-edit/self-regenerate; last
+active admin protected; can't grant a role carrying permissions you lack; **can't
+manage a user more privileged than you** (otherwise an HR manager could
+regenerate the admin's temp password and take the account); branch-restricted
+callers can only grant/manage within their own scope; case-insensitive email
+uniqueness per tenant. Role/branch edits invalidate `PermissionsCacheService`
+(the write path 5.1's doc said must); deactivation sets `DISABLED` and calls
+`TokenService.revokeAllForUser`.
+
+**Forced first-login change**: migration `20261007090000_add_user_must_change_password`
+(`users.must_change_password`, `users.last_login_at`). `login`/`/auth/me` return
+`mustChangePassword`; **server-enforced** in `TenantScopeInterceptor.authenticate()`
+(one check of the already-loaded user row): `403 {code:'PASSWORD_CHANGE_REQUIRED'}`
+on every authenticated route except those carrying the new
+`@AllowPasswordChangePending()` (`POST /auth/first-login/password`, `GET /auth/me`,
+logout, logout-all). New `POST /auth/first-login/password` (no current-password
+field; rejects reuse of the temp password; clears the flag; revokes all refresh
+families; returns a fresh session). A completed forgot-password reset also
+clears a pending flag; SSO keeps it. These are the only edits to the auth core.
+
+**Portal**: `/users` "Team access" screen (create dialog → show-once copyable
+temp-password panel, edit access, deactivate/reactivate/regenerate with confirm
+dialogs), `ForcedPasswordChange` rendered by `AuthGate` instead of the app shell,
+new UI kit pieces `ConfirmDialog` + `CopyField`, `PolicyLinks`; `/privacy-policy`
+(public, outside `(app)`, en + ar template content, banner stating it is a
+template/not legal advice, linked from login + app footers, light/dark/RTL).
+i18n keys `users.*`, `auth.firstLogin.*`, `privacyPolicy.*`, `nav.users/
+privacyPolicy` in both locales. `@hrm/shared`: `user.validator.ts`,
+`firstLoginPasswordSchema`.
+
+**Demo data**: `seed:demo` adds manager/employee/doha.hr/former.staff (deactivated)
+and `newhire@acme-demo.local` (mustChangePassword, temp `Temp-Pass-123!`).
+
+**Bugs caught by the tests**: duplicate `h1`/`h2` "Team access" (strict-mode
+locator), and the styled `Select` taking its accessible name only from a
+`<label for>` (an `aria-label` prop never reached the trigger — axe `critical`
+until a visually-hidden label was added).
+
+**Verification (7.1)**: `apps/api` `user-management.e2e-spec.ts` **23/23** (real
+HTTP + DB: create→temp password→forced change→normal access, server-side block,
+edit roles w/ warmed cache, deactivate/reactivate incl. refresh-token death, RBAC,
+self/last-admin/escalation/branch guards, audit never holds the plaintext,
+cross-tenant isolation); regression `auth-rbac`, `tenant-mfa`, `integrations-sso`,
+`platform-impersonation`, `tenant-isolation-exhaustive`, `privacy`, `notifications`
+all green. `tenant-resolution.e2e-spec.ts` has 1 failure ("platform route while
+platform mode disabled") caused by `apps/api/.env` having `PLATFORM_MODE_ENABLED=true`
+— environmental, untouched by this step. `apps/portal` Playwright: new
+`user-management.spec.ts` **13/13**; full suite 128 passed on the first full run,
+whose one failure (axe color-contrast on the Topbar unread badge, 4.18:1 — latent,
+only surfaced once other specs had created notifications) was fixed
+(`bg-coral-500`→`bg-danger`) and `user-management` + `accessibility` re-run 19/19.
+The full portal suite was not re-run end-to-end after that one-class fix. Not run:
+full API jest suite, mobile/admin apps (untouched).

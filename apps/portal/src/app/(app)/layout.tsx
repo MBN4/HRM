@@ -8,6 +8,8 @@ import { I18nProvider } from '../../i18n/I18nProvider';
 import { Sidebar } from '../../components/layout/Sidebar';
 import { Topbar } from '../../components/layout/Topbar';
 import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
+import { PolicyLinks } from '../../components/layout/PolicyLinks';
+import { ForcedPasswordChange } from '../../components/auth/ForcedPasswordChange';
 import { PageSpinner } from '../../components/ui/Spinner';
 
 /**
@@ -35,7 +37,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex min-w-0 flex-1 flex-col">
               <Topbar />
               <main className="mx-auto w-full max-w-[88rem] flex-1 p-6 lg:p-8">{children}</main>
-              <PoweredByFooter className="border-t border-ink-100 px-6 py-3 text-ink-400" />
+              <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-100 px-6 py-3 text-ink-400">
+                <PoweredByFooter />
+                <PolicyLinks />
+              </footer>
             </div>
           </div>
         </ResolvedI18n>
@@ -56,6 +61,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (loading || !user) {
     return <PageSpinner />;
+  }
+  // Step 7.1 — an HR-issued temporary password must be replaced before ANY
+  // app route renders. UX only: the API independently 403s every other
+  // route for this user (PASSWORD_CHANGE_REQUIRED).
+  if (user.mustChangePassword) {
+    return <ForcedPasswordChange />;
   }
   return <>{children}</>;
 }

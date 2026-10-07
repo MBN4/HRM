@@ -14,6 +14,7 @@ import { PasswordInput } from '../../components/ui/PasswordInput';
 import { Alert } from '../../components/ui/Alert';
 import { Wordmark } from '../../components/brand/Wordmark';
 import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
+import { PolicyLinks } from '../../components/layout/PolicyLinks';
 
 export default function LoginPage() {
   const { t } = useI18n();
@@ -113,6 +114,7 @@ export default function LoginPage() {
           </form>
         </div>
         <PoweredByFooter className="mt-4 text-center text-white/70" />
+        <PolicyLinks className="mt-2 text-center text-white/70" />
       </div>
     </div>
   );

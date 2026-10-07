@@ -63,7 +63,7 @@ export function Topbar() {
         >
           <Bell className="h-5 w-5" aria-hidden />
           {unreadCount > 0 && (
-            <span className="absolute end-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral-500 px-1 text-[10px] font-bold text-white">
+            <span className="absolute end-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
               {unreadCount}
             </span>
           )}

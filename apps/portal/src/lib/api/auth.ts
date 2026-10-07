@@ -55,3 +55,13 @@ export function apiRequestPasswordReset(email: string): Promise<void> {
 export function apiResetPassword(token: string, newPassword: string): Promise<void> {
   return apiFetch('/auth/reset-password', { method: 'POST', body: { token, newPassword }, skipAuth: true });
 }
+
+/**
+ * The forced first-login password change (step 7.1) — the one authenticated
+ * call a `mustChangePassword` session may make besides `/auth/me` and
+ * logout. Returns a FRESH session (the server revokes every prior refresh
+ * token), which the caller must store.
+ */
+export function apiFirstLoginChangePassword(newPassword: string): Promise<LoginResponse> {
+  return apiFetch<LoginResponse>('/auth/first-login/password', { method: 'POST', body: { newPassword } });
+}

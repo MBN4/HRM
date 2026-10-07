@@ -44,6 +44,7 @@ import { ResilienceModule } from './resilience/resilience.module';
 import { SecurityModule } from './security/security.module';
 import { StorageModule } from './storage/storage.module';
 import { TenancyModule } from './tenancy/tenancy.module';
+import { UsersModule } from './users/users.module';
 import { WorkflowModule } from './workflow/workflow.module';
 
 @Module({
@@ -71,6 +72,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     SecurityModule,
     TenancyModule,
     AuthModule,
+    UsersModule,
     CountryPacksModule,
     LicensingModule,
     WorkflowModule,

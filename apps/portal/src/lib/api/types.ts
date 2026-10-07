@@ -15,6 +15,8 @@ export interface MeResponse {
   roles: string[];
   permissions: string[];
   branchIds: string[] | null;
+  /** `true` -> the portal must show the forced set-new-password screen (an HR-issued temporary password is still live). */
+  mustChangePassword?: boolean;
 }
 
 export interface LoginResponse {
@@ -24,6 +26,7 @@ export interface LoginResponse {
   roles: string[];
   permissions: string[];
   branchIds: string[] | null;
+  mustChangePassword?: boolean;
 }
 
 export interface EmployeeBankDetails {

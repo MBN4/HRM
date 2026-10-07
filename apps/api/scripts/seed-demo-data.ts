@@ -33,6 +33,8 @@ if (process.env.NODE_ENV === 'production') {
 
 const TENANT_SLUG = 'acme-demo';
 const DEMO_PASSWORD = 'DemoPass-123!';
+/** The one-time temporary password of the demo user that is mid-onboarding (mustChangePassword=true) — see the "team access" section below. */
+const DEMO_TEMP_PASSWORD = 'Temp-Pass-123!';
 const ARGON2ID = 2;
 const DAY_MS = 86_400_000;
 const HISTORY_DAYS = 100;
@@ -345,6 +347,34 @@ async function main() {
     }
   }
 
+  // ---- team access users (step 7.1) -----------------------------------------
+  // A few extra LOGINS with different roles so /users and the forced first-
+  // login flow are testable by hand. `newhire@` is the one still holding an
+  // HR-issued temporary password (mustChangePassword=true): sign in as it to
+  // see the forced "set your new password" screen. Re-running re-arms it.
+  const dohaBranch = await prisma.branch.findUnique({ where: { tenantId_name: { tenantId, name: 'Acme Doha Office' } } });
+  const tempHash = await hash(DEMO_TEMP_PASSWORD, { algorithm: ARGON2ID });
+  const teamUsers = [
+    { email: 'manager@acme-demo.local', role: SYSTEM_ROLES.MANAGER, status: 'ACTIVE' as const, mustChange: false, branchId: null as string | null },
+    { email: 'employee@acme-demo.local', role: SYSTEM_ROLES.EMPLOYEE, status: 'ACTIVE' as const, mustChange: false, branchId: null as string | null },
+    { email: 'doha.hr@acme-demo.local', role: SYSTEM_ROLES.HR_MANAGER, status: 'ACTIVE' as const, mustChange: false, branchId: dohaBranch?.id ?? null },
+    { email: 'newhire@acme-demo.local', role: SYSTEM_ROLES.EMPLOYEE, status: 'ACTIVE' as const, mustChange: true, branchId: null as string | null },
+    { email: 'former.staff@acme-demo.local', role: SYSTEM_ROLES.EMPLOYEE, status: 'DISABLED' as const, mustChange: false, branchId: null as string | null },
+  ];
+  for (const u of teamUsers) {
+    const role = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId, name: u.role } } });
+    const data = { hashedPassword: u.mustChange ? tempHash : passwordHash, status: u.status, mustChangePassword: u.mustChange };
+    const user = await prisma.user.upsert({
+      where: { tenantId_email: { tenantId, email: u.email } },
+      update: data,
+      create: { tenantId, email: u.email, ...data },
+    });
+    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    await prisma.userRole.create({ data: { tenantId, userId: user.id, roleId: role.id } });
+    await prisma.userBranch.deleteMany({ where: { userId: user.id } });
+    if (u.branchId) await prisma.userBranch.create({ data: { tenantId, userId: user.id, branchId: u.branchId } });
+  }
+
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------
   const extra = [
     { slug: 'demo-globex', name: 'Globex Industries (demo)', edition: 'ENTERPRISE' as const, status: 'ACTIVE' as const, sub: 'ACTIVE' as const, seats: 250, ago: 160, country: 'US' },
@@ -370,6 +400,8 @@ async function main() {
   console.log(`Demo data ready for "${TENANT_SLUG}": ${allEmployees.length} employees (${active} active), ${summaryRows.length} attendance summaries, ${leaveRows.length} leave requests, ${extra.length} extra demo tenants.`);
   console.log('Demo logins (password for both:', `${DEMO_PASSWORD}):`);
   for (const l of demoLogins) console.log(`  ${l.email}  — ${l.branch}`);
+  console.log('Team-access demo users (/users):');
+  for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);
   console.log('Next: pnpm --filter @hrm/api run demo:rollup');
 }
 

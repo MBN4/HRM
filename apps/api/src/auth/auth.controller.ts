@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseInterceptors } from '@nestjs/common';
 import {
   changePasswordSchema,
+  firstLoginPasswordSchema,
   loginSchema,
   mfaDisableSchema,
   mfaEnrollConfirmSchema,
@@ -11,6 +12,7 @@ import {
   setPushTokenSchema,
   PERMISSIONS,
   type ChangePasswordInput,
+  type FirstLoginPasswordInput,
   type LoginInput,
   type MfaDisableInput,
   type MfaEnrollConfirmInput,
@@ -25,6 +27,7 @@ import { Priority } from '../resilience/load-shedding/priority.decorator';
 import { CurrentTenant } from '../tenancy/current-tenant.decorator';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { AllowAnonymous } from './decorators/allow-anonymous.decorator';
+import { AllowPasswordChangePending } from './decorators/allow-password-change-pending.decorator';
 import { RequirePermissions } from './decorators/require-permissions.decorator';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { AuthService } from './auth.service';
@@ -86,26 +89,49 @@ export class AuthController {
   }
 
   @Post('logout')
+  @AllowPasswordChangePending()
   @HttpCode(HttpStatus.NO_CONTENT)
   async logout(@Body(new ZodValidationPipe(refreshSchema)) body: RefreshInput) {
     await this.auth.logout(this.requireTenantId(), this.requireUserId(), body.refreshToken);
   }
 
   @Post('logout-all')
+  @AllowPasswordChangePending()
   @HttpCode(HttpStatus.NO_CONTENT)
   async logoutAll() {
     await this.auth.logoutAll(this.requireTenantId(), this.requireUserId());
   }
 
   @Get('me')
-  me(@CurrentTenant() ctx: ReturnType<TenantContextService['getContext']>) {
+  @AllowPasswordChangePending()
+  async me(@CurrentTenant() ctx: ReturnType<TenantContextService['getContext']>) {
+    // `mustChangePassword` is read here (not carried in the request
+    // context) so the client can learn it must show the forced
+    // set-new-password screen — see docs/conventions/user-management.md.
+    const user = await this.tenantContext.getTx().user.findUniqueOrThrow({
+      where: { id: this.requireUserId() },
+      select: { mustChangePassword: true },
+    });
     return {
       userId: ctx.userId,
       tenantId: ctx.tenantId,
       roles: ctx.roles,
       permissions: ctx.permissions,
       branchIds: ctx.branchIds,
+      mustChangePassword: user.mustChangePassword,
     };
+  }
+
+  /**
+   * Step 7.1 — the forced first-login password change. The ONE route (with
+   * `/auth/me` and logout) a `mustChangePassword` user may call. Returns a
+   * fresh session since every prior refresh token is revoked.
+   */
+  @Post('first-login/password')
+  @AllowPasswordChangePending()
+  @HttpCode(HttpStatus.OK)
+  completeFirstLoginPasswordChange(@Body(new ZodValidationPipe(firstLoginPasswordSchema)) body: FirstLoginPasswordInput) {
+    return this.auth.completeFirstLoginPasswordChange(this.requireTenantId(), this.tenantContext.getTx(), this.requireUserId(), body);
   }
 
   @Post('change-password')

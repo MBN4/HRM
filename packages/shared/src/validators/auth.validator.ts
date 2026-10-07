@@ -67,3 +67,15 @@ export const mfaVerifySchema = z.object({
   code: z.string().min(6),
 });
 export type MfaVerifyInput = z.infer<typeof mfaVerifySchema>;
+
+/**
+ * Forced first-login password change (step 7.1) — see
+ * docs/conventions/user-management.md. Deliberately NO `currentPassword`:
+ * the caller has just authenticated with the temporary password a moment
+ * ago and holds a live session, and `AuthService` rejects a new password
+ * identical to the temporary one instead.
+ */
+export const firstLoginPasswordSchema = z.object({
+  newPassword: passwordSchema,
+});
+export type FirstLoginPasswordInput = z.infer<typeof firstLoginPasswordSchema>;

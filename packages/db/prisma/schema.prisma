@@ -529,6 +529,12 @@ model User {
   mfaSecretEncrypted     String?    @map("mfa_secret_encrypted")
   mfaEnabled             Boolean    @default(false) @map("mfa_enabled")
   mfaRecoveryCodesHashed Json?      @map("mfa_recovery_codes_hashed")
+  // Step 7.1 — HR-driven user onboarding (see docs/conventions/user-management.md).
+  // `true` for a user whose password is an HR-generated TEMPORARY one: the
+  // account authenticates but TenantScopeInterceptor blocks every route
+  // except the first-login password change until it's flipped to `false`.
+  mustChangePassword     Boolean    @default(false) @map("must_change_password")
+  lastLoginAt            DateTime?  @map("last_login_at")
   createdAt              DateTime   @default(now()) @map("created_at")
   updatedAt              DateTime   @updatedAt @map("updated_at")
 

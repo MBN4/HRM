@@ -113,6 +113,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/privacy-residency.md`](./docs/conventions/privacy-residency.md)             | Data-subject export/erasure, the per-`DataCategory` erasure policy + the audit-log anonymize-within reconciliation, consent tracking + the processing register/sub-processor disclosure, retention enforcement building on 5.2's seam, and residency enforcement building on 5.3's seam. (6.1)                                                                                                              |
 | [`docs/conventions/security-hardening.md`](./docs/conventions/security-hardening.md)           | Secure headers + a real CORS allow-list, field-encryption key rotation + the secrets-provider seam, optional tenant MFA (reusing platform's TOTP util), auth/API-surface re-verification, the exhaustive cross-tenant isolation regression suite, CI dependency/secret scanning, WCAG 2.1 AA accessibility (axe-core + honest manual-audit gaps), and encrypted backups/DR with a real restore drill. (6.2) |
 | [`docs/conventions/edge-security.md`](./docs/conventions/edge-security.md)                     | WAF/DDoS/CDN config-as-code (`deploy/edge/`, provider-portable, honestly un-runnable here) + the edge-vs-app rate-limit interaction, the app-side trusted-proxy real-client-IP fix, the default-deny cache-control posture (a caching mistake = a cross-tenant leak), a real concurrent-flood graceful-degradation proof, and the header/TLS/residency responsibility split with the edge. (6.3)            |
+| [`docs/conventions/user-management.md`](./docs/conventions/user-management.md)                 | Tenant user/team access management (`/users`, `user.manage`), HR-generated one-time temp passwords, the server-enforced forced first-login password change (`mustChangePassword` + `@AllowPasswordChangePending()`), the privilege-escalation guards, and the privacy-policy template page. (7.1)                                                                                                           |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                     | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                           |
 
 ## 5. Build log summary
@@ -950,6 +951,20 @@ rich Recharts dashboards (portal `/analytics`, `/dashboard`; admin
 in-app light/dark/system toggle (`data-theme` on `<html>`), and a dev-only
 demo seed (`seed:demo` → `demo:rollup`). See
 [`docs/conventions/design-system.md`](./docs/conventions/design-system.md) §§ 7–10.
+
+**7.1 — Tenant user / team access management (2026-10-07)** — not part of
+the original roadmap; closes the gap that a tenant admin had no way to manage
+who can log in. `/users` (`user.manage`, already in the catalog): list/create/
+edit-access/deactivate/reactivate/regenerate, no hard delete. HR-driven
+onboarding: a CSPRNG temporary password (argon2id-hashed, returned ONCE) +
+new `User.mustChangePassword`, **enforced server-side** in
+`TenantScopeInterceptor` (403 `PASSWORD_CHANGE_REQUIRED` except routes marked
+`@AllowPasswordChangePending()`), cleared by `POST /auth/first-login/password`.
+Escalation guards (can't act on yourself, the last admin, or anyone more
+privileged than you; can't grant permissions you lack). Portal "Team access"
+screen + forced-change screen + a public `/privacy-policy` TEMPLATE page
+(banner: not legal advice). See
+[`docs/conventions/user-management.md`](./docs/conventions/user-management.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

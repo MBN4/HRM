@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@hrm/db';
 import type { Redis } from 'ioredis';
 import type {
   ChangePasswordInput,
+  FirstLoginPasswordInput,
   LoginInput,
   MfaDisableInput,
   MfaEnrollConfirmInput,
@@ -33,6 +34,8 @@ export interface AuthenticatedSession {
   roles: string[];
   permissions: string[];
   branchIds: string[] | null;
+  /** `true` -> the client must show the forced set-new-password screen; every other route 403s until done (step 7.1). */
+  mustChangePassword: boolean;
 }
 
 /** Returned by `login()` in place of a session when the account has MFA enabled — a client must call `POST /auth/mfa/verify` with this token next. */
@@ -257,6 +260,38 @@ export class AuthService {
     this.emit(AUTH_EVENTS.PASSWORD_CHANGED, tenantId, { userId });
   }
 
+  /**
+   * Step 7.1 — completes the forced first-login change. Only valid while
+   * `mustChangePassword` is still `true` (once cleared, the ONLY way to
+   * change a password is the forgot-password flow, or the existing
+   * Settings change-password which needs the current one). Rejects a new
+   * password equal to the temporary one. Revokes every existing refresh
+   * family (the temp-password session included) and returns a fresh
+   * session, so the caller continues without logging in again.
+   */
+  async completeFirstLoginPasswordChange(
+    tenantId: string,
+    tx: Prisma.TransactionClient,
+    userId: string,
+    input: FirstLoginPasswordInput,
+  ): Promise<AuthenticatedSession> {
+    const user = await tx.user.findUnique({ where: { id: userId } });
+    if (!user || !user.mustChangePassword) {
+      throw new BadRequestException('No password change is pending for this account.');
+    }
+    if (await this.password.verify(user.hashedPassword, input.newPassword)) {
+      throw new BadRequestException('Choose a new password that differs from the temporary one.');
+    }
+
+    const hashedPassword = await this.password.hash(input.newPassword);
+    await tx.user.update({ where: { id: userId }, data: { hashedPassword, mustChangePassword: false } });
+    await this.tokens.revokeAllForUser(tenantId, userId);
+
+    const session = await this.issueSession(tenantId, tx, userId);
+    this.emit(AUTH_EVENTS.PASSWORD_CHANGED, tenantId, { userId });
+    return session;
+  }
+
   async requestPasswordReset(
     tenantId: string,
     tx: Prisma.TransactionClient,
@@ -301,7 +336,9 @@ export class AuthService {
     await this.redis.del(this.resetKey(input.token));
 
     const hashedPassword = await this.password.hash(input.newPassword);
-    await tx.user.update({ where: { id: record.userId }, data: { hashedPassword } });
+    // A completed reset proves control of the account's email, so it also
+    // retires any pending HR-issued temporary password (step 7.1).
+    await tx.user.update({ where: { id: record.userId }, data: { hashedPassword, mustChangePassword: false } });
     await this.tokens.revokeAllForUser(tenantId, record.userId);
 
     this.emit(AUTH_EVENTS.PASSWORD_RESET_COMPLETED, tenantId, { userId: record.userId });
@@ -311,7 +348,12 @@ export class AuthService {
     const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, userId);
     const accessToken = this.tokens.signAccessToken(tenantId, userId);
     const refreshToken = await this.tokens.issueRefreshToken(tenantId, userId);
-    return { accessToken, refreshToken, userId, roles, permissions, branchIds };
+    const { mustChangePassword } = await tx.user.update({
+      where: { id: userId },
+      data: { lastLoginAt: new Date() },
+      select: { mustChangePassword: true },
+    });
+    return { accessToken, refreshToken, userId, roles, permissions, branchIds, mustChangePassword };
   }
 
   private async getRecord<T>(key: string): Promise<T | null> {

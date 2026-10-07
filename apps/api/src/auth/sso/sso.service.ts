@@ -109,7 +109,9 @@ export class SsoService {
     const { roles, permissions, branchIds } = await this.permissionsCache.getContext(tx, tenantId, user.id);
     const accessToken = this.tokens.signAccessToken(tenantId, user.id);
     const refreshToken = await this.tokens.issueRefreshToken(tenantId, user.id);
-    return { accessToken, refreshToken, userId: user.id, roles, permissions, branchIds };
+    // A pending HR-issued temporary password stays pending even via SSO (step 7.1): the
+    // password credential is still live, so it must still be retired by the forced change.
+    return { accessToken, refreshToken, userId: user.id, roles, permissions, branchIds, mustChangePassword: user.mustChangePassword };
   }
 
   private async requireEnabledConfig(tx: Prisma.TransactionClient, tenantId: string): Promise<SsoConfig> {

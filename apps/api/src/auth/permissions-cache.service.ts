@@ -44,7 +44,10 @@ const CACHE_TTL_SECONDS = 15;
  * (`PlatformTenantService`'s tenant-admin bootstrap, `SsoService`'s
  * JIT provisioning) — DOES call `invalidate()` right after, defensively,
  * even though a brand-new user has no pre-existing cache entry to go stale.
- * The day a real role-editing endpoint is built, it MUST call
+ * Step 7.1 update: `UsersService` (docs/conventions/user-management.md) is now
+ * the real user-role/branch ASSIGNMENT write path and DOES call `invalidate()`
+ * on every edit; role-DEFINITION editing (a Role's own permission set) still
+ * has no endpoint. The day a real role-editing endpoint is built, it MUST call
  * `invalidate(tenantId, userId)` for every affected user (or every holder
  * of an edited Role) as part of that work — exactly the same obligation
  * every other cached-write pair in this step already carries.

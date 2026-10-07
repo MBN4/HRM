@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { apiLogin, apiLogoutAll, apiLogout, apiMe, bootstrapSession } from '../api/auth';
+import { apiFirstLoginChangePassword, apiLogin, apiLogoutAll, apiLogout, apiMe, bootstrapSession } from '../api/auth';
 import { clearTokens, setTokens } from './token-storage';
 import { setStoredTenantSlug } from '../tenant';
 import type { MeResponse } from '../api/types';
@@ -22,6 +22,8 @@ export interface AuthContextValue {
   login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
+  /** Completes the forced first-login change: stores the fresh session the server returns, then reloads the user. */
+  completeFirstLogin: (newPassword: string) => Promise<void>;
   can: (permission: string) => boolean;
   refreshUser: () => Promise<void>;
 }
@@ -87,11 +89,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const completeFirstLogin = useCallback(
+    async (newPassword: string) => {
+      const session = await apiFirstLoginChangePassword(newPassword);
+      setTokens(session.accessToken, session.refreshToken);
+      await refreshUser();
+    },
+    [refreshUser],
+  );
+
   const can = useCallback((permission: string) => Boolean(user?.permissions?.includes(permission)), [user]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, login, logout, logoutAll, can, refreshUser }),
-    [user, loading, login, logout, logoutAll, can, refreshUser],
+    () => ({ user, loading, login, logout, logoutAll, completeFirstLogin, can, refreshUser }),
+    [user, loading, login, logout, logoutAll, completeFirstLogin, can, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

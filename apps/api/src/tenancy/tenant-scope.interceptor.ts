@@ -17,6 +17,7 @@ import { DEFAULT_REQUEST_PRIORITY, RequestPriority } from '@hrm/shared';
 import { ApiKeyAuthService } from '../auth/api-key/api-key-auth.service';
 import { ApiKeyRateLimitService } from '../auth/api-key/api-key-rate-limit.service';
 import { IS_ALLOW_ANONYMOUS_KEY } from '../auth/decorators/allow-anonymous.decorator';
+import { IS_ALLOW_PASSWORD_CHANGE_PENDING_KEY } from '../auth/decorators/allow-password-change-pending.decorator';
 import { PermissionsCacheService } from '../auth/permissions-cache.service';
 import { LoadSheddingService } from '../resilience/load-shedding/load-shedding.service';
 import { PRIORITY_KEY } from '../resilience/load-shedding/priority.decorator';
@@ -279,7 +280,15 @@ export class TenantScopeInterceptor implements NestInterceptor {
     ]);
 
     return withTenantContext(resolved.tenantId, async (tx) => {
-      const authContext = isAllowAnonymous ? EMPTY_CONTEXT : await this.authenticate(req, resolved.tenantId, tx);
+      const allowPasswordChangePending = Boolean(
+        this.reflector.getAllAndOverride<boolean>(IS_ALLOW_PASSWORD_CHANGE_PENDING_KEY, [
+          context.getHandler(),
+          context.getClass(),
+        ]),
+      );
+      const authContext = isAllowAnonymous
+        ? EMPTY_CONTEXT
+        : await this.authenticate(req, resolved.tenantId, tx, allowPasswordChangePending);
       setRequestLogIdentity(resolved.tenantId, authContext.userId ?? undefined);
 
       return this.tenantContext.run(
@@ -389,6 +398,7 @@ export class TenantScopeInterceptor implements NestInterceptor {
     req: Request,
     tenantId: string,
     tx: Prisma.TransactionClient,
+    allowPasswordChangePending: boolean,
   ): Promise<Omit<RequestTenantStore, 'platform' | 'tx'>> {
     const unauthorized = () => new UnauthorizedException('Authentication required.');
 
@@ -411,6 +421,22 @@ export class TenantScopeInterceptor implements NestInterceptor {
     const user = await tx.user.findUnique({ where: { id: payload.sub } });
     if (!user || user.status !== 'ACTIVE') {
       throw unauthorized();
+    }
+
+    // Step 7.1 — forced first-login password change, enforced SERVER-side
+    // (never the frontend alone). The user row is already loaded above, so
+    // this is a free check on the hot path. A user holding an HR-generated
+    // temporary password is authenticated but may reach ONLY routes that
+    // opt in via `@AllowPasswordChangePending()`. A distinct `code` lets
+    // clients tell this apart from an ordinary RBAC 403. See
+    // docs/conventions/user-management.md.
+    if (user.mustChangePassword && !allowPasswordChangePending) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'You must set a new password before continuing.',
+      });
     }
 
     // Step 4.1 — an impersonation access token carries `impersonatedBy` +
