@@ -3,9 +3,11 @@ import {
   createUserSchema,
   listUsersQuerySchema,
   PERMISSIONS,
+  setUserManagerSchema,
   updateUserAccessSchema,
   type CreateUserInput,
   type ListUsersQuery,
+  type SetUserManagerInput,
   type UpdateUserAccessInput,
 } from '@hrm/shared';
 import { AuditLog } from '../audit/audit-log.decorator';
@@ -34,6 +36,19 @@ export class UsersController {
   @Get()
   list(@Query(new ZodValidationPipe(listUsersQuerySchema)) query: ListUsersQuery) {
     return this.users.list(this.tenantContext.getTx(), this.actor(), query);
+  }
+
+  /** Step 7.2 — the whole reporting hierarchy + who approves each person (registered before any `:id` route). */
+  @Get('hierarchy')
+  hierarchy() {
+    return this.users.hierarchy(this.tenantContext.getTx(), this.actor());
+  }
+
+  @Patch(':id/manager')
+  @UseInterceptors(AuditInterceptor)
+  @AuditLog('User', 'SET_MANAGER')
+  setManager(@Param('id', ParseUUIDPipe) id: string, @Body(new ZodValidationPipe(setUserManagerSchema)) body: SetUserManagerInput) {
+    return this.users.setManager(this.tenantContext.getTx(), this.requireTenantId(), this.actor(), id, body);
   }
 
   @Get('assignable-roles')
@@ -68,7 +83,7 @@ export class UsersController {
   @UseInterceptors(AuditInterceptor)
   @AuditLog('User', 'REACTIVATE')
   reactivate(@Param('id', ParseUUIDPipe) id: string) {
-    return this.users.reactivate(this.tenantContext.getTx(), this.actor(), id);
+    return this.users.reactivate(this.tenantContext.getTx(), this.requireTenantId(), this.actor(), id);
   }
 
   @Post(':id/regenerate-temp-password')

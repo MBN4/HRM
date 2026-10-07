@@ -1,3 +1,4 @@
+import type { ApprovalRouting } from './users';
 /**
  * Plain TypeScript mirrors of `apps/api`'s response DTOs — deliberately
  * duplicated here rather than added to `@hrm/shared` (which is framework-
@@ -209,7 +210,21 @@ export interface WorkflowInstanceStep {
   dueAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Step 7.2 — only on `GET /workflow/my-pending-approvals`: why this step is in MY queue. */
+  viewerReason?: ViewerReason;
+  routing?: ApprovalRouting | null;
 }
+
+export type ViewerReason =
+  | 'DIRECT_MANAGER'
+  | 'ESCALATED_MANAGER_UNAVAILABLE'
+  | 'CEO_TOP_OF_CHAIN'
+  | 'CEO_ESCALATED'
+  | 'ADMIN_FALLBACK'
+  | 'DELEGATED'
+  | 'ESCALATED_OVERDUE'
+  | 'ASSIGNED'
+  | 'CEO_OVERRIDE';
 
 export interface WorkflowInstance {
   id: string;

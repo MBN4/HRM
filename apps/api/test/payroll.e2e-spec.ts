@@ -83,6 +83,7 @@ describe('payroll (e2e)', () => {
   let branchDelegateId: string;
 
   let tokenAdminA: string;
+  let tokenApproverA: string;
   let tokenHrNoSalaryViewA: string;
   let tokenAdminB: string;
 
@@ -201,6 +202,9 @@ describe('payroll (e2e)', () => {
 
     const adminA = await makeUserWithRole(tenantAId, adminRoleA.id, 'admin@payroll-a.test');
     tokenAdminA = jwt.sign({ sub: adminA.id, tenantId: tenantAId });
+    // Step 7.2: nobody approves their own request, so the run's approver is a SECOND admin.
+    const approverA = await makeUserWithRole(tenantAId, adminRoleA.id, 'approver@payroll-a.test');
+    tokenApproverA = jwt.sign({ sub: approverA.id, tenantId: tenantAId });
     const noSalaryUser = await makeUserWithRole(tenantAId, noSalaryViewRole.id, 'no-salary-view@payroll-a.test');
     tokenHrNoSalaryViewA = jwt.sign({ sub: noSalaryUser.id, tenantId: tenantAId });
     const adminB = await makeUserWithRole(tenantBId, adminRoleB.id, 'admin@payroll-b.test');
@@ -467,7 +471,7 @@ describe('payroll (e2e)', () => {
 
       const instanceDetail = await get(`/workflow/instances/${instanceId}`, tokenAdminA).expect(200);
       const activeStep = instanceDetail.body.steps.find((s: { status: string }) => s.status === 'ACTIVE');
-      await post(`/workflow/instances/${instanceId}/steps/${activeStep.id}/actions`, tokenAdminA, { actionType: 'APPROVE' }).expect(201);
+      await post(`/workflow/instances/${instanceId}/steps/${activeStep.id}/actions`, tokenApproverA, { actionType: 'APPROVE' }).expect(201);
 
       const approvedRun = await waitFor(async () => {
         const res = await get(`/payroll/runs/${usRunId}`, tokenAdminA).expect(200);

@@ -8,6 +8,7 @@ import type { Branch } from '../../lib/api/types';
 import { Alert } from '../ui/Alert';
 import { Button } from '../ui/Button';
 import { Input, Label } from '../ui/Field';
+import { ManagerSelect } from './ManagerSelect';
 import { RoleBranchPicker } from './RoleBranchPicker';
 
 export function CreateUserForm({
@@ -25,6 +26,7 @@ export function CreateUserForm({
   const [email, setEmail] = useState('');
   const [roleIds, setRoleIds] = useState<string[]>([]);
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  const [managerId, setManagerId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,7 +39,7 @@ export function CreateUserForm({
     }
     setSubmitting(true);
     try {
-      onCreated(await createUser({ email: email.trim(), roleIds, branchIds }));
+      onCreated(await createUser({ email: email.trim(), roleIds, branchIds, ...(managerId ? { managerId } : {}) }));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('error.generic'));
       setSubmitting(false);
@@ -51,6 +53,7 @@ export function CreateUserForm({
         <Input id="new-user-email" type="email" required autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
       <RoleBranchPicker roles={roles} branches={branches} roleIds={roleIds} branchIds={branchIds} onRoleIds={setRoleIds} onBranchIds={setBranchIds} />
+      <ManagerSelect id="new-user-manager" value={managerId} onChange={setManagerId} />
       {error && <Alert tone="error">{error}</Alert>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onCancel}>

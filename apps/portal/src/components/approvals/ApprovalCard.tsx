@@ -3,6 +3,8 @@
 import { useI18n } from '../../i18n/I18nProvider';
 import { formatCurrency, formatDate } from '../../lib/format';
 import type { PendingApproval } from '../../lib/api/pending-approvals';
+import type { ViewerReason } from '../../lib/api/types';
+import { Badge } from '../ui/Badge';
 import { Card, CardBody } from '../ui/Card';
 import { WorkflowActionForm } from '../workflow/WorkflowActionForm';
 
@@ -32,6 +34,29 @@ function SnapshotSummary({ approval, locale }: { approval: PendingApproval; loca
   return null;
 }
 
+const REASON_TONE: Record<ViewerReason, 'neutral' | 'success' | 'warning' | 'danger' | 'info'> = {
+  DIRECT_MANAGER: 'success',
+  ESCALATED_MANAGER_UNAVAILABLE: 'warning',
+  CEO_TOP_OF_CHAIN: 'info',
+  CEO_ESCALATED: 'warning',
+  ADMIN_FALLBACK: 'neutral',
+  DELEGATED: 'info',
+  ESCALATED_OVERDUE: 'danger',
+  ASSIGNED: 'neutral',
+  CEO_OVERRIDE: 'info',
+};
+
+/** Step 7.2 — WHY this request is in my queue: a short badge + one plain sentence. */
+function ReasonLine({ reason }: { reason: ViewerReason }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-ink-600" data-testid="approval-reason" data-reason={reason}>
+      <Badge tone={REASON_TONE[reason]}>{t(`approvals.reason.${reason}`)}</Badge>
+      <span>{t(`approvals.reason.${reason}.hint`)}</span>
+    </div>
+  );
+}
+
 export function ApprovalCard({ approval, locale, onActed }: { approval: PendingApproval; locale: string; onActed: () => void }) {
   const { t } = useI18n();
 
@@ -50,6 +75,8 @@ export function ApprovalCard({ approval, locale, onActed }: { approval: PendingA
           </div>
           <span className="text-xs text-ink-400">{t('approvals.step', { name: approval.step.name })}</span>
         </div>
+
+        {approval.step.viewerReason && <ReasonLine reason={approval.step.viewerReason} />}
 
         <SnapshotSummary approval={approval} locale={locale} />
 

@@ -19,6 +19,8 @@ export const createUserSchema = z
     roleIds: roleIdsSchema,
     /** Empty/omitted = unrestricted (every branch), matching `UserBranch`'s own semantics. */
     branchIds: branchIdsSchema.optional().default([]),
+    /** Step 7.2 — who this person reports to (approval chain). Optional; set/changed later via `PATCH /users/:id/manager`. */
+    managerId: z.string().uuid().nullable().optional(),
   })
   .strict();
 export type CreateUserInput = z.infer<typeof createUserSchema>;
@@ -40,3 +42,7 @@ export const listUsersQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
+
+/** Step 7.2 — `managerId: null` clears the manager (top of a chain; approvals then go to the CEO). */
+export const setUserManagerSchema = z.object({ managerId: z.string().uuid().nullable() }).strict();
+export type SetUserManagerInput = z.infer<typeof setUserManagerSchema>;

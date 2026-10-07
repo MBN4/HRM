@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma, WorkflowInstance, WorkflowInstanceStep } from '@hrm/db';
 import { approverRuleSchema, WorkflowStepActionInput, workflowConditionSchema } from '@hrm/shared';
 import { ApproverResolverService } from './approver-resolver.service';
+import { DbChainReader, isCeo, isHrExcluded, type ChainRouting } from './approval-chain';
 import { evaluateWorkflowCondition } from './condition-evaluator';
 import { WORKFLOW_EVENTS } from './workflow-events';
 
@@ -14,6 +15,20 @@ export interface StartInstanceParams {
 }
 
 const TERMINAL_STATUSES = new Set(['APPROVED', 'REJECTED', 'CANCELED']);
+
+/** Why a pending step is in a given approver's inbox (step 7.2) — the approvals screen's "why is this in my queue". */
+export type ViewerReason =
+  | 'DIRECT_MANAGER'
+  | 'ESCALATED_MANAGER_UNAVAILABLE'
+  | 'CEO_TOP_OF_CHAIN'
+  | 'CEO_ESCALATED'
+  | 'ADMIN_FALLBACK'
+  | 'DELEGATED'
+  | 'ESCALATED_OVERDUE'
+  | 'ASSIGNED'
+  | 'CEO_OVERRIDE';
+
+export type PendingApprovalStep = Omit<WorkflowInstanceStep, 'routing'> & { viewerReason: ViewerReason; routing: ChainRouting | null };
 
 /**
  * The ONE generic workflow/approval engine — see /CLAUDE.md § Conventions
@@ -104,7 +119,8 @@ export class WorkflowEngineService {
     const hasStanding =
       canManage ||
       instance.requesterId === callerId ||
-      steps.some((step) => this.isEligibleForStep(step, callerId));
+      steps.some((step) => this.isEligibleForStep(step, callerId)) ||
+      isCeo((await new DbChainReader(tx).stateOf(callerId))?.roleNames ?? []);
     if (!hasStanding) {
       throw new ForbiddenException('You have no standing on this workflow instance.');
     }
@@ -151,7 +167,22 @@ export class WorkflowEngineService {
       return instance;
     }
 
-    if (!this.isEligibleForStep(step, actorUserId)) {
+    // Step 7.2 hard rules, enforced HERE (server-side, the only place a step is
+    // decided) — never merely hidden in the UI:
+    //  1. HR administers, it does not authorize: an HR-excluded user can never
+    //     approve / reject / delegate, whatever rule or delegation put them there.
+    //  2. Nobody decides their own request (it always goes UP the chain) — not
+    //     even the CEO.
+    //  3. The CEO may step in on ANY active step in the tenant.
+    const actor = await new DbChainReader(tx).stateOf(actorUserId);
+    const actorRoles = actor?.roleNames ?? [];
+    if (isHrExcluded(actorRoles)) {
+      throw new ForbiddenException('HR administers requests but cannot approve, reject or delegate them.');
+    }
+    if (actorUserId === instance.requesterId) {
+      throw new ForbiddenException('You cannot approve, reject or delegate your own request — it is decided by someone above you.');
+    }
+    if (!this.isEligibleForStep(step, actorUserId) && !isCeo(actorRoles)) {
       throw new ForbiddenException(`You are not an eligible approver for step "${step.name}".`);
     }
 
@@ -159,6 +190,10 @@ export class WorkflowEngineService {
       const delegate = await tx.user.findUnique({ where: { id: body.delegatedToUserId }, select: { id: true, status: true } });
       if (!delegate || delegate.status !== 'ACTIVE') {
         throw new BadRequestException('delegatedToUserId must be an active user in this tenant.');
+      }
+      const delegateRoles = (await new DbChainReader(tx).stateOf(delegate.id))?.roleNames ?? [];
+      if (isHrExcluded(delegateRoles) || delegate.id === instance.requesterId) {
+        throw new BadRequestException('A request cannot be delegated to HR or to its own requester.');
       }
       await tx.workflowInstanceStep.update({ where: { id: step.id }, data: { delegatedToUserId: delegate.id } });
       await tx.workflowAction.create({
@@ -229,10 +264,47 @@ export class WorkflowEngineService {
     return this.finalize(tx, tenantId, instance, 'CANCELED');
   }
 
-  /** In-app filter over currently-ACTIVE steps (see /CLAUDE.md § Conventions → Workflow engine for the known scaling tradeoff this accepts for now). */
-  async myPendingApprovals(tx: Prisma.TransactionClient, userId: string): Promise<WorkflowInstanceStep[]> {
+  /**
+   * In-app filter over currently-ACTIVE steps (see /CLAUDE.md § Conventions → Workflow engine for the known scaling tradeoff this accepts for now).
+   * Step 7.2: each item carries `viewerReason` (why it is in THIS user's queue)
+   * and the chain `routing`. The CEO additionally sees every other active step
+   * in the tenant (`CEO_OVERRIDE`) — except their own requests, which they can
+   * never decide.
+   */
+  async myPendingApprovals(tx: Prisma.TransactionClient, userId: string): Promise<PendingApprovalStep[]> {
     const activeSteps = await tx.workflowInstanceStep.findMany({ where: { status: 'ACTIVE' }, orderBy: { activatedAt: 'asc' } });
-    return activeSteps.filter((step) => this.isEligibleForStep(step, userId));
+    const me = await new DbChainReader(tx).stateOf(userId);
+    if (me && isHrExcluded(me.roleNames)) {
+      return [];
+    }
+    const ceo = isCeo(me?.roleNames ?? []);
+    const instanceIds = [...new Set(activeSteps.map((step) => step.instanceId))];
+    const instances = await tx.workflowInstance.findMany({ where: { id: { in: instanceIds } }, select: { id: true, requesterId: true } });
+    const requesterByInstance = new Map(instances.map((instance) => [instance.id, instance.requesterId]));
+
+    const result: PendingApprovalStep[] = [];
+    for (const step of activeSteps) {
+      if (requesterByInstance.get(step.instanceId) === userId) {
+        continue;
+      }
+      const routing = (step.routing as unknown as ChainRouting | null) ?? null;
+      if (this.isEligibleForStep(step, userId)) {
+        result.push({ ...step, routing, viewerReason: this.viewerReasonFor(step, userId, routing) });
+      } else if (ceo) {
+        result.push({ ...step, routing, viewerReason: 'CEO_OVERRIDE' });
+      }
+    }
+    return result;
+  }
+
+  private viewerReasonFor(step: WorkflowInstanceStep, userId: string, routing: ChainRouting | null): ViewerReason {
+    if (step.delegatedToUserId === userId) {
+      return 'DELEGATED';
+    }
+    if (step.escalatedToUserId === userId) {
+      return 'ESCALATED_OVERDUE';
+    }
+    return routing && routing.kind !== 'NO_APPROVER' ? routing.kind : 'ASSIGNED';
   }
 
   private isEligibleForStep(step: WorkflowInstanceStep, userId: string): boolean {
@@ -281,10 +353,11 @@ export class WorkflowEngineService {
       if (!templateStep) continue;
 
       const rule = approverRuleSchema.parse(templateStep.approverRule);
-      const eligibleApproverIds = await this.approverResolver.resolve(tx, rule, {
+      const { approverIds: eligibleApproverIds, routing } = await this.approverResolver.resolveDetailed(tx, rule, {
         requesterId: instance.requesterId,
         dataSnapshot,
       });
+      const routingJson = routing ? (routing as unknown as Prisma.InputJsonValue) : undefined;
 
       const autoApproveCondition = templateStep.autoApproveCondition
         ? workflowConditionSchema.parse(templateStep.autoApproveCondition)
@@ -295,7 +368,7 @@ export class WorkflowEngineService {
       if (autoApproves) {
         await tx.workflowInstanceStep.update({
           where: { id: instanceStep.id },
-          data: { status: 'APPROVED', eligibleApproverIds, activatedAt: now, decidedAt: now },
+          data: { status: 'APPROVED', eligibleApproverIds, routing: routingJson, activatedAt: now, decidedAt: now },
         });
         await tx.workflowAction.create({
           data: { tenantId, instanceId: instance.id, instanceStepId: instanceStep.id, actionType: 'AUTO_APPROVE' },
@@ -314,7 +387,7 @@ export class WorkflowEngineService {
           : null;
         await tx.workflowInstanceStep.update({
           where: { id: instanceStep.id },
-          data: { status: 'ACTIVE', eligibleApproverIds, activatedAt: now, dueAt },
+          data: { status: 'ACTIVE', eligibleApproverIds, routing: routingJson, activatedAt: now, dueAt },
         });
       }
     }

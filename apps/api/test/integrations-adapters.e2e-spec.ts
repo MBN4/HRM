@@ -287,8 +287,13 @@ describe('integrations — adapter seams (accounting/biometric/Slack) (e2e)', ()
       const template = await prisma.workflowTemplate.create({
         data: { tenantId, name: 'SLACK_TEST', entityType: 'SLACK_TEST', version: 1, isActive: true },
       });
+      // Step 7.2: nobody approves their own request — a second user approves.
+      const adminRoleId = (await prisma.userRole.findFirstOrThrow({ where: { userId: adminUserId } })).roleId;
+      const approver = await prisma.user.create({ data: { tenantId, email: 'slack-approver@int-adapters.test', hashedPassword: 'unused', status: 'ACTIVE' } });
+      await prisma.userRole.create({ data: { tenantId, userId: approver.id, roleId: adminRoleId } });
+      const approverToken = jwt.sign({ sub: approver.id, tenantId });
       await prisma.workflowStep.create({
-        data: { tenantId, templateId: template.id, name: 'Self-approval', order: 1, approverRule: { type: 'SPECIFIC_USER', userId: adminUserId } },
+        data: { tenantId, templateId: template.id, name: 'Approval', order: 1, approverRule: { type: 'SPECIFIC_USER', userId: approver.id } },
       });
 
       const start = await request(app.getHttpServer())
@@ -308,7 +313,7 @@ describe('integrations — adapter seams (accounting/biometric/Slack) (e2e)', ()
       await request(app.getHttpServer())
         .post(`/workflow/instances/${start.body.id}/steps/${step.id}/actions`)
         .set('Host', hostFor(TENANT_SLUG))
-        .set('Authorization', `Bearer ${adminToken}`)
+        .set('Authorization', `Bearer ${approverToken}`)
         .send({ actionType: 'APPROVE' })
         .expect(201);
 

@@ -1,9 +1,19 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
-import { SYSTEM_ROLES, type CreateUserInput, type ListUsersQuery, type UpdateUserAccessInput } from '@hrm/shared';
+import { SYSTEM_ROLES, type CreateUserInput, type ListUsersQuery, type SetUserManagerInput, type UpdateUserAccessInput } from '@hrm/shared';
 import { PasswordService } from '../auth/password.service';
 import { PermissionsCacheService } from '../auth/permissions-cache.service';
 import { TokenService } from '../auth/token.service';
+import {
+  canBeApprover,
+  ChainReader,
+  ChainRouting,
+  ChainUserState,
+  DbChainReader,
+  resolveChainApprovers,
+  wouldCreateCycle,
+} from '../workflow/approval-chain';
+import { WorkflowRoutingService } from '../workflow/workflow-routing.service';
 import { generateTemporaryPassword } from './temp-password.util';
 
 /** The acting user, as `TenantContextService` knows them — the guards below compare every target against THIS caller's own authority. */
@@ -17,6 +27,9 @@ export interface UserActor {
 const USER_INCLUDE = {
   roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
   branches: { include: { branch: true } },
+  employeeProfile: { select: { firstName: true, lastName: true } },
+  manager: { select: { id: true, email: true, employeeProfile: { select: { firstName: true, lastName: true } } } },
+  _count: { select: { directReports: true } },
 } satisfies Prisma.UserInclude;
 
 type UserRow = Prisma.UserGetPayload<{ include: typeof USER_INCLUDE }>;
@@ -31,6 +44,12 @@ export interface UserSummary {
   roles: { id: string; name: string }[];
   /** Empty = unrestricted (every branch). */
   branches: { id: string; name: string }[];
+  /** Linked Employee's name, when there is one — the friendlier label next to the email. */
+  displayName: string | null;
+  /** Step 7.2 — who this user reports to (null at the top of a chain). */
+  managerId: string | null;
+  manager: { id: string; email: string; displayName: string | null } | null;
+  directReportCount: number;
   /** True when the CALLER may edit/deactivate this user — the UI hides actions otherwise (the server re-checks regardless). */
   manageable: boolean;
 }
@@ -52,6 +71,7 @@ export class UsersService {
     private readonly password: PasswordService,
     private readonly tokens: TokenService,
     private readonly permissionsCache: PermissionsCacheService,
+    private readonly routing: WorkflowRoutingService,
   ) {}
 
   async list(tx: Prisma.TransactionClient, actor: UserActor, query: ListUsersQuery) {
@@ -107,6 +127,9 @@ export class UsersService {
     const roles = await this.loadAssignableRoles(tx, actor, input.roleIds);
     this.assertBranchGrantAllowed(actor, input.branchIds);
     await this.assertBranchesExist(tx, input.branchIds);
+    if (input.managerId) {
+      await this.loadActiveManager(tx, input.managerId);
+    }
 
     const temporaryPassword = generateTemporaryPassword();
     const user = await tx.user.create({
@@ -116,6 +139,7 @@ export class UsersService {
         hashedPassword: await this.password.hash(temporaryPassword),
         status: 'ACTIVE',
         mustChangePassword: true,
+        managerId: input.managerId ?? null,
       },
     });
     await tx.userRole.createMany({ data: roles.map((role) => ({ tenantId, userId: user.id, roleId: role.id })) });
@@ -156,6 +180,10 @@ export class UsersService {
     // the cache's 15s TTL is NOT left to bound staleness here (this is the
     // real write path its own doc comment said must invalidate).
     await this.permissionsCache.invalidate(tenantId, userId);
+    // A role change can make this user (in)eligible as an approver (HR / CEO).
+    if (input.roleIds) {
+      await this.routing.rerouteActiveChainSteps(tx, tenantId);
+    }
     return this.getSummary(tx, actor, userId);
   }
 
@@ -178,17 +206,113 @@ export class UsersService {
     await tx.user.update({ where: { id: userId }, data: { status: 'DISABLED' } });
     await this.tokens.revokeAllForUser(tenantId, userId);
     await this.permissionsCache.invalidate(tenantId, userId);
+    // Step 7.2: anything currently waiting on this person escalates up the chain NOW.
+    await this.routing.rerouteActiveChainSteps(tx, tenantId);
     return this.getSummary(tx, actor, userId);
   }
 
-  async reactivate(tx: Prisma.TransactionClient, actor: UserActor, userId: string) {
+  async reactivate(tx: Prisma.TransactionClient, tenantId: string, actor: UserActor, userId: string) {
     const target = await this.loadTarget(tx, userId);
     this.assertCanManage(actor, target);
     if (target.status === 'ACTIVE') {
       throw new ConflictException('This user is already active.');
     }
     await tx.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } });
+    // ...and a returning manager takes their direct reports' pending requests back.
+    await this.routing.rerouteActiveChainSteps(tx, tenantId);
     return this.getSummary(tx, actor, userId);
+  }
+
+  /**
+   * Step 7.2 — set/change/clear who `userId` reports to. Guards: not yourself,
+   * you must be able to manage the target (the 7.1 escalation guard), the
+   * manager must exist and be ACTIVE, and the new link must not close a loop
+   * (A -> B -> ... -> A). Pending approvals reroute immediately.
+   */
+  async setManager(tx: Prisma.TransactionClient, tenantId: string, actor: UserActor, userId: string, input: SetUserManagerInput) {
+    const target = await this.loadTarget(tx, userId);
+    this.assertNotSelf(actor, target, 'You cannot change who you report to — ask a colleague with access.');
+    this.assertCanManage(actor, target);
+
+    if (input.managerId) {
+      if (input.managerId === userId) {
+        throw new BadRequestException('A person cannot report to themselves.');
+      }
+      await this.loadActiveManager(tx, input.managerId);
+      if (await wouldCreateCycle(new DbChainReader(tx), userId, input.managerId)) {
+        throw new BadRequestException('That would create a reporting loop: the chosen manager already reports (directly or indirectly) to this person.');
+      }
+    }
+
+    await tx.user.update({ where: { id: userId }, data: { managerId: input.managerId } });
+    await this.routing.rerouteActiveChainSteps(tx, tenantId);
+    return this.getSummary(tx, actor, userId);
+  }
+
+  /**
+   * The whole reporting hierarchy for the org-chart screen: every user (branch-
+   * scoped callers see their scope) with role names, manager link, and — via the
+   * SAME chain walker the workflow engine uses — who currently approves THEIR
+   * requests and why (so a deactivated manager visibly escalates).
+   */
+  async hierarchy(tx: Prisma.TransactionClient, actor: UserActor) {
+    const rows = await tx.user.findMany({
+      take: 5000,
+      orderBy: { email: 'asc' },
+      select: {
+        id: true,
+        email: true,
+        status: true,
+        managerId: true,
+        employeeProfile: { select: { firstName: true, lastName: true, managerId: true } },
+        roles: { select: { role: { select: { name: true } } } },
+        branches: { select: { branchId: true } },
+      },
+    });
+    const employeeUserIds = new Map<string, string | null>();
+    const employees = await tx.employee.findMany({ where: { userId: { not: null } }, select: { id: true, userId: true, managerId: true } });
+    for (const e of employees) employeeUserIds.set(e.id, e.userId);
+
+    const states = new Map<string, ChainUserState>();
+    const managers = new Map<string, string | null>();
+    for (const r of rows) {
+      states.set(r.id, { id: r.id, email: r.email, status: r.status, roleNames: r.roles.map((x) => x.role.name) });
+      const viaEmployee = r.employeeProfile?.managerId ? (employeeUserIds.get(r.employeeProfile.managerId) ?? null) : null;
+      managers.set(r.id, r.managerId ?? viaEmployee);
+    }
+    const reader: ChainReader = {
+      managerOf: async (id) => managers.get(id) ?? null,
+      stateOf: async (id) => states.get(id) ?? null,
+      activeUsersWithRole: async (roleName) => [...states.values()].filter((s) => s.status === 'ACTIVE' && s.roleNames.includes(roleName)),
+    };
+    const nameOf = (id: string) => {
+      const row = rows.find((x) => x.id === id);
+      return row?.employeeProfile ? `${row.employeeProfile.firstName} ${row.employeeProfile.lastName}` : null;
+    };
+    const reportCounts = new Map<string, number>();
+    for (const [id, managerId] of managers) {
+      void id;
+      if (managerId) reportCounts.set(managerId, (reportCounts.get(managerId) ?? 0) + 1);
+    }
+
+    const visible = actor.branchIds ? rows.filter((r) => r.branches.some((b) => actor.branchIds!.includes(b.branchId))) : rows;
+    const items = [];
+    for (const r of visible) {
+      const resolved = await resolveChainApprovers(reader, r.id);
+      items.push({
+        id: r.id,
+        email: r.email,
+        displayName: nameOf(r.id),
+        status: r.status,
+        roles: r.roles.map((x) => x.role.name),
+        managerId: managers.get(r.id) ?? null,
+        directReportCount: reportCounts.get(r.id) ?? 0,
+        approvers: resolved.approverIds.map((id) => ({ id, email: states.get(id)?.email ?? '', displayName: nameOf(id) })),
+        routing: resolved.routing as ChainRouting,
+        isApprover: canBeApprover(states.get(r.id)!),
+      });
+    }
+    return { items };
   }
 
   /**
@@ -227,6 +351,17 @@ export class UsersService {
       throw new NotFoundException('User not found.');
     }
     return user;
+  }
+
+  private async loadActiveManager(tx: Prisma.TransactionClient, managerId: string) {
+    const manager = await tx.user.findUnique({ where: { id: managerId }, select: { id: true, status: true } });
+    if (!manager) {
+      throw new BadRequestException('The chosen manager does not exist.');
+    }
+    if (manager.status !== 'ACTIVE') {
+      throw new BadRequestException('The chosen manager is deactivated — pick an active user.');
+    }
+    return manager;
   }
 
   private async loadAssignableRoles(tx: Prisma.TransactionClient, actor: UserActor, roleIds: string[]) {
@@ -334,6 +469,16 @@ export class UsersService {
       createdAt: row.createdAt,
       roles: row.roles.map((ur) => ({ id: ur.role.id, name: ur.role.name })),
       branches: row.branches.map((ub) => ({ id: ub.branch.id, name: ub.branch.name })),
+      displayName: row.employeeProfile ? `${row.employeeProfile.firstName} ${row.employeeProfile.lastName}` : null,
+      managerId: row.managerId,
+      manager: row.manager
+        ? {
+            id: row.manager.id,
+            email: row.manager.email,
+            displayName: row.manager.employeeProfile ? `${row.manager.employeeProfile.firstName} ${row.manager.employeeProfile.lastName}` : null,
+          }
+        : null,
+      directReportCount: row._count.directReports,
       manageable,
     };
   }

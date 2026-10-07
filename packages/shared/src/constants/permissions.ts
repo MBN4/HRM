@@ -155,6 +155,11 @@ export const ALL_PERMISSIONS: readonly PermissionKey[] = Object.values(PERMISSIO
 
 export const SYSTEM_ROLES = {
   TENANT_ADMIN: 'TENANT_ADMIN',
+  // Step 7.2 (team hierarchy approvals) — the org head: every permission
+  // (like TENANT_ADMIN) PLUS ultimate approval authority — can approve ANY
+  // request in the tenant, and is the fallback approver at the top of every
+  // management chain. See docs/conventions/team-hierarchy-approvals.md.
+  CEO: 'CEO',
   HR_MANAGER: 'HR_MANAGER',
   MANAGER: 'MANAGER',
   EMPLOYEE: 'EMPLOYEE',
@@ -165,6 +170,7 @@ export type SystemRoleName = (typeof SYSTEM_ROLES)[keyof typeof SYSTEM_ROLES];
 /** Sensible defaults for the seeded system roles — all editable after seeding. */
 export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly PermissionKey[]> = {
   [SYSTEM_ROLES.TENANT_ADMIN]: ALL_PERMISSIONS,
+  [SYSTEM_ROLES.CEO]: ALL_PERMISSIONS,
   [SYSTEM_ROLES.HR_MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,
     PERMISSIONS.EMPLOYEE_WRITE,

@@ -86,6 +86,8 @@ describe('integrations — outbound webhooks (e2e)', () => {
   let tenantAId: string;
   let tenantBId: string;
   let adminTokenA: string;
+  const approverTokens: Record<string, string> = {};
+  const approverIds = { A: '', B: '' };
   let adminTokenB: string;
   let employeeTokenA: string;
   let adminAId: string;
@@ -142,6 +144,21 @@ describe('integrations — outbound webhooks (e2e)', () => {
     await prisma.userRole.create({ data: { tenantId: tenantBId, userId: adminB.id, roleId: adminBRole.id } });
     adminTokenB = jwt.sign({ sub: adminB.id, tenantId: tenantBId });
 
+    // Step 7.2: nobody approves their own request — each tenant's workflow is
+    // submitted by its admin and approved by a SECOND user.
+    const approverA = await prisma.user.create({
+      data: { tenantId: tenantAId, email: 'approver@int-webhook-a.test', hashedPassword: 'unused', status: 'ACTIVE' },
+    });
+    await prisma.userRole.create({ data: { tenantId: tenantAId, userId: approverA.id, roleId: adminARole.id } });
+    approverTokens[TENANT_A_SLUG] = jwt.sign({ sub: approverA.id, tenantId: tenantAId });
+    const approverB = await prisma.user.create({
+      data: { tenantId: tenantBId, email: 'approver@int-webhook-b.test', hashedPassword: 'unused', status: 'ACTIVE' },
+    });
+    await prisma.userRole.create({ data: { tenantId: tenantBId, userId: approverB.id, roleId: adminBRole.id } });
+    approverTokens[TENANT_B_SLUG] = jwt.sign({ sub: approverB.id, tenantId: tenantBId });
+    approverIds.A = approverA.id;
+    approverIds.B = approverB.id;
+
     // A single-step, self-approvable workflow template — the SAME
     // `SPECIFIC_USER` approver-rule shape workflow.e2e-spec.ts's own
     // fixtures already establish. Real `workflow.submitted`/
@@ -150,14 +167,14 @@ describe('integrations — outbound webhooks (e2e)', () => {
       data: { tenantId: tenantAId, name: ENTITY_TYPE, entityType: ENTITY_TYPE, version: 1, isActive: true },
     });
     await prisma.workflowStep.create({
-      data: { tenantId: tenantAId, templateId: template.id, name: 'Self-approval', order: 1, approverRule: SPECIFIC(adminAId) },
+      data: { tenantId: tenantAId, templateId: template.id, name: 'Self-approval', order: 1, approverRule: SPECIFIC(approverIds.A) },
     });
 
     const templateB = await prisma.workflowTemplate.create({
       data: { tenantId: tenantBId, name: ENTITY_TYPE, entityType: ENTITY_TYPE, version: 1, isActive: true },
     });
     await prisma.workflowStep.create({
-      data: { tenantId: tenantBId, templateId: templateB.id, name: 'Self-approval', order: 1, approverRule: SPECIFIC(adminB.id) },
+      data: { tenantId: tenantBId, templateId: templateB.id, name: 'Self-approval', order: 1, approverRule: SPECIFIC(approverIds.B) },
     });
   });
 
@@ -203,7 +220,7 @@ describe('integrations — outbound webhooks (e2e)', () => {
     await request(app.getHttpServer())
       .post(`/workflow/instances/${start.body.id}/steps/${step.id}/actions`)
       .set('Host', hostFor(tenantSlug))
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${approverTokens[tenantSlug]}`)
       .send({ actionType: 'APPROVE' })
       .expect(201);
 

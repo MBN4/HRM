@@ -32,6 +32,16 @@ export interface PortalTestFixtures {
   offboardingTargetEmployeeId: string;
   passwordResetTargetEmail: string;
   passwordResetTargetUserId: string;
+  hierarchyCeoEmail: string;
+  hierarchyPmEmail: string;
+  hierarchyLeadEmail: string;
+  hierarchyInternEmail: string;
+  hierarchyPeerEmail: string;
+  hierarchyCeoUserId: string;
+  hierarchyPmUserId: string;
+  hierarchyLeadUserId: string;
+  hierarchyInternUserId: string;
+  hierarchyPeerUserId: string;
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

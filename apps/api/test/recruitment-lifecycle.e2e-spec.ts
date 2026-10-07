@@ -68,6 +68,7 @@ describe('recruitment lifecycle (e2e)', () => {
 
   let tokenAdminA: string;
   let tokenHrA: string;
+  let tokenCeoA: string;
   let tokenAdminB: string;
 
   let empCounter = 0;
@@ -135,6 +136,11 @@ describe('recruitment lifecycle (e2e)', () => {
     const hrA = await makeUserWithRole(tenantAId, hrRoleA.id, 'hr@lifecycle-a.test');
     tokenHrA = jwt.sign({ sub: hrA.id, tenantId: tenantAId });
 
+    // Step 7.2: HR administers recruitment but never approves — the requisition/offer sign-off is the CEO's.
+    const ceoRoleA = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantAId, name: SYSTEM_ROLES.CEO } } });
+    const ceoA = await makeUserWithRole(tenantAId, ceoRoleA.id, 'ceo@lifecycle-a.test');
+    tokenCeoA = jwt.sign({ sub: ceoA.id, tenantId: tenantAId });
+
     const adminB = await makeUserWithRole(tenantBId, adminRoleB.id, 'admin@lifecycle-b.test');
     tokenAdminB = jwt.sign({ sub: adminB.id, tenantId: tenantBId });
 
@@ -146,7 +152,7 @@ describe('recruitment lifecycle (e2e)', () => {
         data: { tenantId: tenantAId, name: `${entityType} Approval`, entityType, version: 1, isActive: true },
       });
       await prisma.workflowStep.create({
-        data: { tenantId: tenantAId, templateId: template.id, name: 'HR approval', order: 1, approverRule: { type: 'ROLE', roleName: SYSTEM_ROLES.HR_MANAGER } },
+        data: { tenantId: tenantAId, templateId: template.id, name: 'CEO approval', order: 1, approverRule: { type: 'ROLE', roleName: SYSTEM_ROLES.CEO } },
       });
     }
     const offboardingTemplate = await prisma.workflowTemplate.create({
@@ -205,7 +211,7 @@ describe('recruitment lifecycle (e2e)', () => {
 
       const instanceDetail = await get(`/workflow/instances/${instanceId}`, tokenHrA).expect(200);
       const activeStep = instanceDetail.body.steps.find((s: { status: string }) => s.status === 'ACTIVE');
-      await post(`/workflow/instances/${instanceId}/steps/${activeStep.id}/actions`, tokenHrA, { actionType: 'APPROVE' }).expect(201);
+      await post(`/workflow/instances/${instanceId}/steps/${activeStep.id}/actions`, tokenCeoA, { actionType: 'APPROVE' }).expect(201);
 
       // `JobRequisitionWorkflowEventsListener` applies the transition
       // fire-and-forget off the workflow engine's `workflow.approved` event
@@ -316,7 +322,7 @@ describe('recruitment lifecycle (e2e)', () => {
 
       const instanceDetail = await get(`/workflow/instances/${pending.body.workflowInstanceId}`, tokenHrA).expect(200);
       const activeStep = instanceDetail.body.steps.find((s: { status: string }) => s.status === 'ACTIVE');
-      await post(`/workflow/instances/${pending.body.workflowInstanceId}/steps/${activeStep.id}/actions`, tokenHrA, { actionType: 'APPROVE' }).expect(
+      await post(`/workflow/instances/${pending.body.workflowInstanceId}/steps/${activeStep.id}/actions`, tokenCeoA, { actionType: 'APPROVE' }).expect(
         201,
       );
 

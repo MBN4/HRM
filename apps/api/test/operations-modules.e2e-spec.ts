@@ -88,6 +88,7 @@ describe('operations modules (e2e)', () => {
 
   let tokenAdminA: string;
   let tokenHrA: string;
+  let tokenCeoA: string;
   let tokenAdminB: string;
 
   function post(path: string, token: string, body: unknown, host = TENANT_A_SLUG) {
@@ -178,6 +179,10 @@ describe('operations modules (e2e)', () => {
     tokenAdminA = jwt.sign({ sub: adminA.id, tenantId: tenantAId });
     const hrA = await makeUserWithRole(tenantAId, hrRoleA.id, 'hr@ops-a.test');
     tokenHrA = jwt.sign({ sub: hrA.id, tenantId: tenantAId });
+    // Step 7.2: HR never approves — the large-claim second step is the CEO's.
+    const ceoRoleA = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantAId, name: SYSTEM_ROLES.CEO } } });
+    const ceoA = await makeUserWithRole(tenantAId, ceoRoleA.id, 'ceo@ops-a.test');
+    tokenCeoA = jwt.sign({ sub: ceoA.id, tenantId: tenantAId });
     const adminB = await makeUserWithRole(tenantBId, adminRoleB.id, 'admin@ops-b.test');
     tokenAdminB = jwt.sign({ sub: adminB.id, tenantId: tenantBId });
 
@@ -196,7 +201,7 @@ describe('operations modules (e2e)', () => {
         templateId: expenseTemplate.id,
         name: 'HR approval (large amounts only)',
         order: 2,
-        approverRule: ROLE(SYSTEM_ROLES.HR_MANAGER),
+        approverRule: ROLE(SYSTEM_ROLES.CEO),
         condition: amountGreaterThan(1000),
       },
     });
@@ -315,7 +320,7 @@ describe('operations modules (e2e)', () => {
         detail = await get(`/workflow/instances/${submitted.body.workflowInstanceId}`, tokenHrA).expect(200);
         const hrStep = detail.body.steps.find((s: { name: string; status: string }) => s.name === 'HR approval (large amounts only)' && s.status === 'ACTIVE');
         expect(hrStep).toBeDefined();
-        await post(`/workflow/instances/${submitted.body.workflowInstanceId}/steps/${hrStep.id}/actions`, tokenHrA, { actionType: 'APPROVE' }).expect(201);
+        await post(`/workflow/instances/${submitted.body.workflowInstanceId}/steps/${hrStep.id}/actions`, tokenCeoA, { actionType: 'APPROVE' }).expect(201);
 
         const approved = await waitFor(async () => {
           const claim = await get(`/expenses/claims/${claimId}`, reportToken).expect(200);

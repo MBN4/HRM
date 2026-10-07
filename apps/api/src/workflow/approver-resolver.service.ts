@@ -1,11 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
 import { ApproverRule } from '@hrm/shared';
+import { ChainRouting, DbChainReader, isHrExcluded, resolveChainApprovers } from './approval-chain';
 import { evaluateWorkflowCondition } from './condition-evaluator';
 
 export interface ApproverResolutionContext {
   requesterId: string;
   dataSnapshot: Record<string, unknown>;
+}
+
+export interface ResolvedApprovers {
+  approverIds: string[];
+  /** Set only when a hierarchical (`MANAGER`) rule produced the result — WHY these approvers. */
+  routing: ChainRouting | null;
 }
 
 /**
@@ -31,80 +38,88 @@ export interface ApproverResolutionContext {
 @Injectable()
 export class ApproverResolverService {
   async resolve(tx: Prisma.TransactionClient, rule: ApproverRule, context: ApproverResolutionContext): Promise<string[]> {
+    return (await this.resolveDetailed(tx, rule, context)).approverIds;
+  }
+
+  /**
+   * Same as `resolve`, plus the chain routing (step 7.2) that explains a
+   * `MANAGER` result. EVERY rule kind passes through the two hard filters:
+   * the requester is never their own approver, and HR-excluded users (HR
+   * administers, it does not authorize) never appear — even when a `ROLE`
+   * rule names `HR_MANAGER` directly.
+   */
+  async resolveDetailed(tx: Prisma.TransactionClient, rule: ApproverRule, context: ApproverResolutionContext): Promise<ResolvedApprovers> {
+    const raw = await this.resolveRule(tx, rule, context);
+    const approverIds = await this.dropIneligible(tx, raw.approverIds, context.requesterId);
+    return { approverIds, routing: raw.routing };
+  }
+
+  private async dropIneligible(tx: Prisma.TransactionClient, userIds: string[], requesterId: string): Promise<string[]> {
+    const candidates = userIds.filter((id) => id !== requesterId);
+    if (candidates.length === 0) {
+      return [];
+    }
+    const users = await tx.user.findMany({
+      where: { id: { in: candidates } },
+      select: { id: true, roles: { select: { role: { select: { name: true } } } } },
+    });
+    const excluded = new Set(users.filter((u) => isHrExcluded(u.roles.map((r) => r.role.name))).map((u) => u.id));
+    return candidates.filter((id) => !excluded.has(id));
+  }
+
+  private async resolveRule(tx: Prisma.TransactionClient, rule: ApproverRule, context: ApproverResolutionContext): Promise<ResolvedApprovers> {
+    const plain = async (ids: Promise<string[]>): Promise<ResolvedApprovers> => ({ approverIds: await ids, routing: null });
     switch (rule.type) {
       case 'SPECIFIC_USER':
-        return this.filterActive(tx, [rule.userId]);
+        return plain(this.filterActive(tx, [rule.userId]));
 
       case 'ROLE': {
         const role = await tx.role.findFirst({ where: { name: rule.roleName }, select: { id: true } });
         if (!role) {
-          return [];
+          return { approverIds: [], routing: null };
         }
         const userRoles = await tx.userRole.findMany({
           where: { roleId: role.id, user: { status: 'ACTIVE' } },
           select: { userId: true },
         });
-        return [...new Set(userRoles.map((userRole) => userRole.userId))];
+        return { approverIds: [...new Set(userRoles.map((userRole) => userRole.userId))], routing: null };
       }
 
       case 'MANAGER': {
-        const managerUserId = await this.resolveRequesterManagerUserId(tx, context.requesterId);
-        if (!managerUserId) {
-          return [];
-        }
-        return this.filterActive(tx, [managerUserId]);
+        // Step 7.2: the hierarchical chain — direct manager, escalating up past
+        // anyone unavailable, ultimately the CEO. See approval-chain.ts.
+        return resolveChainApprovers(new DbChainReader(tx), context.requesterId);
       }
 
       case 'BRANCH_HEAD': {
         const branchId = await this.resolveRequesterBranchId(tx, context);
         if (!branchId) {
-          return [];
+          return { approverIds: [], routing: null };
         }
         const branch = await tx.branch.findUnique({ where: { id: branchId }, select: { headUserId: true } });
         if (!branch?.headUserId) {
-          return [];
+          return { approverIds: [], routing: null };
         }
-        return this.filterActive(tx, [branch.headUserId]);
+        return plain(this.filterActive(tx, [branch.headUserId]));
       }
 
       case 'DEPARTMENT_HEAD': {
         const departmentId = await this.resolveRequesterDepartmentId(tx, context);
         if (!departmentId) {
-          return [];
+          return { approverIds: [], routing: null };
         }
         const department = await tx.department.findUnique({ where: { id: departmentId }, select: { headUserId: true } });
         if (!department?.headUserId) {
-          return [];
+          return { approverIds: [], routing: null };
         }
-        return this.filterActive(tx, [department.headUserId]);
+        return plain(this.filterActive(tx, [department.headUserId]));
       }
 
       case 'CONDITIONAL': {
         const matches = evaluateWorkflowCondition(rule.condition, context.dataSnapshot);
-        return this.resolve(tx, matches ? rule.ifTrue : rule.ifFalse, context);
+        return this.resolveRule(tx, matches ? rule.ifTrue : rule.ifFalse, context);
       }
     }
-  }
-
-  /**
-   * Prefers the real Employee org chart (`Employee.managerId`, resolved to
-   * that manager's linked `User` account) — the seam this rule was always
-   * meant to resolve against once the Employee module (1.1) landed, see
-   * docs/conventions/employee.md. Falls back to the legacy `User.managerId`
-   * seam column (0.7) for a requester with no `Employee` record at all, so
-   * nothing that worked before 1.1 regresses.
-   */
-  private async resolveRequesterManagerUserId(tx: Prisma.TransactionClient, requesterId: string): Promise<string | null> {
-    const employee = await tx.employee.findFirst({ where: { userId: requesterId }, select: { managerId: true } });
-    if (employee) {
-      if (!employee.managerId) {
-        return null;
-      }
-      const manager = await tx.employee.findUnique({ where: { id: employee.managerId }, select: { userId: true } });
-      return manager?.userId ?? null;
-    }
-    const requester = await tx.user.findUnique({ where: { id: requesterId }, select: { managerId: true } });
-    return requester?.managerId ?? null;
   }
 
   /**

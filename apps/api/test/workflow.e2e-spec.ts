@@ -100,8 +100,9 @@ describe('workflow engine (e2e)', () => {
     await seedSystemRolesAndPermissions(prisma, tenantAId);
     await seedSystemRolesAndPermissions(prisma, tenantBId);
 
+    // Step 7.2: HR is EXCLUDED from approving (see team-hierarchy-approvals.md), so this suite's second-level "senior approver" is a TENANT_ADMIN holder instead of an HR_MANAGER.
     const hrRoleA = await prisma.role.findUniqueOrThrow({
-      where: { tenantId_name: { tenantId: tenantAId, name: SYSTEM_ROLES.HR_MANAGER } },
+      where: { tenantId_name: { tenantId: tenantAId, name: SYSTEM_ROLES.TENANT_ADMIN } },
     });
     hrRoleAId = hrRoleA.id;
     const employeeRoleA = await prisma.role.findUniqueOrThrow({
@@ -151,13 +152,13 @@ describe('workflow engine (e2e)', () => {
     // Sequential: manager -> HR.
     await createTemplate('LEAVE_REQUEST', [
       { name: 'Manager approval', order: 1, approverRule: MANAGER },
-      { name: 'HR approval', order: 2, approverRule: ROLE(SYSTEM_ROLES.HR_MANAGER) },
+      { name: 'HR approval', order: 2, approverRule: ROLE(SYSTEM_ROLES.TENANT_ADMIN) },
     ]);
 
     // Conditional: manager always; HR only if amount > 1000.
     await createTemplate('EXPENSE_CLAIM', [
       { name: 'Manager approval', order: 1, approverRule: MANAGER },
-      { name: 'HR approval (large amounts only)', order: 2, approverRule: ROLE(SYSTEM_ROLES.HR_MANAGER), condition: amountGreaterThan(1000) },
+      { name: 'HR approval (large amounts only)', order: 2, approverRule: ROLE(SYSTEM_ROLES.TENANT_ADMIN), condition: amountGreaterThan(1000) },
     ]);
 
     // Parallel: approver A and B share order 1 — BOTH must approve.

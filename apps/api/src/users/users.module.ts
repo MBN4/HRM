@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { WorkflowModule } from '../workflow/workflow.module';
 import { PasswordService } from '../auth/password.service';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
@@ -13,7 +14,7 @@ import { UsersService } from './users.service';
  * `AuthModule`'s exports (no change to auth core).
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, WorkflowModule],
   controllers: [UsersController],
   providers: [UsersService, PasswordService],
 })

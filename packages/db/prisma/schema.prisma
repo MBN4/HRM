@@ -1296,6 +1296,13 @@ model WorkflowInstanceStep {
   dueAt               DateTime?          @map("due_at")
   decidedAt           DateTime?          @map("decided_at")
   decidedByUserId     String?            @map("decided_by_user_id") @db.Uuid
+  // Step 7.2 — WHY these approvers were chosen when the step's rule walked the
+  // management chain (`{ kind, skipped: [{ userId, email, why }] }`, e.g.
+  // DIRECT_MANAGER vs ESCALATED_MANAGER_UNAVAILABLE vs CEO_TOP_OF_CHAIN).
+  // Null for steps resolved by a non-chain rule (ROLE/SPECIFIC_USER/...).
+  // Re-written when the chain changes under an ACTIVE step (a manager is
+  // deactivated / reassigned). See docs/conventions/team-hierarchy-approvals.md.
+  routing             Json?
 
   tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   instance     WorkflowInstance @relation(fields: [tenantId, instanceId], references: [tenantId, id], onDelete: Cascade)

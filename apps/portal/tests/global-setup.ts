@@ -213,6 +213,25 @@ export default async function globalSetup(): Promise<void> {
   // `TEST_PASSWORD`.
   const passwordResetTargetUser = await makeUser(tenantA.id, 'password-reset-target@portal-e2e-a.test', employeeRoleA.id);
 
+  // Step 7.2 (team-hierarchy.spec.ts) — a reporting chain
+  // ceo <- pm <- lead <- intern, plus a `peer` also reporting to the CEO. No
+  // Employee records: the hierarchy keys off `User.managerId` alone, and the
+  // MANAGER-rule approval templates above resolve through that chain.
+  const ceoRoleA = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId: tenantA.id, name: SYSTEM_ROLES.CEO } } });
+  const hierarchyCeoUser = await makeUser(tenantA.id, 'h-ceo@portal-e2e-a.test', ceoRoleA.id);
+  const hierarchyPmUser = await makeUser(tenantA.id, 'h-pm@portal-e2e-a.test', managerRoleA.id);
+  const hierarchyLeadUser = await makeUser(tenantA.id, 'h-lead@portal-e2e-a.test', managerRoleA.id);
+  const hierarchyInternUser = await makeUser(tenantA.id, 'h-intern@portal-e2e-a.test', employeeRoleA.id);
+  const hierarchyPeerUser = await makeUser(tenantA.id, 'h-peer@portal-e2e-a.test', employeeRoleA.id);
+  for (const [user, manager] of [
+    [hierarchyPmUser, hierarchyCeoUser],
+    [hierarchyLeadUser, hierarchyPmUser],
+    [hierarchyInternUser, hierarchyLeadUser],
+    [hierarchyPeerUser, hierarchyCeoUser],
+  ] as const) {
+    await prisma.user.update({ where: { id: user.id }, data: { managerId: manager.id } });
+  }
+
   // Step 7.1 — a tenant-B admin, for user-management.spec.ts's cross-tenant UI check.
   await makeUser(tenantB.id, 'admin@portal-e2e-b.test', adminRoleB.id);
   const employeeBUser = await makeUser(tenantB.id, 'employee@portal-e2e-b.test', employeeRoleB.id);
@@ -563,6 +582,16 @@ export default async function globalSetup(): Promise<void> {
     offboardingTargetEmployeeId: offboardingTargetEmployee.id,
     passwordResetTargetEmail: 'password-reset-target@portal-e2e-a.test',
     passwordResetTargetUserId: passwordResetTargetUser.id,
+    hierarchyCeoEmail: 'h-ceo@portal-e2e-a.test',
+    hierarchyPmEmail: 'h-pm@portal-e2e-a.test',
+    hierarchyLeadEmail: 'h-lead@portal-e2e-a.test',
+    hierarchyInternEmail: 'h-intern@portal-e2e-a.test',
+    hierarchyPeerEmail: 'h-peer@portal-e2e-a.test',
+    hierarchyCeoUserId: hierarchyCeoUser.id,
+    hierarchyPmUserId: hierarchyPmUser.id,
+    hierarchyLeadUserId: hierarchyLeadUser.id,
+    hierarchyInternUserId: hierarchyInternUser.id,
+    hierarchyPeerUserId: hierarchyPeerUser.id,
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 

@@ -4263,3 +4263,47 @@ only surfaced once other specs had created notifications) was fixed
 (`bg-coral-500`→`bg-danger`) and `user-management` + `accessibility` re-run 19/19.
 The full portal suite was not re-run end-to-end after that one-class fix. Not run:
 full API jest suite, mobile/admin apps (untouched).
+
+## 7.2 — Hierarchical team approvals (2026-10-08)
+
+Not part of the original roadmap. Full design in
+[`docs/conventions/team-hierarchy-approvals.md`](./conventions/team-hierarchy-approvals.md).
+
+**Backend**: new `apps/api/src/workflow/approval-chain.ts` (pure chain walker +
+`DbChainReader`, cycle check) — the existing `MANAGER` approver rule now resolves
+direct manager → next manager up past anyone deactivated/missing/HR → active CEO(s)
+→ admin fallback; `routing` persisted per step (migration
+`20261008090000_add_workflow_step_routing`, which also backfills the new `CEO`
+system role for existing tenants). Engine hard rules in `WorkflowEngineService`:
+HR-excluded users can't approve/reject/delegate (403, and filtered from every
+rule's resolved approvers), no self-approval (403, even CEO), CEO may act on any
+active step; `myPendingApprovals` returns `viewerReason` + `routing`.
+`WorkflowRoutingService.rerouteActiveChainSteps` re-resolves pending chain steps on
+deactivate/reactivate/set-manager/role change. `UsersService`: `setManager`
+(`PATCH /users/:id/manager`, audited `SET_MANAGER`, no self/loop/inactive),
+`hierarchy` (`GET /users/hierarchy`), `managerId` on create, manager fields on
+summaries. `CEO` added to `SYSTEM_ROLES` (all permissions).
+
+**Portal**: `/hierarchy` tree, `ManagerSelect`/`ChangeManagerForm`, "Reports to"
+column + action on `/users`, reason badges and "Org-wide (CEO)" section on
+`/approvals`; ~55 en+ar i18n keys. **Demo seed**: `seed:demo` adds `ceo@`/`pm@`/
+`lead@`/`intern@`/`hr@acme-demo.local` (pw `DemoPass-123!`) + a MANAGER-rule
+Leave Approval template.
+
+**Existing tests changed (a consequence of the new rules, not regressions)**:
+suites where HR approved or one admin submitted+approved now use a second
+approver — `workflow`, `payroll`, `statutory-reporting`, `recruitment-lifecycle`,
+`operations-modules` (CEO as the HR-step approver), `integrations-webhooks`,
+`integrations-adapters`.
+
+**Verification**: new `team-hierarchy.e2e-spec.ts` **23/23** (intern→lead,
+lead→PM, PM→CEO, deactivation escalation incl. pending+future+CEO fallback,
+reactivation, CEO-any, self-approval, HR 403/never-approver/skipped-in-chain,
+cycles, reroute on reassign, audit, inbox reasons, hierarchy endpoint,
+cross-tenant). Full API jest `--runInBand` before the test fixes: 682 passed /
+26 failed; after fixing the above 7 suites they pass, plus the 1 known
+environmental failure (`tenant-resolution` "platform mode disabled",
+`PLATFORM_MODE_ENABLED=true` in `.env`). The full API suite was not re-run
+end-to-end after the fixes (only the affected suites + new one). Playwright:
+`team-hierarchy` (8) + `user-management` + `mss` **21/21** incl. axe light/dark;
+the rest of the portal suite not re-run. No RTL browser test for the new page.

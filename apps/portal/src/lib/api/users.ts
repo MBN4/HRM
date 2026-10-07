@@ -13,6 +13,34 @@ export interface TeamUser {
   branches: { id: string; name: string }[];
   /** Whether the CALLER may edit/deactivate this user (the server re-checks regardless). */
   manageable: boolean;
+  /** Step 7.2 — reporting line (`User.managerId`). */
+  displayName: string | null;
+  managerId: string | null;
+  manager: { id: string; email: string; displayName: string | null } | null;
+  directReportCount: number;
+}
+
+export type RoutingKind = 'DIRECT_MANAGER' | 'ESCALATED_MANAGER_UNAVAILABLE' | 'CEO_TOP_OF_CHAIN' | 'CEO_ESCALATED' | 'ADMIN_FALLBACK' | 'NO_APPROVER';
+
+export interface ApprovalRouting {
+  kind: RoutingKind;
+  skipped: { userId: string; email: string | null; why: 'DEACTIVATED' | 'HR_EXCLUDED' | 'NOT_FOUND' }[];
+}
+
+/** One row of `GET /users/hierarchy` (step 7.2). */
+export interface HierarchyUser {
+  id: string;
+  email: string;
+  displayName: string | null;
+  status: 'ACTIVE' | 'DISABLED' | string;
+  /** Role NAMES, e.g. 'CEO', 'HR_MANAGER', 'MANAGER', 'EMPLOYEE', 'TENANT_ADMIN'. */
+  roles: string[];
+  managerId: string | null;
+  directReportCount: number;
+  /** Who CURRENTLY approves THIS person's requests. */
+  approvers: { id: string; email: string; displayName: string | null }[];
+  routing: ApprovalRouting;
+  isApprover: boolean;
 }
 
 /** Returned ONCE by create / regenerate — never retrievable again. */
@@ -41,7 +69,7 @@ export function listAssignableRoles(): Promise<AssignableRole[]> {
   return apiFetch<AssignableRole[]>('/users/assignable-roles');
 }
 
-export function createUser(input: { email: string; roleIds: string[]; branchIds: string[] }): Promise<TeamUserWithTempPassword> {
+export function createUser(input: { email: string; roleIds: string[]; branchIds: string[]; managerId?: string | null }): Promise<TeamUserWithTempPassword> {
   return apiFetch<TeamUserWithTempPassword>('/users', { method: 'POST', body: input });
 }
 
@@ -59,4 +87,12 @@ export function reactivateUser(id: string): Promise<TeamUser> {
 
 export function regenerateTempPassword(id: string): Promise<TeamUserWithTempPassword> {
   return apiFetch<TeamUserWithTempPassword>(`/users/${id}/regenerate-temp-password`, { method: 'POST' });
+}
+
+export function getHierarchy(): Promise<{ items: HierarchyUser[] }> {
+  return apiFetch<{ items: HierarchyUser[] }>('/users/hierarchy');
+}
+
+export function setUserManager(id: string, managerId: string | null): Promise<TeamUser> {
+  return apiFetch<TeamUser>(`/users/${id}/manager`, { method: 'PATCH', body: { managerId } });
 }

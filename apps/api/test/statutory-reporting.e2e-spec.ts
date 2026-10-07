@@ -61,6 +61,7 @@ describe('statutory reporting (e2e)', () => {
   let branchQaId: string;
 
   let tokenAdminA: string;
+  let tokenApproverA: string;
   let tokenAdminB: string;
   let tokenEmployeeA: string;
 
@@ -129,7 +130,7 @@ describe('statutory reporting (e2e)', () => {
     const instanceId = runAfterSubmit.body.workflowInstanceId;
     const instanceDetail = await get(`/workflow/instances/${instanceId}`, tokenAdminA).expect(200);
     const activeStep = instanceDetail.body.steps.find((s: { status: string }) => s.status === 'ACTIVE');
-    await post(`/workflow/instances/${instanceId}/steps/${activeStep.id}/actions`, tokenAdminA, { actionType: 'APPROVE' }).expect(201);
+    await post(`/workflow/instances/${instanceId}/steps/${activeStep.id}/actions`, tokenApproverA, { actionType: 'APPROVE' }).expect(201);
     await waitFor(async () => {
       const row = await prisma.payrollRun.findUnique({ where: { id: runId } });
       return row && row.status === 'APPROVED' ? row : null;
@@ -207,6 +208,9 @@ describe('statutory reporting (e2e)', () => {
 
     const adminA = await makeUserWithRole(tenantAId, adminRoleA.id, 'admin@statutory-reporting-a.test');
     tokenAdminA = jwt.sign({ sub: adminA.id, tenantId: tenantAId });
+    // Step 7.2: nobody approves their own request, so the run's approver is a SECOND admin.
+    const approverA = await makeUserWithRole(tenantAId, adminRoleA.id, 'approver@statutory-reporting-a.test');
+    tokenApproverA = jwt.sign({ sub: approverA.id, tenantId: tenantAId });
     const adminB = await makeUserWithRole(tenantBId, adminRoleB.id, 'admin@statutory-reporting-b.test');
     tokenAdminB = jwt.sign({ sub: adminB.id, tenantId: tenantBId });
     const employeeA = await makeUserWithRole(tenantAId, employeeRoleA.id, 'employee@statutory-reporting-a.test');

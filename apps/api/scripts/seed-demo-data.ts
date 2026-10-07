@@ -375,6 +375,46 @@ async function main() {
     if (u.branchId) await prisma.userBranch.create({ data: { tenantId, userId: user.id, branchId: u.branchId } });
   }
 
+  // ---- hierarchical approval chain (step 7.2) ----------------------------------
+  // ceo -> (top) ; pm reports to nobody => routes to the CEO ; lead -> pm ; intern -> lead.
+  // Each has a linked Employee so they can submit leave from the portal, and a
+  // MANAGER-rule "Leave Approval" template exists so leave actually routes via the chain.
+  // Passwords: DemoPass-123!. `hr@` is HR (admin rights, can NEVER approve).
+  const hqBranch = (await prisma.branch.findFirst({ where: { tenantId }, orderBy: { name: 'asc' } }))!;
+  const chain = [
+    { email: 'ceo@acme-demo.local', role: SYSTEM_ROLES.CEO, name: 'Cora Executive', manager: null as string | null },
+    { email: 'pm@acme-demo.local', role: SYSTEM_ROLES.MANAGER, name: 'Priya Manager', manager: null },
+    { email: 'lead@acme-demo.local', role: SYSTEM_ROLES.MANAGER, name: 'Leo Teamlead', manager: 'pm@acme-demo.local' },
+    { email: 'intern@acme-demo.local', role: SYSTEM_ROLES.EMPLOYEE, name: 'Ivy Intern', manager: 'lead@acme-demo.local' },
+    { email: 'hr@acme-demo.local', role: SYSTEM_ROLES.HR_MANAGER, name: 'Hana Hr', manager: null },
+  ];
+  const chainIds = new Map<string, string>();
+  for (const c of chain) {
+    const role = await prisma.role.findUniqueOrThrow({ where: { tenantId_name: { tenantId, name: c.role } } });
+    const managerId = c.manager ? (chainIds.get(c.manager) ?? null) : null;
+    const user = await prisma.user.upsert({
+      where: { tenantId_email: { tenantId, email: c.email } },
+      update: { hashedPassword: passwordHash, status: 'ACTIVE', mustChangePassword: false, managerId },
+      create: { tenantId, email: c.email, hashedPassword: passwordHash, status: 'ACTIVE', managerId },
+    });
+    chainIds.set(c.email, user.id);
+    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    await prisma.userRole.create({ data: { tenantId, userId: user.id, roleId: role.id } });
+    const [firstName, lastName] = c.name.split(' ');
+    const code = `CHAIN-${c.email.split('@')[0].toUpperCase()}`;
+    const linked = await prisma.employee.findFirst({ where: { tenantId, userId: user.id } });
+    if (!linked) {
+      await prisma.employee.create({
+        data: { tenantId, branchId: hqBranch.id, userId: user.id, employeeCode: code, firstName, lastName, employmentType: 'FULL_TIME', joinDate: daysAgo(400), status: 'ACTIVE', statutoryFields: { SSN: '000-00-0000', W4: 'on-file' } },
+      });
+    }
+  }
+  const leaveTemplate = await prisma.workflowTemplate.findFirst({ where: { tenantId, entityType: 'LeaveRequest', isActive: true } });
+  if (!leaveTemplate) {
+    const tpl = await prisma.workflowTemplate.create({ data: { tenantId, name: 'Leave Approval', entityType: 'LeaveRequest', version: 1, isActive: true } });
+    await prisma.workflowStep.create({ data: { tenantId, templateId: tpl.id, name: 'Manager approval', order: 1, approverRule: { type: 'MANAGER' } } });
+  }
+
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------
   const extra = [
     { slug: 'demo-globex', name: 'Globex Industries (demo)', edition: 'ENTERPRISE' as const, status: 'ACTIVE' as const, sub: 'ACTIVE' as const, seats: 250, ago: 160, country: 'US' },
@@ -400,6 +440,7 @@ async function main() {
   console.log(`Demo data ready for "${TENANT_SLUG}": ${allEmployees.length} employees (${active} active), ${summaryRows.length} attendance summaries, ${leaveRows.length} leave requests, ${extra.length} extra demo tenants.`);
   console.log('Demo logins (password for both:', `${DEMO_PASSWORD}):`);
   for (const l of demoLogins) console.log(`  ${l.email}  — ${l.branch}`);
+  console.log('Approval chain (step 7.2), password', DEMO_PASSWORD + ': intern@ -> lead@ -> pm@ -> (top) -> ceo@acme-demo.local ; hr@acme-demo.local is HR (never approves).');
   console.log('Team-access demo users (/users):');
   for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);
   console.log('Next: pnpm --filter @hrm/api run demo:rollup');

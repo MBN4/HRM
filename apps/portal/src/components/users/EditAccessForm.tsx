@@ -3,10 +3,11 @@
 import { FormEvent, useState } from 'react';
 import { useI18n } from '../../i18n/I18nProvider';
 import { ApiError } from '../../lib/api/client';
-import { updateUserAccess, type AssignableRole, type TeamUser } from '../../lib/api/users';
+import { setUserManager, updateUserAccess, type AssignableRole, type TeamUser } from '../../lib/api/users';
 import type { Branch } from '../../lib/api/types';
 import { Alert } from '../ui/Alert';
 import { Button } from '../ui/Button';
+import { ManagerSelect } from './ManagerSelect';
 import { RoleBranchPicker } from './RoleBranchPicker';
 
 export function EditAccessForm({
@@ -25,6 +26,7 @@ export function EditAccessForm({
   const { t } = useI18n();
   const [roleIds, setRoleIds] = useState(user.roles.map((r) => r.id));
   const [branchIds, setBranchIds] = useState(user.branches.map((b) => b.id));
+  const [managerId, setManagerId] = useState<string | null>(user.managerId ?? null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +42,7 @@ export function EditAccessForm({
     setSubmitting(true);
     try {
       await updateUserAccess(user.id, { roleIds, branchIds });
+      if (managerId !== (user.managerId ?? null)) await setUserManager(user.id, managerId);
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : t('error.generic'));
@@ -50,6 +53,7 @@ export function EditAccessForm({
   return (
     <form onSubmit={submit} className="space-y-4" data-testid="edit-access-form">
       <RoleBranchPicker roles={roles} branches={branches} roleIds={roleIds} branchIds={branchIds} onRoleIds={setRoleIds} onBranchIds={setBranchIds} />
+      <ManagerSelect id={`edit-manager-${user.id}`} value={managerId} onChange={setManagerId} excludeUserId={user.id} />
       {error && <Alert tone="error">{error}</Alert>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="secondary" onClick={onCancel}>

@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   Megaphone,
+  GitFork,
   Network,
   Paintbrush,
   Receipt,
@@ -139,6 +140,8 @@ export function Sidebar() {
   // Tenant user / team access management (step 7.1) — see docs/conventions/user-management.md.
   if (can(PERMISSIONS.USER_MANAGE)) {
     adminItems.push({ href: '/users', label: t('nav.users'), icon: UserCog });
+    // Step 7.2 — hierarchical approvals: the reporting tree (NOT the employee /org-chart).
+    adminItems.push({ href: '/hierarchy', label: t('nav.hierarchy'), icon: GitFork });
   }
   // Data privacy & residency (step 6.1) — see docs/conventions/privacy-residency.md.
   if (can(PERMISSIONS.PRIVACY_MANAGE)) {

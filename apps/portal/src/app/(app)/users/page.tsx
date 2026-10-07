@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { KeyRound, Pencil, Plus, Power, PowerOff, Search } from 'lucide-react';
+import { KeyRound, Network, Pencil, Plus, Power, PowerOff, Search } from 'lucide-react';
 import { PERMISSIONS } from '@hrm/shared';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useAuth } from '../../../lib/auth/AuthContext';
@@ -23,6 +23,8 @@ import { Badge, StatusBadge } from '../../../components/ui/Badge';
 import { Input, Select } from '../../../components/ui/Field';
 import { Modal } from '../../../components/ui/Modal';
 import { Alert } from '../../../components/ui/Alert';
+import { ChangeManagerForm } from '../../../components/users/ChangeManagerForm';
+import { primaryRoleLabel, userName } from '../../../lib/hierarchy';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { Pagination } from '../../../components/ui/Pagination';
@@ -36,6 +38,7 @@ const PAGE_SIZE = 20;
 type Dialog =
   | { kind: 'create' }
   | { kind: 'edit'; user: TeamUser }
+  | { kind: 'manager'; user: TeamUser }
   | { kind: 'deactivate'; user: TeamUser }
   | { kind: 'reactivate'; user: TeamUser }
   | { kind: 'regenerate'; user: TeamUser }
@@ -151,6 +154,7 @@ export default function UsersPage() {
                   <tr className="border-b border-ink-100 text-start text-xs font-semibold uppercase tracking-wide text-ink-500">
                     <th scope="col" className="px-5 py-3 text-start">{t('users.col.user')}</th>
                     <th scope="col" className="px-3 py-3 text-start">{t('users.col.roles')}</th>
+                    <th scope="col" className="px-3 py-3 text-start">{t('users.col.reportsTo')}</th>
                     <th scope="col" className="px-3 py-3 text-start">{t('users.col.branches')}</th>
                     <th scope="col" className="px-3 py-3 text-start">{t('users.col.status')}</th>
                     <th scope="col" className="px-3 py-3 text-start">{t('users.col.lastLogin')}</th>
@@ -192,10 +196,24 @@ export default function UsersPage() {
         </Modal>
       )}
 
+      {dialog?.kind === 'manager' && (
+        <Modal title={t('hierarchy.changeManagerFor', { name: userName(dialog.user) })} onClose={() => setDialog(null)}>
+          <ChangeManagerForm
+            userId={dialog.user.id}
+            currentManagerId={dialog.user.managerId}
+            onCancel={() => setDialog(null)}
+            onSaved={() => {
+              setDialog(null);
+              reload();
+            }}
+          />
+        </Modal>
+      )}
+
       {dialog?.kind === 'deactivate' && (
         <ConfirmDialog
           title={t('users.confirm.deactivate.title', { email: dialog.user.email })}
-          body={t('users.confirm.deactivate.body')}
+          body={`${t('users.confirm.deactivate.body')} ${t('users.confirm.deactivate.escalation')}`}
           confirmLabel={t('users.action.deactivate')}
           tone="danger"
           onClose={() => setDialog(null)}
@@ -261,10 +279,28 @@ function UserRow({ user, isSelf, locale, onAction }: { user: TeamUser; isSelf: b
       </td>
       <td className="px-3 py-3">
         <div className="flex flex-wrap gap-1">
+          {/* Plain-language label (CEO / Admin / HR / Manager / Member); the raw role names stay in the tooltip + text for screen readers/tests. */}
           {user.roles.map((r) => (
-            <Badge key={r.id}>{r.name}</Badge>
+            <span key={r.id} title={r.name}>
+              <Badge tone={r.name === 'CEO' ? 'success' : r.name === 'HR_MANAGER' ? 'warning' : r.name === 'MANAGER' || r.name === 'TENANT_ADMIN' ? 'info' : 'neutral'}>
+                {r.name}
+              </Badge>
+            </span>
           ))}
         </div>
+        <p className="mt-1 text-xs text-ink-500" data-testid={`user-role-label-${user.email}`}>
+          {t(`hierarchy.role.${primaryRoleLabel(user.roles.map((r) => r.name), user.directReportCount)}`)}
+        </p>
+      </td>
+      <td className="px-3 py-3 text-ink-600" data-testid={`user-manager-${user.email}`}>
+        {user.manager ? (
+          <>
+            <span className="block text-ink-800">{userName(user.manager)}</span>
+            {user.manager.displayName && <span className="block text-xs text-ink-500">{user.manager.email}</span>}
+          </>
+        ) : (
+          <span className="text-ink-500">{t('users.noManager')}</span>
+        )}
       </td>
       <td className="px-3 py-3 text-ink-600">{user.branches.length === 0 ? t('users.allBranches') : user.branches.map((b) => b.name).join(', ')}</td>
       <td className="px-3 py-3">
@@ -276,6 +312,9 @@ function UserRow({ user, isSelf, locale, onAction }: { user: TeamUser; isSelf: b
           <div className="flex justify-end gap-1">
             <button type="button" className={iconBtn} title={t('users.action.editAccess')} aria-label={`${t('users.action.editAccess')} — ${user.email}`} onClick={() => onAction({ kind: 'edit', user })} data-testid={`edit-${user.email}`}>
               <Pencil className="h-4 w-4" aria-hidden />
+            </button>
+            <button type="button" className={iconBtn} title={t('users.action.changeManager')} aria-label={`${t('users.action.changeManager')} — ${user.email}`} onClick={() => onAction({ kind: 'manager', user })} data-testid={`manager-${user.email}`}>
+              <Network className="h-4 w-4" aria-hidden />
             </button>
             {!disabled && (
               <button type="button" className={iconBtn} title={t('users.action.regenerate')} aria-label={`${t('users.action.regenerate')} — ${user.email}`} onClick={() => onAction({ kind: 'regenerate', user })} data-testid={`regenerate-${user.email}`}>
