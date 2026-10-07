@@ -1252,6 +1252,12 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
 
     // Step 7.2 — hierarchical approvals.
     'nav.hierarchy': 'Reporting hierarchy',
+    'sidebar.primaryNav': 'Primary',
+    'sidebar.collapse': 'Collapse sidebar',
+    'sidebar.expand': 'Expand sidebar',
+    'sidebar.resize': 'Resize sidebar',
+    'sidebar.openMenu': 'Open navigation menu',
+    'sidebar.closeMenu': 'Close navigation menu',
     'hierarchy.title': 'Reporting hierarchy',
     'hierarchy.subtitle': 'Who reports to whom, and who approves each person\'s requests. If a manager is unavailable, approvals escalate up the chain to the CEO.',
     'hierarchy.search': 'Search people',
@@ -2527,6 +2533,12 @@ export const UI_MESSAGES: Record<SupportedLocale, Record<string, string>> = {
 
     // Step 7.2 — hierarchical approvals.
     'nav.hierarchy': 'التسلسل الإداري',
+    'sidebar.primaryNav': 'التنقل الرئيسي',
+    'sidebar.collapse': 'طيّ الشريط الجانبي',
+    'sidebar.expand': 'توسيع الشريط الجانبي',
+    'sidebar.resize': 'تغيير عرض الشريط الجانبي',
+    'sidebar.openMenu': 'فتح قائمة التنقل',
+    'sidebar.closeMenu': 'إغلاق قائمة التنقل',
     'hierarchy.title': 'التسلسل الإداري',
     'hierarchy.subtitle': 'من يتبع لمن، ومن يوافق على طلبات كل شخص. إذا لم يكن المدير متاحًا تصعَّد الموافقات إلى أعلى السلسلة حتى الرئيس التنفيذي.',
     'hierarchy.search': 'البحث عن الأشخاص',

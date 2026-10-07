@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { ShieldCheck } from 'lucide-react';
 import { usePlatformAuth } from '../../lib/auth/PlatformAuthContext';
+import { SidebarMobileTrigger } from '@hrm/ui';
 import { ThemeToggle } from './ThemeToggle';
 import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/Badge';
@@ -25,8 +26,8 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-ink-100 bg-surface/85 px-6 backdrop-blur">
-      <div />
-      <div className="flex items-center gap-4">
+      <SidebarMobileTrigger label="Open navigation menu" />
+      <div className="flex items-center gap-4 ms-auto">
         <ThemeToggle />
         {me && (
           <>

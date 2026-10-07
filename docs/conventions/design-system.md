@@ -223,3 +223,53 @@ engine output. Logins (password `DemoPass-123!`): `demo.us@acme-demo.local`
 (US branch, LTR) and `demo.qa@acme-demo.local` (Doha branch → Qatar pack →
 real RTL Arabic). Re-run `demo:rollup` daily if you want "yesterday" populated
 (the scheduled job also does this on a running worker).
+
+## 11. Sidebar (step 7.3) — `packages/ui` (`@hrm/ui`)
+
+ONE sidebar component for both apps, in the repo's first shared React package
+(source-only, consumed via Next's `transpilePackages: ['@hrm/shared','@hrm/ui']`
+and scanned by each app's Tailwind `content` glob). `apps/portal` and
+`apps/admin` only supply **data** (nav groups/items, labels, brand lockup);
+their items, order and RBAC/owner-only gating are unchanged.
+
+- **API**: `<SidebarProvider storageKey>` (per-app persisted state) wraps the
+  shell; `<AppSidebar variant="portal"|"admin" groups footerItems labels brand caption/>`;
+  `<SidebarMobileTrigger label/>` goes in each Topbar. Every string is passed in
+  (portal: `sidebar.*` en+ar catalog keys; admin: English, like the rest of its chrome).
+  `variant="portal"` = soft pill + accent bar; `"admin"` = solid `primary` pill.
+- **Collapse to rail**: toggle in the footer (`aria-expanded`, label flips
+  Collapse/Expand). Rail = 72px, icons only (labels stay in the DOM, so they remain the
+  link's accessible name). Labels fade + collapse (`opacity`/`max-width`/`margin`
+  transition) rather than snap. `RailTooltip` shows the label on hover **and keyboard
+  focus**; it is portalled + `position: fixed` (the nav is `overflow-y: auto` and would
+  clip it) and opens toward the content.
+- **Drag to resize**: a `role="separator"` handle on the **inline-end (inner) edge**.
+  Range **224–360px** (default **264**); releasing below the rail/min midpoint snaps to
+  the rail, dragging a rail outward re-expands it. Keyboard: Arrow keys ±16px, Enter/
+  double-click toggles. Pointer capture on the handle; no transition while dragging.
+- **Persistence**: `localStorage` `mbn.portal.sidebar.v1` / `mbn.admin.sidebar.v1` =
+  `{"collapsed":bool,"width":px}`. Read after mount (never during SSR), all access
+  try/catch'd (blocked storage ⇒ defaults), width clamped on read. `data-ready` flips
+  after the read and transitions are enabled only then, so a reload never animates.
+- **RTL (the risky part)**: only logical utilities (`start-/end-`, `ms-`, `-end-1.5`) for
+  layout; the sidebar is the first flex child so `dir=rtl` puts it on the right and the
+  handle (`end`) on its LEFT edge. Drag math can't use logical CSS, so it reads
+  `getComputedStyle(aside).direction` and measures from the right edge in RTL; Arrow
+  keys are mirrored the same way; chevrons use `rtl:rotate-180`; the tooltip picks
+  `right:` vs `left:` from the anchor's computed direction and uses an `-rtl` keyframe.
+- **Animation**: one easing (`cubic-bezier(0.22,1,0.36,1)`), 260ms width / 220ms labels,
+  applied ONLY through `motion-safe:` classes — `prefers-reduced-motion` gets
+  `transition-duration: 0s` (asserted by a test).
+- **Small screens (<1024px)**: no rail — a fixed overlay drawer (translate off-canvas,
+  `invisible` when closed so it leaves the tab order), backdrop, Esc / backdrop / route
+  change closes it, opened by the Topbar hamburger. The desktop collapsed preference is
+  ignored there (labels always shown).
+- **Brand**: `Wordmark` gained `markOnly` (rail shows just the mark/logo tile).
+- **Not in the sidebar**: the theme toggle and account menu stay in the Topbar (moving
+  them would duplicate `data-testid`s and change established flows); they are unaffected
+  by collapse. A tooltip-per-footer-item and an in-sidebar account chip are easy
+  `footerSlot` additions if wanted.
+- Tests: `apps/portal/tests/sidebar.spec.ts` (collapse/persist/tooltip, drag bounds +
+  snap + persist, keyboard handle, active state, reduced motion, mobile drawer, RTL
+  geometry + mirrored keys/tooltip, axe light/dark × expanded/collapsed × LTR/RTL) and
+  `apps/admin/tests/sidebar.spec.ts`.

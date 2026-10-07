@@ -126,7 +126,7 @@ function Node({ node, byId, collapsed, forceOpen, matches, canChange, onToggle, 
             <p className="truncate text-xs text-ink-500">{u.email}</p>
           </div>
           <span className="text-xs text-ink-500" data-testid={`hierarchy-reports-${u.email}`}>
-            {t('hierarchy.reports', { count: u.directReportCount })}
+            {t('hierarchy.reports', { count: Math.max(u.directReportCount, node.children.length) })}
           </span>
           {canChange && (
             <button

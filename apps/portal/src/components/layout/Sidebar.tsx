@@ -1,7 +1,5 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Bell,
@@ -37,19 +35,15 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
 import { useBranding } from '../../lib/branding/BrandingProvider';
 import { PERMISSIONS } from '@hrm/shared';
+import { AppSidebar, type SidebarGroup, type SidebarItem } from '@hrm/ui';
 import { Wordmark } from '../brand/Wordmark';
 
-interface NavItem {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboard;
-}
+type NavItem = SidebarItem;
 
 export function Sidebar() {
   const { t } = useI18n();
   const { can } = useAuth();
   const { branding, logoUrl } = useBranding();
-  const pathname = usePathname();
 
   const essItems: NavItem[] = [
     { href: '/dashboard', label: t('nav.dashboard'), icon: LayoutDashboard },
@@ -148,53 +142,28 @@ export function Sidebar() {
     adminItems.push({ href: '/privacy', label: t('nav.privacy'), icon: ShieldCheck });
   }
 
-  return (
-    <aside className="sticky top-0 flex h-screen w-64 shrink-0 flex-col bg-sidebar text-sidebar-fg">
-      <div className="flex h-16 items-center px-5">
-        <Wordmark name={branding.productName} logoUrl={logoUrl} tone="light" tint={branding.primaryColor} />
-      </div>
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4 scrollbar-thin" aria-label="Primary">
-        <NavGroup items={essItems} pathname={pathname} />
-        <div>
-          <p className="eyebrow px-3 pb-2 text-sidebar-fg/80">{t('nav.team')}</p>
-          <NavGroup items={mssItems} pathname={pathname} />
-        </div>
-        {adminItems.length > 0 && (
-          <div>
-            <p className="eyebrow px-3 pb-2 text-sidebar-fg/80">{t('nav.admin')}</p>
-            <NavGroup items={adminItems} pathname={pathname} />
-          </div>
-        )}
-      </nav>
-      <div className="border-t border-white/10 p-3">
-        <NavGroup items={[{ href: '/settings', label: t('nav.settings'), icon: Settings }]} pathname={pathname} />
-      </div>
-    </aside>
-  );
-}
+  // Presentation only (packages/ui's AppSidebar) — the items, their order and
+  // their permission gates above are untouched.
+  const groups: SidebarGroup[] = [
+    { id: 'ess', items: essItems },
+    { id: 'team', label: t('nav.team'), items: mssItems },
+  ];
+  if (adminItems.length > 0) groups.push({ id: 'admin', label: t('nav.admin'), items: adminItems });
 
-function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string | null }) {
   return (
-    <ul className="space-y-0.5">
-      {items.map((item) => {
-        const active = pathname === item.href || pathname?.startsWith(`${item.href}/`);
-        const Icon = item.icon;
-        return (
-          <li key={item.href}>
-            <Link
-              href={item.href}
-              aria-current={active ? 'page' : undefined}
-              className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                active ? 'bg-white/[0.12] text-white' : 'text-sidebar-fg hover:bg-white/[0.07] hover:text-white'
-              }`}
-            >
-              {active && <span className="absolute inset-y-1.5 start-0 w-1 rounded-full bg-accent-400" aria-hidden />}
-              <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-accent-300' : 'text-sidebar-fg/80 group-hover:text-accent-300'}`} aria-hidden />
-              {item.label}
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <AppSidebar
+      variant="portal"
+      groups={groups}
+      footerItems={[{ href: '/settings', label: t('nav.settings'), icon: Settings }]}
+      labels={{
+        primaryNav: t('sidebar.primaryNav'),
+        collapse: t('sidebar.collapse'),
+        expand: t('sidebar.expand'),
+        resize: t('sidebar.resize'),
+        openMenu: t('sidebar.openMenu'),
+        closeMenu: t('sidebar.closeMenu'),
+      }}
+      brand={(compact) => <Wordmark name={branding.productName} logoUrl={logoUrl} tone="light" tint={branding.primaryColor} markOnly={compact} />}
+    />
   );
 }

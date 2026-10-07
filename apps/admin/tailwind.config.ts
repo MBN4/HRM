@@ -13,7 +13,8 @@ const mbnPreset = require('@hrm/config/tailwind-preset');
  */
 const config: Config = {
   presets: [mbnPreset],
-  content: ['./src/**/*.{ts,tsx}'],
+  // packages/ui ships Tailwind classes (the shared sidebar), so its source must be scanned too.
+  content: ['./src/**/*.{ts,tsx}', '../../packages/ui/src/**/*.{ts,tsx}'],
 };
 
 export default config;

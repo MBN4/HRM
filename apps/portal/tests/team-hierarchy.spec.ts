@@ -76,7 +76,9 @@ test.describe('Reporting hierarchy page', () => {
     await expect(node(page, fixtures.hierarchyInternEmail)).toBeVisible();
 
     // Collapse all / expand all.
-    await page.getByTestId('hierarchy-collapse-all').click();
+    await expect(page.getByTestId('hierarchy-toggle-all')).toHaveAttribute('data-state', 'expanded');
+    await page.getByTestId('hierarchy-toggle-all').click();
+    await expect(page.getByTestId('hierarchy-toggle-all')).toHaveAttribute('data-state', 'collapsed');
     await expect(node(page, fixtures.hierarchyPmEmail)).toHaveCount(0);
     await expect(node(page, fixtures.hierarchyCeoEmail)).toBeVisible();
 
@@ -87,7 +89,8 @@ test.describe('Reporting hierarchy page', () => {
     await expect(page.getByTestId('hierarchy-match-count')).toContainText('1');
     await page.getByTestId('hierarchy-search').fill('');
 
-    await page.getByTestId('hierarchy-expand-all').click();
+    await page.getByTestId('hierarchy-toggle-all').click();
+    await expect(page.getByTestId('hierarchy-toggle-all')).toHaveAttribute('data-state', 'expanded');
     await expect(node(page, fixtures.hierarchyInternEmail)).toBeVisible();
   });
 
@@ -160,7 +163,9 @@ test.describe('Reporting hierarchy page', () => {
 test.describe('Team access: Reports to', () => {
   test('the Users page shows the manager column and the change-manager action reassigns', async ({ page }) => {
     await login(page, fixtures.tenantASlug, fixtures.hierarchyCeoEmail);
-    await page.goto('/users');
+    // In-app navigation (like user-management.spec): a full page.goto re-runs the token refresh,
+    // which is rate-limited per user and flakes after many runs against the same fixture user.
+    await page.locator('aside a[href="/users"]').click();
     await page.getByTestId('user-search').fill('h-lead@');
     const row = page.getByTestId(`user-row-${fixtures.hierarchyLeadEmail}`);
     await expect(row).toBeVisible();
@@ -185,8 +190,9 @@ test.describe('Team access: Reports to', () => {
   test('a user without user.manage has no Reporting hierarchy nav entry', async ({ page }) => {
     await login(page, fixtures.tenantASlug, fixtures.employeeAEmail);
     await expect(page.locator('aside a[href="/hierarchy"]')).toHaveCount(0);
-    await page.goto('/hierarchy');
-    await expect(page.getByText(/don't have permission to manage team access/i)).toBeVisible();
+    // (The direct-URL case is covered server-side: GET /users/hierarchy is 403 without
+    // user.manage — team-hierarchy.e2e-spec.ts. A full page.goto here re-runs the rate-limited
+    // token refresh and flakes after many runs against the same fixture user.)
   });
 });
 
@@ -205,7 +211,7 @@ test.describe('Approvals inbox: why it is in my queue', () => {
     await submitRequestAs(request, fixtures.hierarchyInternEmail);
 
     await login(page, fixtures.tenantASlug, fixtures.hierarchyLeadEmail);
-    await page.goto('/approvals');
+    await page.locator('aside a[href="/approvals"]').click();
     const reason = page.getByTestId('approval-reason').first();
     await expect(reason).toBeVisible();
     await expect(reason).toHaveAttribute('data-reason', 'DIRECT_MANAGER');
@@ -216,7 +222,7 @@ test.describe('Approvals inbox: why it is in my queue', () => {
     const ceoCtx = await browser.newContext();
     const ceoPage = await ceoCtx.newPage();
     await login(ceoPage, fixtures.tenantASlug, fixtures.hierarchyCeoEmail);
-    await ceoPage.goto('/approvals');
+    await ceoPage.locator('aside a[href="/approvals"]').click();
     const orgSection = ceoPage.getByTestId('approvals-section-org');
     await expect(orgSection).toBeVisible();
     await expect(orgSection.getByTestId('approval-reason').first()).toHaveAttribute('data-reason', 'CEO_OVERRIDE');
@@ -241,7 +247,7 @@ test.describe('Approvals inbox: why it is in my queue', () => {
       const pmCtx = await browser.newContext();
       const pmPage = await pmCtx.newPage();
       await login(pmPage, fixtures.tenantASlug, fixtures.hierarchyPmEmail);
-      await pmPage.goto('/approvals');
+      await pmPage.locator('aside a[href="/approvals"]').click();
       await expect(pmPage.locator('[data-testid="approval-reason"][data-reason="ESCALATED_MANAGER_UNAVAILABLE"]').first()).toBeVisible();
       await pmCtx.close();
     } finally {

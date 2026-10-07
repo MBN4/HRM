@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hrm/shared": "workspace:*",
+    "@hrm/ui": "workspace:*",
     "lucide-react": "^0.468.0",
     "next": "14.2.18",
     "react": "^18.3.1",

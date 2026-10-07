@@ -1,12 +1,13 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { Building2, CreditCard, FileClock, Globe2, LayoutDashboard, Paintbrush, ShieldAlert, ShieldCheck, Upload, UserCog } from 'lucide-react';
+import { AppSidebar, type SidebarItem } from '@hrm/ui';
 import { Wordmark } from '../brand/Wordmark';
 import { usePlatformAuth } from '../../lib/auth/PlatformAuthContext';
 
-const NAV_ITEMS = [
+// Same items, order and owner-only gating as before the 7.3 sidebar redesign —
+// only the presentation moved to the shared packages/ui AppSidebar.
+const NAV_ITEMS: (SidebarItem & { ownerOnly: boolean })[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, ownerOnly: false },
   { href: '/tenants', label: 'Tenants', icon: Building2, ownerOnly: false },
   { href: '/billing', label: 'Billing', icon: CreditCard, ownerOnly: false },
@@ -19,44 +20,29 @@ const NAV_ITEMS = [
   { href: '/impersonation', label: 'Impersonation', icon: ShieldAlert, ownerOnly: false },
   { href: '/audit', label: 'Audit trail', icon: FileClock, ownerOnly: false },
   // Data privacy & residency (step 6.1) — PRIVACY_READ is held by both
-  // platform roles, the same "READ is broad" posture every other READ nav
-  // item here already follows. See docs/conventions/privacy-residency.md.
+  // platform roles. See docs/conventions/privacy-residency.md.
   { href: '/privacy', label: 'Data privacy', icon: ShieldCheck, ownerOnly: false },
   { href: '/admins', label: 'Platform admins', icon: UserCog, ownerOnly: true },
-] as const;
+];
 
 export function Sidebar() {
-  const pathname = usePathname();
   const { me } = usePlatformAuth();
+  const items = NAV_ITEMS.filter((item) => !item.ownerOnly || me?.role === 'PLATFORM_OWNER');
 
   return (
-    <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-sidebar text-sidebar-fg">
-      <div className="flex h-16 items-center border-b border-white/10 px-5">
-        <Wordmark tone="light" suffix="Vendor Console" />
-      </div>
-      {/* sidebar-fg (#c3d9d1) on the near-black sidebar is ~11:1 — the WCAG
-          fix that once forced ink-300 here now lives in the token itself. */}
-      <p className="eyebrow px-5 pt-5 text-sidebar-fg/80">Platform-wide · cross-tenant</p>
-
-      <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-3 scrollbar-thin" aria-label="Primary">
-        {NAV_ITEMS.filter((item) => !item.ownerOnly || me?.role === 'PLATFORM_OWNER').map((item) => {
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              aria-current={active ? 'page' : undefined}
-              className={`group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                active ? 'bg-primary text-white shadow-card' : 'text-sidebar-fg hover:bg-white/[0.07] hover:text-white'
-              }`}
-            >
-              <Icon className={`h-4 w-4 ${active ? '' : 'text-sidebar-fg/80 group-hover:text-accent-300'}`} aria-hidden />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-    </aside>
+    <AppSidebar
+      variant="admin"
+      groups={[{ id: 'platform', items }]}
+      caption="Platform-wide · cross-tenant"
+      labels={{
+        primaryNav: 'Primary',
+        collapse: 'Collapse sidebar',
+        expand: 'Expand sidebar',
+        resize: 'Resize sidebar',
+        openMenu: 'Open navigation menu',
+        closeMenu: 'Close navigation menu',
+      }}
+      brand={(compact) => <Wordmark tone="light" suffix="Vendor Console" markOnly={compact} />}
+    />
   );
 }

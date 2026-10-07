@@ -55,15 +55,16 @@ handled by configuration and feature flags, never by branching the code.
 14 App Router (web apps) · Prisma + PostgreSQL 16 · Redis · BullMQ · MinIO
 (S3-compatible object storage, local dev).
 
-| Path              | Purpose                                                       |
-| ----------------- | ------------------------------------------------------------- |
-| `apps/api`        | NestJS backend — all business logic, REST API                 |
-| `apps/admin`      | Vendor super-admin console (Next.js App Router)               |
-| `apps/portal`     | Tenant org portal (Next.js App Router)                        |
-| `apps/mobile`     | Employee self-service mobile app (React Native / Expo)        |
-| `packages/db`     | Prisma schema + generated client (`@hrm/db`)                  |
-| `packages/shared` | Shared types, DTOs, zod validators, constants (`@hrm/shared`) |
-| `packages/config` | Shared ESLint / TypeScript / Prettier config (`@hrm/config`)  |
+| Path              | Purpose                                                              |
+| ----------------- | -------------------------------------------------------------------- |
+| `apps/api`        | NestJS backend — all business logic, REST API                        |
+| `apps/admin`      | Vendor super-admin console (Next.js App Router)                      |
+| `apps/portal`     | Tenant org portal (Next.js App Router)                               |
+| `apps/mobile`     | Employee self-service mobile app (React Native / Expo)               |
+| `packages/db`     | Prisma schema + generated client (`@hrm/db`)                         |
+| `packages/shared` | Shared types, DTOs, zod validators, constants (`@hrm/shared`)        |
+| `packages/config` | Shared ESLint / TypeScript / Prettier config (`@hrm/config`)         |
+| `packages/ui`     | Shared React shell pieces (the app sidebar) — `@hrm/ui`, source-only |
 
 Infra for local dev: `docker-compose.yml` runs Postgres 16, Redis, and MinIO.
 Every app/package that needs environment variables documents them in its own
@@ -980,6 +981,13 @@ column on `WorkflowInstanceStep`, the inbox "why is this in my queue" reason,
 and the portal `/hierarchy` tree + searchable `ManagerSelect`. Existing suites
 that had HR/self approve were updated to a second approver. See
 [`docs/conventions/team-hierarchy-approvals.md`](./docs/conventions/team-hierarchy-approvals.md).
+
+**7.3 — Sidebar redesign (2026-10-08)** — not a numbered phase step; both
+`apps/portal` and `apps/admin` now share ONE animated sidebar from the new
+`packages/ui` workspace (`@hrm/ui`): collapse-to-icon-rail with tooltips,
+drag-to-resize (persisted in `localStorage`), mobile drawer, full RTL/dark/
+reduced-motion support. Nav items and RBAC gating untouched. See
+[`docs/conventions/design-system.md`](./docs/conventions/design-system.md) § 11.
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

@@ -38,6 +38,7 @@ export function Wordmark({
   size = 'md',
   suffix,
   tint = null,
+  markOnly = false,
   testId = 'brand-name',
 }: {
   name?: string;
@@ -48,6 +49,8 @@ export function Wordmark({
   tint?: string | null;
   /** Secondary label under the name (e.g. "Vendor Console"). */
   suffix?: string;
+  /** Collapsed sidebar rail: show only the mark/logo tile. */
+  markOnly?: boolean;
   testId?: string;
 }) {
   const big = size === 'lg';
@@ -68,7 +71,7 @@ export function Wordmark({
           {name.charAt(0).toUpperCase()}
         </span>
       )}
-      <span className="flex flex-col leading-none">
+      <span className={`flex-col leading-none ${markOnly ? 'hidden' : 'flex'}`}>
         <span
           className={`font-bold tracking-tight ${big ? 'text-2xl' : 'text-lg'} ${tone === 'light' ? 'text-white' : 'text-ink-900'}`}
           data-testid={testId}

@@ -38,6 +38,9 @@ export default function HierarchyPage() {
 
   const items = data?.items;
   const roots = useMemo(() => buildTree(items ?? []), [items]);
+  const allBranchIds = useMemo(() => branchIds(roots), [roots]);
+  // "Open" = at least one branch is currently expanded -> the next click collapses everything; otherwise it expands everything.
+  const anyOpen = allBranchIds.some((id) => !collapsed.has(id));
   const byId = useMemo(() => new Map((items ?? []).map((u) => [u.id, u])), [items]);
 
   const term = search.trim().toLowerCase();
@@ -81,16 +84,18 @@ export default function HierarchyPage() {
               data-testid="hierarchy-search"
             />
           </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setCollapsed(new Set())} data-testid="hierarchy-expand-all">
-              <ChevronsUpDown className="h-4 w-4" aria-hidden />
-              {t('hierarchy.expandAll')}
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => setCollapsed(new Set(branchIds(roots)))} data-testid="hierarchy-collapse-all">
-              <ChevronsDownUp className="h-4 w-4" aria-hidden />
-              {t('hierarchy.collapseAll')}
-            </Button>
-          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setCollapsed(anyOpen ? new Set(allBranchIds) : new Set())}
+            aria-label={anyOpen ? t('hierarchy.collapseAll') : t('hierarchy.expandAll')}
+            data-testid="hierarchy-toggle-all"
+            data-state={anyOpen ? 'expanded' : 'collapsed'}
+          >
+            {/* One dynamic control: the arrow and label always describe what the NEXT click does. */}
+            {anyOpen ? <ChevronsDownUp className="h-4 w-4" aria-hidden /> : <ChevronsUpDown className="h-4 w-4" aria-hidden />}
+            {anyOpen ? t('hierarchy.collapseAll') : t('hierarchy.expandAll')}
+          </Button>
         </div>
         <CardBody className="space-y-4">
           {term && (

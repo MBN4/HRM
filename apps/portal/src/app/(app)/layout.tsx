@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth/AuthContext';
 import { SessionProvider, useSession } from '../../lib/session/SessionProvider';
 import { I18nProvider } from '../../i18n/I18nProvider';
+import { SidebarProvider } from '@hrm/ui';
 import { Sidebar } from '../../components/layout/Sidebar';
 import { Topbar } from '../../components/layout/Topbar';
 import { PoweredByFooter } from '../../components/layout/PoweredByFooter';
@@ -32,6 +33,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <AuthGate>
       <SessionProvider>
         <ResolvedI18n>
+          <SidebarProvider storageKey="mbn.portal.sidebar.v1">
           <div className="flex min-h-screen bg-sand-50">
             <Sidebar />
             <div className="flex min-w-0 flex-1 flex-col">
@@ -43,6 +45,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </footer>
             </div>
           </div>
+          </SidebarProvider>
         </ResolvedI18n>
       </SessionProvider>
     </AuthGate>

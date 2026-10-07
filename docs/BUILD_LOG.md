@@ -4307,3 +4307,17 @@ environmental failure (`tenant-resolution` "platform mode disabled",
 end-to-end after the fixes (only the affected suites + new one). Playwright:
 `team-hierarchy` (8) + `user-management` + `mss` **21/21** incl. axe light/dark;
 the rest of the portal suite not re-run. No RTL browser test for the new page.
+
+## 7.3 — Sidebar redesign, both apps (2026-10-08)
+
+Frontend-only; routes, nav items, RBAC visibility and i18n key meanings unchanged.
+New workspace `packages/ui` (`@hrm/ui`, source-only React; `pnpm-lock.yaml` importer
+added by hand + workspace symlinks because `pnpm install` wanted to purge/reinstall
+all `node_modules` interactively offline — run a normal `pnpm install` once online to
+let pnpm reconcile). `AppSidebar` + `SidebarProvider` + `SidebarMobileTrigger` +
+`RailTooltip`: collapse-to-icon-rail with tooltips, drag-to-resize (224–360px, snap to
+rail), localStorage persistence, mobile overlay drawer, `prefers-reduced-motion`,
+RTL-correct handle/drag/keys/tooltip. Both apps: `transpilePackages` + Tailwind
+`content` + `@hrm/ui` dependency; `Wordmark markOnly`; tailwind-preset gained the
+tooltip keyframes; `sidebar.*` strings (en+ar). See
+[`conventions/design-system.md`](./conventions/design-system.md) § 11.

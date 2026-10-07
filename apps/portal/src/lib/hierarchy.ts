@@ -36,10 +36,16 @@ export function buildTree(items: HierarchyUser[]): TreeNode[] {
   const childrenOf = new Map<string, HierarchyUser[]>();
   const rootUsers: HierarchyUser[] = [];
   for (const u of items) {
-    if (u.managerId && byId.has(u.managerId) && u.managerId !== u.id) {
-      const list = childrenOf.get(u.managerId) ?? [];
+    // The tree parent is the real manager; a person with NO manager whose approvals fall to the
+    // CEO ("top of chain -> CEO") hangs under that CEO, so the whole org reads as one tree
+    // (intern -> lead -> PM -> CEO) and the CEO node can be collapsed/expanded.
+    const topOfChainCeo =
+      !u.managerId && u.routing.kind === 'CEO_TOP_OF_CHAIN' ? u.approvers.find((a) => a.id !== u.id && byId.has(a.id))?.id : undefined;
+    const parentId = u.managerId && byId.has(u.managerId) ? u.managerId : topOfChainCeo;
+    if (parentId && parentId !== u.id) {
+      const list = childrenOf.get(parentId) ?? [];
       list.push(u);
-      childrenOf.set(u.managerId, list);
+      childrenOf.set(parentId, list);
     } else {
       rootUsers.push(u);
     }

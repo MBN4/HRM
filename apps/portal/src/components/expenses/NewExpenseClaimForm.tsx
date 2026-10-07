@@ -33,11 +33,18 @@ export function NewExpenseClaimForm({ onSubmitted, onCancel }: { onSubmitted: ()
 
   useEffect(() => {
     (async () => {
-      const [draft, cats] = await Promise.all([createExpenseClaimDraft(), listExpenseCategories()]);
-      setClaim(draft);
-      setCategories(cats);
-      if (cats[0]) setCategoryId(cats[0].id);
+      try {
+        const [draft, cats] = await Promise.all([createExpenseClaimDraft(), listExpenseCategories()]);
+        setClaim(draft);
+        setCategories(cats);
+        if (cats[0]) setCategoryId(cats[0].id);
+      } catch (err) {
+        // e.g. an account with no linked Employee record ("You have no employee profile.") —
+        // show it in the dialog instead of an unhandled rejection / Next error overlay.
+        setError(err instanceof ApiError ? err.message : t('error.generic'));
+      }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleAddLine(e: FormEvent) {
@@ -75,7 +82,7 @@ export function NewExpenseClaimForm({ onSubmitted, onCancel }: { onSubmitted: ()
     }
   }
 
-  if (!claim) return <PageSpinner />;
+  if (!claim) return error ? <Alert tone="error">{error}</Alert> : <PageSpinner />;
 
   return (
     <div className="space-y-4">

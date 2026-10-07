@@ -41,6 +41,9 @@ importers:
       '@hrm/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@hrm/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@18.3.1)
@@ -365,6 +368,9 @@ importers:
       '@hrm/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@hrm/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@18.3.1)
@@ -497,6 +503,39 @@ importers:
       eslint:
         specifier: ^8.57.1
         version: 8.57.1
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/ui:
+    devDependencies:
+      '@hrm/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/react':
+        specifier: ^18.3.17
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.5
+        version: 18.3.7(@types/react@18.3.31)
+      eslint:
+        specifier: ^8.57.1
+        version: 8.57.1
+      eslint-config-next:
+        specifier: 14.2.18
+        version: 14.2.18(eslint@8.57.1)(typescript@5.9.3)
+      lucide-react:
+        specifier: ^0.468.0
+        version: 0.468.0(react@18.3.1)
+      next:
+        specifier: 14.2.18
+        version: 14.2.18(@opentelemetry/api@1.9.1)(@playwright/test@1.62.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Bell, ChevronDown, LogOut } from 'lucide-react';
+import { SidebarMobileTrigger } from '@hrm/ui';
 import { ThemeToggle } from './ThemeToggle';
 import { useI18n } from '../../i18n/I18nProvider';
 import { useAuth } from '../../lib/auth/AuthContext';
@@ -43,8 +44,8 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-ink-100 bg-surface/85 px-6 backdrop-blur">
-      <div />
-      <div className="flex items-center gap-3">
+      <SidebarMobileTrigger label={t('sidebar.openMenu')} />
+      <div className="flex items-center gap-3 ms-auto">
         <button
           type="button"
           onClick={() => setLocale(locale === 'en' ? 'ar' : 'en')}

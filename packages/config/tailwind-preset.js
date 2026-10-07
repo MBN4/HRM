@@ -49,10 +49,15 @@ module.exports = {
         'pop-in': { from: { opacity: '0', transform: 'translateY(-4px) scale(0.98)' }, to: { opacity: '1', transform: 'none' } },
         'fade-up': { from: { opacity: '0', transform: 'translateY(6px)' }, to: { opacity: '1', transform: 'none' } },
         shimmer: { '100%': { transform: 'translateX(100%)' } },
+        // Sidebar rail tooltip (packages/ui): slides in from the sidebar side — mirrored for RTL.
+        'sidebar-tip-in': { from: { opacity: '0', transform: 'translate(-6px, -50%)' }, to: { opacity: '1', transform: 'translate(0, -50%)' } },
+        'sidebar-tip-in-rtl': { from: { opacity: '0', transform: 'translate(6px, -50%)' }, to: { opacity: '1', transform: 'translate(0, -50%)' } },
       },
       animation: {
         'pop-in': 'pop-in 120ms ease-out',
         'fade-up': 'fade-up 280ms ease-out both',
+        'sidebar-tip-in': 'sidebar-tip-in 140ms ease-out both',
+        'sidebar-tip-in-rtl': 'sidebar-tip-in-rtl 140ms ease-out both',
       },
       boxShadow: {
         card: '0 1px 2px rgb(10 14 13 / 0.05), 0 1px 3px rgb(10 14 13 / 0.04)',
