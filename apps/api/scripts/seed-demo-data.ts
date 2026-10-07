@@ -24,6 +24,7 @@
  */
 import { hash } from '@node-rs/argon2';
 import { prisma, SYSTEM_ROLES } from '@hrm/db';
+import { branchLocalToUtc } from '../src/attendance/attendance-timezone.util';
 import type { AttendanceDayStatus, EmploymentType, Gender, LeaveRequestStatus, LeaveType } from '@hrm/db';
 
 if (process.env.NODE_ENV === 'production') {
@@ -380,7 +381,7 @@ async function main() {
   // Each has a linked Employee so they can submit leave from the portal, and a
   // MANAGER-rule "Leave Approval" template exists so leave actually routes via the chain.
   // Passwords: DemoPass-123!. `hr@` is HR (admin rights, can NEVER approve).
-  const hqBranch = (await prisma.branch.findFirst({ where: { tenantId }, orderBy: { name: 'asc' } }))!;
+  const hqBranch = (await prisma.branch.findUniqueOrThrow({ where: { tenantId_name: { tenantId, name: 'Acme US HQ' } } }));
   const chain = [
     { email: 'ceo@acme-demo.local', role: SYSTEM_ROLES.CEO, name: 'Cora Executive', manager: null as string | null },
     { email: 'pm@acme-demo.local', role: SYSTEM_ROLES.MANAGER, name: 'Priya Manager', manager: null },
@@ -403,6 +404,8 @@ async function main() {
     const [firstName, lastName] = c.name.split(' ');
     const code = `CHAIN-${c.email.split('@')[0].toUpperCase()}`;
     const linked = await prisma.employee.findFirst({ where: { tenantId, userId: user.id } });
+    // (7.x demo chain lives in US HQ — LTR, New York time — so Part 2/3's colourful month is easy to eyeball.)
+    if (linked && linked.branchId !== hqBranch.id) await prisma.employee.update({ where: { id: linked.id }, data: { branchId: hqBranch.id } });
     if (!linked) {
       await prisma.employee.create({
         data: { tenantId, branchId: hqBranch.id, userId: user.id, employeeCode: code, firstName, lastName, employmentType: 'FULL_TIME', joinDate: daysAgo(400), status: 'ACTIVE', statutoryFields: { SSN: '000-00-0000', W4: 'on-file' } },
@@ -436,6 +439,50 @@ async function main() {
   const internEmp = await prisma.employee.findUnique({ where: { tenantId_employeeCode: { tenantId, employeeCode: 'CHAIN-INTERN' } } });
   if (internEmp) await whUpsert('MEMBER', internEmp.id, { employeeId: internEmp.id }, { startTime: '07:30', workHours: 7, breakHours: 1, graceMinutes: 30, halfDayThresholdHours: 4 });
 
+  // ---- a COLOURFUL month of attendance for Ivy Intern (step 8.1, Part 2) --------
+  // Ivy's effective policy is her MEMBER override (07:30, 7+1 => 8h required, grace 30m,
+  // half-day < 4h), New York time. One record per working day for the last ~30 days with a
+  // deliberate mix so /attendance/status shows GREEN, YELLOW, RED (late beyond grace, early
+  // out, half day) plus NEUTRAL (weekends, any public holiday, one approved-leave day).
+  // Idempotent: her window is cleared and rewritten on every run.
+  if (internEmp) {
+    const tz = 'America/New_York';
+    const intern = internEmp;
+    const pattern = ['G', 'G', 'Y', 'G', 'R', 'G', 'G', 'Y', 'G', 'E', 'G', 'G', 'H', 'G', 'R', 'G', 'G', 'Y', 'G', 'G', 'E', 'G'];
+    // [clock-in local, clock-out local] per scenario against 07:30 / 8h / grace 30 / half-day 4h.
+    const scenario: Record<string, [string, string]> = {
+      G: ['07:25', '15:35'], //  on time, 8h10m
+      Y: ['07:50', '15:55'], //  20 min late (within the 30m grace), 8h05m
+      R: ['08:35', '16:40'], //  65 min late (beyond grace), 8h05m
+      E: ['07:28', '13:10'], //  left early: 5h42m of 8h
+      H: ['07:30', '10:50'], //  half day: 3h20m (< 4h)
+    };
+    const start = new Date(todayUtc.getTime() - 32 * DAY_MS);
+    await prisma.attendanceRecord.deleteMany({ where: { tenantId, employeeId: intern.id, workDate: { gte: start } } });
+    await prisma.leaveRequest.deleteMany({ where: { tenantId, employeeId: intern.id, reason: '[demo] status month' } });
+    let idx = 0;
+    let leaveDone = false;
+    for (let i = 31; i >= 1; i -= 1) {
+      const d = new Date(todayUtc.getTime() - i * DAY_MS);
+      if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      const kind = pattern[idx % pattern.length];
+      idx += 1;
+      if (idx === 9 && !leaveDone) {
+        leaveDone = true; // one approved-leave weekday with NO record -> NEUTRAL / ON_LEAVE
+        await prisma.leaveRequest.create({ data: { tenantId, employeeId: intern.id, leaveType: 'ANNUAL', startDate: d, endDate: d, days: 1, status: 'APPROVED', reason: '[demo] status month' } });
+        continue;
+      }
+      const [inAt, outAt] = scenario[kind];
+      await prisma.attendanceRecord.create({
+        data: {
+          tenantId, employeeId: intern.id, branchId: intern.branchId, workDate: d,
+          clockInAt: branchLocalToUtc(d, inAt, tz), clockInSource: 'WEB',
+          clockOutAt: branchLocalToUtc(d, outAt, tz), clockOutSource: 'WEB', status: 'CLOSED',
+        },
+      });
+    }
+  }
+
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------
   const extra = [
     { slug: 'demo-globex', name: 'Globex Industries (demo)', edition: 'ENTERPRISE' as const, status: 'ACTIVE' as const, sub: 'ACTIVE' as const, seats: 250, ago: 160, country: 'US' },
@@ -462,6 +509,7 @@ async function main() {
   console.log('Demo logins (password for both:', `${DEMO_PASSWORD}):`);
   for (const l of demoLogins) console.log(`  ${l.email}  — ${l.branch}`);
   console.log('Approval chain (step 7.2), password', DEMO_PASSWORD + ': intern@ -> lead@ -> pm@ -> (top) -> ceo@acme-demo.local ; hr@acme-demo.local is HR (never approves).');
+  console.log('Attendance status (Part 2): intern@acme-demo.local has ~30 days of mixed GREEN/YELLOW/RED/NEUTRAL days — GET /attendance/status?from&to (US HQ, New York time).');
   console.log('Working hours (/working-hours, sign in as hr@acme-demo.local or ceo@): company 09:00 8+1; Engineering (US HQ) team 10:00; Ivy Intern member 07:30 7+1.');
   console.log('Team-access demo users (/users):');
   for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);

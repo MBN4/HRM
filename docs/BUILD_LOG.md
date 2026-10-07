@@ -4348,3 +4348,17 @@ source badge + precedence strip), `working_hours.manage`-gated nav, en+ar.
 **Verification**: `working-hours.e2e-spec.ts` **23/23** (each precedence layer, QA vs
 US pack fallback, CRUD, 10 validation rejects, audit, RBAC incl. own-vs-other
 effective read, branch-restricted HR, cross-tenant). Playwright `working-hours.spec.ts` **6/6** (company default, validation, Member→Team→Company precedence via add/remove, modal error, axe light/dark/modal, no-access for a plain employee). Also green: auth-rbac, user-management, attendance, tenant-isolation-exhaustive, employees, team-hierarchy API suites. Full API suite not re-run.
+
+## 8.1 Part 2 — Attendance day-status classification (2026-10-09)
+
+Backend only. Design + rules: [`conventions/attendance-status.md`](./conventions/attendance-status.md).
+`apps/api/src/attendance/status/`: pure `classifyDay` (GREEN/YELLOW/RED/NEUTRAL/IN_PROGRESS +
+reasons), `AttendanceStatusService.classifyRange` (computed on read, a fixed handful of
+queries per range, resolver called once), `GET /attendance/status?employeeId&from&to`
+(own / HR-admin-CEO via `working_hours.manage` within branch scope / managers for their
+**reporting chain**). `attendanceStatusQuerySchema` in `@hrm/shared`; service exported from
+`AttendanceModule`; no schema change. **Demo**: Ivy Intern now lives in US HQ with ~30 days
+of mixed attendance (13 green, 3 yellow, 2 late-red, 2 early-out, 1 half-day, 9 weekend, 1 leave).
+**Verification**: `attendance-status.e2e-spec.ts` **21/21** with real instants against a real
+Part-1 policy (each rule, weekend US vs QA, holiday, leave, IN_PROGRESS, override shifts the
+result, Doha-local time, midnight-crossing shift, RBAC/chain/branch/cross-tenant, range validation).

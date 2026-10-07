@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ATTENDANCE_SUMMARY_QUEUE } from '../queue/queue.constants';
 import { WorkflowModule } from '../workflow/workflow.module';
+import { WorkingHoursModule } from '../working-hours/working-hours.module';
+import { AttendanceStatusController } from './status/attendance-status.controller';
+import { AttendanceStatusService } from './status/attendance-status.service';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceClockService } from './clock/attendance-clock.service';
 import { BIOMETRIC_DEVICE_ADAPTER } from './devices/biometric-device.interface';
@@ -35,14 +38,16 @@ import { AttendanceSummaryService } from './summary/attendance-summary.service';
 @Module({
   imports: [
     WorkflowModule,
+    WorkingHoursModule,
     BullModule.registerQueue({
       name: ATTENDANCE_SUMMARY_QUEUE,
       defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 1000 } },
     }),
   ],
-  controllers: [AttendanceController, ShiftsController, AttendanceRegularizationController],
+  controllers: [AttendanceController, AttendanceStatusController, ShiftsController, AttendanceRegularizationController],
   providers: [
     AttendanceClockService,
+    AttendanceStatusService,
     ShiftResolutionService,
     ShiftsService,
     AttendanceSummaryService,
@@ -58,6 +63,6 @@ import { AttendanceSummaryService } from './summary/attendance-summary.service';
   // the same "consumer imports the reused module" direction
   // operations-modules.md's Expense→Payroll `ExchangeRateService` export
   // already establishes.
-  exports: [AttendanceClockService, BIOMETRIC_DEVICE_ADAPTER],
+  exports: [AttendanceClockService, AttendanceStatusService, BIOMETRIC_DEVICE_ADAPTER],
 })
 export class AttendanceModule {}

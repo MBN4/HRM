@@ -141,3 +141,16 @@ export const branchGeofenceSchema = z
     { message: 'geofenceLat/geofenceLong/geofenceRadiusMeters must be all set or all null.', path: ['geofenceRadiusMeters'] },
   );
 export type BranchGeofenceInput = z.infer<typeof branchGeofenceSchema>;
+
+/** Part 2 (8.1) — day-status classification. Dates are branch-local calendar days (YYYY-MM-DD); the range is capped so a month view is one cheap read. */
+export const ATTENDANCE_STATUS_MAX_DAYS = 93;
+const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+export const attendanceStatusQuerySchema = z
+  .object({ employeeId: z.string().uuid().optional(), from: ymd, to: ymd })
+  .strict()
+  .refine((q) => q.from <= q.to, { message: 'from must be on or before to', path: ['to'] })
+  .refine((q) => (Date.parse(q.to) - Date.parse(q.from)) / 86_400_000 < ATTENDANCE_STATUS_MAX_DAYS, {
+    message: `The range cannot exceed ${ATTENDANCE_STATUS_MAX_DAYS} days`,
+    path: ['to'],
+  });
+export type AttendanceStatusQuery = z.infer<typeof attendanceStatusQuerySchema>;
