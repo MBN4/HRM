@@ -14,7 +14,6 @@ import { StatusBadge } from '../../../components/ui/Badge';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { PageSpinner } from '../../../components/ui/Spinner';
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
-import { MonthlyAttendanceGraph } from '../../../components/attendance/MonthlyAttendanceGraph';
 import { RegularizeForm } from '../../../components/attendance/RegularizeForm';
 
 function dateOffset(days: number): string {
@@ -59,8 +58,6 @@ export default function AttendancePage() {
           <ClockWidget locale={locale} />
         </CardBody>
       </Card>
-
-      <MonthlyAttendanceGraph />
 
       <Card>
         <CardHeader>

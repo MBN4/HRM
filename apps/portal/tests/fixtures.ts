@@ -45,12 +45,6 @@ export interface PortalTestFixtures {
   whDepartmentName: string;
   whEmployeeCode: string;
   whEmployeeName: string;
-  attendancePrevMonthFirst: string;
-  attendanceEmployeeACounts: { GREEN: number; YELLOW: number; RED: number; NEUTRAL: number; IN_PROGRESS: number };
-  attendanceEmployeeASampleDates: { green?: string; yellow?: string; red?: string; absent?: string; leave?: string };
-  qaAttendanceGreenDate: string;
-  attendanceLiveEmail: string;
-  attendanceLiveEmployeeId: string;
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

@@ -483,29 +483,6 @@ async function main() {
     }
   }
 
-  // ---- a LIVE "currently clocked in" demo state for Ivy (step 8.1, Part 3) ----
-  // So the LIVE ANALOG CLOCK on /dashboard is demonstrable with zero manual
-  // steps: an OPEN record (no clock-out) started ~2h before whenever this
-  // script runs. "Today" wasn't part of the colourful-month loop above (it
-  // only ever walks i=31..1), so this never collides with that history.
-  // Idempotent: any pre-existing open record for her is cleared first, so
-  // re-running the seed never leaves two.
-  if (internEmp) {
-    await prisma.attendanceRecord.deleteMany({ where: { tenantId, employeeId: internEmp.id, clockOutAt: null } });
-    await prisma.attendanceRecord.create({
-      data: {
-        tenantId,
-        employeeId: internEmp.id,
-        branchId: internEmp.branchId,
-        workDate: todayUtc,
-        clockInAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-        clockInSource: 'WEB',
-        clockOutAt: null,
-        status: 'OPEN',
-      },
-    });
-  }
-
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------
   const extra = [
     { slug: 'demo-globex', name: 'Globex Industries (demo)', edition: 'ENTERPRISE' as const, status: 'ACTIVE' as const, sub: 'ACTIVE' as const, seats: 250, ago: 160, country: 'US' },
@@ -533,7 +510,6 @@ async function main() {
   for (const l of demoLogins) console.log(`  ${l.email}  — ${l.branch}`);
   console.log('Approval chain (step 7.2), password', DEMO_PASSWORD + ': intern@ -> lead@ -> pm@ -> (top) -> ceo@acme-demo.local ; hr@acme-demo.local is HR (never approves).');
   console.log('Attendance status (Part 2): intern@acme-demo.local has ~30 days of mixed GREEN/YELLOW/RED/NEUTRAL days — GET /attendance/status?from&to (US HQ, New York time).');
-  console.log('Live clock (Part 3): intern@acme-demo.local is clocked in right now (started ~2h before seeding) — sign in as intern@acme-demo.local (or hr@/ceo@ and switch to her month on /attendance) and open /dashboard to see the live analog clock + goal ring running; the monthly graph on /attendance shows her colourful month.');
   console.log('Working hours (/working-hours, sign in as hr@acme-demo.local or ceo@): company 09:00 8+1; Engineering (US HQ) team 10:00; Ivy Intern member 07:30 7+1.');
   console.log('Team-access demo users (/users):');
   for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);
