@@ -4379,3 +4379,16 @@ goal ring while clocked in; resulting status / Half-day-Short-day callout after 
   **Verification:** see below.
 
 * `attendance-ui.spec.ts` **10/10** (real API/DB: live clock ticking + elapsed anchored to server clock-in, clock-out → Half-day status, UI clock-in → live, reduced-motion whole-second ticks, seeded month colours/legend/tooltips, light+dark incl. axe, QA-branch RTL mirroring + Fri/Sat neutral from the API, employee sees own only, manager picks a report / out-of-chain refused). Full portal suite: 145 pass; 3 fail in payroll/recruitment/statutory-reports approval flows — payroll + recruitment fail identically on a clean checkout (pre-existing), statutory-reports depends on the same payroll approval path.
+
+## 8.1 Part 4 — Default leave allocation + 3 stale portal approval specs (2026-10-10)
+
+**A. Default leave allocation.** Design in [`conventions/leave.md`](./conventions/leave.md) § Default leave
+allocation. `GET /leave/defaults` + `PUT /leave/defaults/:countryCode` (`leave.defaults.manage`) over the existing
+0.5 tenant override + 1.2 balance model — legal floor rejected with a clear message, allocation to all active members
+going forward only (raise-only on existing rows; earned/used never rewritten), audited. New: `LeaveDefaultsService`/
+`Controller`, `updateLeaveDefaultsSchema`, permission + backfill migration `20261010090000_add_leave_defaults_permission`
+(no table changes), portal `/leave-defaults` (nav "Leave allocation"), en+ar strings.
+**B. Test-only repair** of `payroll.spec.ts`, `recruitment.spec.ts` (requisition + offer approvals) and
+`statutory-reports.spec.ts`: since 7.2 the submitter can't approve their own request, so these now approve as a
+SECOND tenant admin (`approver@portal-e2e-a.test`, new fixture; `approveAs()` helper in `tests/helpers.ts`; the API call
+in the statutory spec logs in as that user). No product code or hierarchy rule changed.

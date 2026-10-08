@@ -260,3 +260,50 @@ is waiting for your approval."`, seeded in 0.8) — because a leave
   RBAC deny-by-default for both submission and balance adjustment; and
   cross-tenant isolation — RLS, not application code, is what blocks
   tenant B from reading or listing tenant A's leave requests).
+
+## Default leave allocation (step 8.1, Part 4)
+
+An admin screen + API to set the tenant's **default days per leave type** — a thin layer over what already
+exists, no parallel store:
+
+- **Storage = the existing 0.5 two-layer override.** Defaults live in
+  `TenantCountryOverride.overrides.leaveDefaults` for a (tenant, country). `PUT /leave/defaults/:countryCode`
+  merges ONLY that section (working-time / required-fields / payslip overrides are preserved) and busts the 5.1
+  cache. Resolution is unchanged: `resolveLeavePackConfig` → `mergeCountryPackConfig`, so every consumer
+  (balances, accrual, the 0.5 `GET /country-packs/effective`) sees the new numbers with no other code change.
+- **Per country, because packs are per branch.** A tenant's branches may span countries, each with its own pack
+  and legal floor, so `GET /leave/defaults` returns one entry per branch country: `legalFloor` (the pack),
+  `override` (what the tenant set), `effective`, `memberCount`. The screen shows one card per country.
+- **Leave types** are the existing closed catalog: `ANNUAL`, `SICK`, `MATERNITY`, `PATERNITY` (there is no
+  "casual" type; adding one is a schema + pack change, deliberately out of scope).
+- **Legal floor — rejected, not silently clamped.** A value below the pack's floor is a `400` whose message
+  names the type, the country and the minimum ("Annual leave cannot be set to 5 day(s): the legal minimum for US
+  is 10 day(s). Enter 10 or more."), plus a structured `violations`/`legalFloor` body; the UI shows the same
+  message inline before any round trip. Exactly at the floor is fine. The check reuses
+  `assertLeaveBoundsRespected` (same bound as the raw override route), and `mergeCountryPackConfig` still
+  clamps at read time as the second layer.
+- **Applying (allocation) — through the existing balance model, going forward only.** Saving allocates to every
+  ACTIVE member of that country's branches for the current year (`LeaveBalance` rows in the same shape
+  `getOrCreateBalance` makes: ANNUAL/SICK start at 0 accrued and accrue monthly; MATERNITY/PATERNITY available
+  in full):
+  - members with **no** balance get one at the new default (`createMany … skipDuplicates`);
+  - **new members** inherit the current defaults automatically at first touch (nothing to run);
+  - existing current-year rows are only ever **raised**: `entitledDays` (the accrual cap) goes up to the new
+    value, and for the non-accrued types the increase is also granted. `accruedDays` already earned,
+    `usedDays` and `carriedOverDays` are **never rewritten**; **lowering** a default (still ≥ floor) never takes
+    days away from existing balances — it applies to new allocations / next period only. Rationale: a snapshot
+    that silently shrank earned leave would be a payroll/legal incident; a raise is always safe. (Note the
+    accrual job caps at the row's `entitledDays` snapshot, which is why a raise must lift it.)
+  - `PUT` returns `applied: { year, members, balancesCreated, balancesRaised }`.
+- **RBAC / audit.** New `leave.defaults.manage` (TENANT_ADMIN/CEO via `ALL_PERMISSIONS`, HR_MANAGER explicitly;
+  not MANAGER/EMPLOYEE; backfilled for existing tenants by migration `20261010090000`). Both routes require it
+  (403 otherwise; the portal nav entry and page also hide). `PUT` is `@AuditLog('LeaveDefaults', UPDATE)` with the
+  previous override row as `before`. Cross-tenant: RLS on `tenant_country_overrides`/`leave_balances` + tenant-scoped
+  queries — another tenant's admin neither sees nor changes this tenant's defaults.
+- **Files.** `apps/api/src/leave/leave-defaults.{service,controller}.ts`, `updateLeaveDefaultsSchema`
+  (`@hrm/shared`), portal `/leave-defaults` (`app/(app)/leave-defaults/page.tsx`, `lib/api/leave.ts`),
+  `leaveDefaults.*` strings (en + ar). Tests: `apps/api/test/leave-defaults.e2e-spec.ts` (8),
+  `apps/portal/tests/leave-defaults.spec.ts` (4).
+- **Known limits.** Allocation runs inside the request transaction (bulk statements, one per leave type — fine
+  for a tenant's headcount; a very large tenant would want it moved to a queue job); only the current calendar
+  year is allocated; no per-team/per-member leave override (country-level only).

@@ -154,6 +154,13 @@ export const PERMISSIONS = {
   // deliberately NOT MANAGER/EMPLOYEE. A member may always read their OWN
   // effective policy without it. See docs/conventions/working-hours.md.
   WORKING_HOURS_MANAGE: 'working_hours.manage',
+
+  // Step 8.1 Part 4 (default leave allocation) — setting the tenant's default leave
+  // days per type per country (a thin admin layer over the 0.5 tenant override, which
+  // still clamps to the Country Pack's legal floor). HR administers it
+  // (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER explicitly); deliberately NOT
+  // MANAGER/EMPLOYEE. See docs/conventions/leave.md § Default leave allocation.
+  LEAVE_DEFAULTS_MANAGE: 'leave.defaults.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -234,6 +241,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.STATUTORY_REPORT_GENERATE,
     PERMISSIONS.STATUTORY_REPORT_READ,
     PERMISSIONS.WORKING_HOURS_MANAGE,
+    PERMISSIONS.LEAVE_DEFAULTS_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

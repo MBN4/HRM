@@ -1011,6 +1011,12 @@ server-anchored elapsed time + goal ring on `/dashboard`, and a colour-coded, RT
 (dashboard + `/attendance`) with a manager/HR "pick a member" view. See
 [`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md).
 
+**8.1 Part 4 — Default leave allocation (2026-10-10)** — admin `/leave-defaults` +
+`GET/PUT /leave/defaults` (`leave.defaults.manage`): per-country default days per leave type stored in the
+existing 0.5 tenant override, rejected below the Country Pack legal floor, allocated to all active members through
+the 1.2 balance model going forward only (raise-only, earned/used never rewritten). Also repaired 3 stale portal
+approval specs (second-approver). See [`docs/conventions/leave.md`](./docs/conventions/leave.md) § Default leave allocation.
+
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and
 `apps/admin`: a password show/hide toggle (`components/ui/PasswordInput.tsx`

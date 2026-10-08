@@ -77,7 +77,17 @@ test.describe.serial('Statutory Reports console', () => {
     const runAfterSubmit = await (await request.get(`${API}/payroll/runs/${runId}`, { headers })).json();
     const instanceBody = await (await request.get(`${API}/workflow/instances/${runAfterSubmit.workflowInstanceId}`, { headers })).json();
     const activeStep = instanceBody.steps.find((s: { status: string }) => s.status === 'ACTIVE');
-    await request.post(`${API}/workflow/instances/${instanceBody.instance.id}/steps/${activeStep.id}/actions`, { headers, data: { actionType: 'APPROVE' } });
+    // Approved by a SECOND tenant admin — since step 7.2 the submitter (adminA) cannot approve their own request.
+    const approverLogin = await request.post(`${API}/auth/login`, {
+      headers: { 'x-tenant-id': fixtures.tenantASlug },
+      data: { email: fixtures.approverAEmail, password: TEST_PASSWORD },
+    });
+    const approverHeaders = { 'x-tenant-id': fixtures.tenantASlug, Authorization: `Bearer ${(await approverLogin.json()).accessToken}` };
+    const approveRes = await request.post(`${API}/workflow/instances/${instanceBody.instance.id}/steps/${activeStep.id}/actions`, {
+      headers: approverHeaders,
+      data: { actionType: 'APPROVE' },
+    });
+    expect(approveRes.ok()).toBe(true);
 
     await waitFor(async () => {
       const res = await request.get(`${API}/payroll/runs/${runId}`, { headers });

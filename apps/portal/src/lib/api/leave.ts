@@ -36,3 +36,35 @@ export function getLeaveCalendar(params: { branchId?: string; departmentId?: str
 export function getLeaveConflicts(params: { branchId?: string; departmentId?: string; from: string; to: string }): Promise<LeaveRequest[]> {
   return apiFetch<LeaveRequest[]>('/leave/conflicts', { query: params });
 }
+
+// ---- Step 8.1 Part 4: default leave allocation (GET/PUT /leave/defaults) ----
+
+export interface LeaveDefaultDays {
+  annualDays: number;
+  sickDays: number;
+  maternityDays: number;
+  paternityDays: number;
+}
+
+export interface LeaveDefaultsCountry {
+  countryCode: string;
+  legalFloor: LeaveDefaultDays;
+  override: Partial<LeaveDefaultDays> | null;
+  effective: LeaveDefaultDays;
+  memberCount: number;
+}
+
+export interface LeaveDefaultsApplied {
+  year: number;
+  members: number;
+  balancesCreated: number;
+  balancesRaised: number;
+}
+
+export function getLeaveDefaults(): Promise<{ year: number; countries: LeaveDefaultsCountry[] }> {
+  return apiFetch('/leave/defaults');
+}
+
+export function saveLeaveDefaults(countryCode: string, input: Partial<LeaveDefaultDays>): Promise<{ country: LeaveDefaultsCountry; applied: LeaveDefaultsApplied }> {
+  return apiFetch(`/leave/defaults/${countryCode}`, { method: 'PUT', body: input });
+}

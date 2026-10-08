@@ -52,3 +52,20 @@ export const runLeaveAccrualSchema = z
   })
   .strict();
 export type RunLeaveAccrualInput = z.infer<typeof runLeaveAccrualSchema>;
+
+/**
+ * Step 8.1 Part 4 — `PUT /leave/defaults/:countryCode`: the tenant's default days per leave type for one
+ * country. Keys are exactly `leaveDefaultsSchema`'s (0.5); every key optional, at least one required.
+ * The legal-floor bound is pack-relative, so (like 0.5's override) it is enforced server-side, not here.
+ */
+export const updateLeaveDefaultsSchema = z
+  .object({
+    annualDays: z.number().min(0).max(366),
+    sickDays: z.number().min(0).max(366),
+    maternityDays: z.number().min(0).max(366),
+    paternityDays: z.number().min(0).max(366),
+  })
+  .partial()
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'Provide at least one leave type.' });
+export type UpdateLeaveDefaultsInput = z.infer<typeof updateLeaveDefaultsSchema>;

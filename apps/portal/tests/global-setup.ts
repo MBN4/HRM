@@ -90,6 +90,11 @@ export default async function globalSetup(): Promise<void> {
   // PATCH response too.
   const adminAUser = await makeUser(tenantA.id, 'admin@portal-e2e-a.test', adminRoleA.id);
 
+  // Step 8.1 Part 4 (Part B test repair) — a SECOND tenant admin. Since 7.2 nobody may approve their own request, so
+  // the ROLE:TENANT_ADMIN approval templates below (PayrollRun, JobRequisition, Offer) are approved by this user, not
+  // by the admin who submitted. A legitimate approver — the hierarchy rules are untouched.
+  await makeUser(tenantA.id, 'approver@portal-e2e-a.test', adminRoleA.id);
+
   const managerAUser = await makeUser(tenantA.id, 'manager@portal-e2e-a.test', managerRoleA.id);
   const managerAEmployee = await prisma.employee.create({
     data: {
@@ -640,6 +645,7 @@ export default async function globalSetup(): Promise<void> {
     tenantASlug: TENANT_A_SLUG,
     tenantBSlug: TENANT_B_SLUG,
     adminAEmail: 'admin@portal-e2e-a.test',
+    approverAEmail: 'approver@portal-e2e-a.test',
     managerAEmail: 'manager@portal-e2e-a.test',
     branchRestrictedManagerEmail: 'branch-restricted-manager@portal-e2e-a.test',
     employeeAEmail: 'employee@portal-e2e-a.test',

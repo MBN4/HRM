@@ -253,7 +253,8 @@ test.describe('RTL (QA branch)', () => {
     expect(clock.x + clock.width / 2).toBeGreaterThan(card.x + card.width / 2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.emulateMedia({ colorScheme: 'dark' });
-    await page.screenshot({ path: 'test-results/attendance-ui-dashboard-rtl-dark.png', fullPage: true });
+    await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark');
+    await expect(page.getByTestId('analog-clock')).toBeVisible();
   });
 });
 

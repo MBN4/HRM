@@ -6,6 +6,9 @@ import { LeaveAccrualProcessor } from './accrual/leave-accrual.processor';
 import { LeaveAccrualService } from './accrual/leave-accrual.service';
 import { LeaveBalanceService } from './leave-balance.service';
 import { LeaveController } from './leave.controller';
+import { LeaveDefaultsController } from './leave-defaults.controller';
+import { LeaveDefaultsService } from './leave-defaults.service';
+import { CountryPacksModule } from '../country-packs/country-packs.module';
 import { LeaveService } from './leave.service';
 import { LeaveWorkflowEventsListener } from './leave-workflow-events.listener';
 
@@ -23,13 +26,14 @@ import { LeaveWorkflowEventsListener } from './leave-workflow-events.listener';
 @Module({
   imports: [
     WorkflowModule,
+    CountryPacksModule,
     BullModule.registerQueue({
       name: LEAVE_ACCRUAL_QUEUE,
       defaultJobOptions: { attempts: 5, backoff: { type: 'exponential', delay: 1000 } },
     }),
   ],
-  controllers: [LeaveController],
-  providers: [LeaveService, LeaveBalanceService, LeaveAccrualService, LeaveAccrualProcessor, LeaveWorkflowEventsListener],
+  controllers: [LeaveController, LeaveDefaultsController],
+  providers: [LeaveDefaultsService, LeaveService, LeaveBalanceService, LeaveAccrualService, LeaveAccrualProcessor, LeaveWorkflowEventsListener],
   // `LeaveBalanceService` additively exported (step 3.5.1) so the data
   // migration toolkit's leave opening-balance importer can call
   // `getOrCreateBalance`/`setOpeningBalance` directly rather than

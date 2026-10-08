@@ -41,7 +41,7 @@ only does calendar layout and a ticking `now`.
 - **Reduced motion.** The second hand sweeps per `requestAnimationFrame`; with
   `prefers-reduced-motion: reduce` it ticks once a second and the glow/pulse/fade are off (`motion-safe:`
   utilities + a `matchMedia` check). The time itself is information, so it still moves.
-- **After clock-out:** a graceful fade to the day's status badge, hours vs required, the human reason, and —
+- **After clock-out:** the day's status badge, hours vs required, the human reason, and —
   for a RED finished day — a **Half day** / **Short day** badge (from `isHalfDay` / `isShortDay`/`isEarlyOut`).
 - **Test hooks:** `clock-live` / `clock-idle[data-state=idle|done]`, `analog-clock[data-live]`,
   `second-hand[data-second-deg]`, `clock-elapsed`, `clock-remaining`, `clock-progress-ring[data-progress]`,

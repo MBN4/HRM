@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { prisma } from '@hrm/db';
 import { FIXTURES_PATH, type PortalTestFixtures } from './fixtures';
-import { login, waitFor } from './helpers';
+import { approveAs, login, waitFor } from './helpers';
 
 const fixtures: PortalTestFixtures = JSON.parse(readFileSync(FIXTURES_PATH, 'utf-8'));
 
@@ -37,7 +37,7 @@ async function refreshUntil(page: Page, check: () => Promise<boolean>): Promise<
  * DOM lookups — never a direct API call to fake a step forward.
  */
 test.describe.serial('Recruitment + Onboarding + Offboarding console', () => {
-  test('HR/admin creates a requisition, submits it for approval, and approves it via the inline WorkflowStatusPanel', async ({ page }) => {
+  test('HR/admin creates a requisition, submits it for approval, and approves it via the inline WorkflowStatusPanel', async ({ page, browser }) => {
     await login(page, fixtures.tenantASlug, fixtures.adminAEmail);
     await page.goto('/recruitment');
 
@@ -59,10 +59,15 @@ test.describe.serial('Recruitment + Onboarding + Offboarding console', () => {
     await expect(page.getByTestId('workflow-status-panel')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('workflow-step-row')).toHaveCount(1);
 
-    // The seeded JobRequisition workflow template uses a `ROLE: TENANT_ADMIN`
-    // approver rule (see global-setup.ts) — the SAME admin who submitted the
-    // requisition is eligible to approve it inline, no re-login needed.
-    await page.getByTestId('approve-button').click();
+    // The seeded JobRequisition workflow template uses a `ROLE: TENANT_ADMIN` approver rule (see global-setup.ts).
+    // Since step 7.2 the submitter cannot approve their own request, so a SECOND tenant admin approves it, inline in
+    // the same WorkflowStatusPanel, from a separate session; this page then refreshes to see the result.
+    await approveAs(browser, fixtures.tenantASlug, fixtures.approverAEmail, async (approver) => {
+      await approver.goto('/recruitment');
+      const approverRow = approver.locator('[data-testid="requisition-row"]', { hasText: REQUISITION_TITLE });
+      await approverRow.getByRole('button', { name: REQUISITION_TITLE }).click();
+      await expect(approver.getByTestId('workflow-status-panel')).toBeVisible({ timeout: 10000 });
+    });
     await refreshUntil(page, async () => (await row.getAttribute('data-status')) === 'APPROVED');
   });
 
@@ -126,7 +131,7 @@ test.describe.serial('Recruitment + Onboarding + Offboarding console', () => {
     await expect(page.getByTestId('scorecard-row')).toBeVisible();
   });
 
-  test('an offer is created, submitted, approved via the panel, and accepted — auto-starting onboarding with zero direct API calls', async ({ page }) => {
+  test('an offer is created, submitted, approved via the panel, and accepted — auto-starting onboarding with zero direct API calls', async ({ page, browser }) => {
     await login(page, fixtures.tenantASlug, fixtures.adminAEmail);
 
     await page.goto('/recruitment/candidates');
@@ -152,7 +157,12 @@ test.describe.serial('Recruitment + Onboarding + Offboarding console', () => {
 
     await row.locator('button').first().click();
     await expect(page.getByTestId('workflow-status-panel')).toBeVisible({ timeout: 10000 });
-    await page.getByTestId('approve-button').click();
+    // A second tenant admin approves (no self-approval since 7.2) — see the requisition test above.
+    await approveAs(browser, fixtures.tenantASlug, fixtures.approverAEmail, async (approver) => {
+      await approver.goto('/recruitment/offers');
+      await approver.locator('[data-testid="offer-row"]').first().locator('button').first().click();
+      await expect(approver.getByTestId('workflow-status-panel')).toBeVisible({ timeout: 10000 });
+    });
     await refreshUntil(page, async () => (await row.getAttribute('data-status')) === 'APPROVED');
 
     await row.getByTestId('accept-offer-button').click();

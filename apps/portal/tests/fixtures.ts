@@ -4,6 +4,8 @@ export interface PortalTestFixtures {
   tenantASlug: string;
   tenantBSlug: string;
   adminAEmail: string;
+  /** A second TENANT_ADMIN — approves what `adminAEmail` submits (no self-approval since 7.2). */
+  approverAEmail: string;
   managerAEmail: string;
   branchRestrictedManagerEmail: string;
   employeeAEmail: string;

@@ -162,7 +162,7 @@ export function ClockWidget({ locale, onClockEvent }: { locale: string; onClockE
   if (clockedIn && live?.clockIn) {
     const goalReached = requiredMs > 0 && elapsedMs >= requiredMs;
     return (
-      <div data-testid="clock-live" data-state="in-progress" className="space-y-4 motion-safe:animate-fade-up">
+      <div data-testid="clock-live" data-state="in-progress" className="space-y-4">
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center">
           <AnalogClock timeZone={timeZone} progress={requiredMs > 0 ? progress : undefined} live label={t('attendance.live.clockLabel', { zone: timeZone })} />
           <div className="min-w-0 flex-1 space-y-3 text-center sm:text-start">
@@ -215,7 +215,7 @@ export function ClockWidget({ locale, onClockEvent }: { locale: string; onClockE
   const done = today && today.clockIn && today.clockOut ? today : null;
   const shortfall = done ? shortfallKind(done) : null;
   return (
-    <div data-testid="clock-idle" data-state={done ? 'done' : 'idle'} className="space-y-4 motion-safe:animate-fade-up">
+    <div data-testid="clock-idle" data-state={done ? 'done' : 'idle'} className="space-y-4">
       <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-center">
         <AnalogClock timeZone={timeZone} label={t('attendance.live.clockLabel', { zone: timeZone })} />
         <div className="min-w-0 flex-1 space-y-3 text-center sm:text-start">

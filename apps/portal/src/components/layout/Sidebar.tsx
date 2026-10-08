@@ -7,6 +7,7 @@ import {
   Briefcase,
   CalendarClock,
   CalendarDays,
+  CalendarRange,
   ClipboardCheck,
   CreditCard,
   FileSignature,
@@ -141,6 +142,10 @@ export function Sidebar() {
   // Working hours (step 8.1) — see docs/conventions/.
   if (can(PERMISSIONS.WORKING_HOURS_MANAGE)) {
     adminItems.push({ href: '/working-hours', label: t('nav.workingHours'), icon: Clock3 });
+  }
+  // Default leave allocation (step 8.1 Part 4) — see docs/conventions/leave.md.
+  if (can(PERMISSIONS.LEAVE_DEFAULTS_MANAGE)) {
+    adminItems.push({ href: '/leave-defaults', label: t('nav.leaveDefaults'), icon: CalendarRange });
   }
   // Data privacy & residency (step 6.1) — see docs/conventions/privacy-residency.md.
   if (can(PERMISSIONS.PRIVACY_MANAGE)) {

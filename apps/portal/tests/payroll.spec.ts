@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'fs';
 import { FIXTURES_PATH, TEST_PASSWORD, type PortalTestFixtures } from './fixtures';
-import { login, waitFor } from './helpers';
+import { approveAs, login, waitFor } from './helpers';
 
 const fixtures: PortalTestFixtures = JSON.parse(readFileSync(FIXTURES_PATH, 'utf-8'));
 const API = 'http://localhost:3001';
@@ -119,7 +119,7 @@ test.describe.serial('Payroll console', () => {
     await expect(page.getByText("don't have permission to view salary amounts")).toBeVisible();
   });
 
-  test('submit for approval surfaces the WorkflowStatusPanel, and approving it reaches APPROVED', async ({ page }) => {
+  test('submit for approval surfaces the WorkflowStatusPanel, and approving it reaches APPROVED', async ({ page, browser }) => {
     await login(page, fixtures.tenantASlug, fixtures.adminAEmail);
     await page.goto(`/payroll/${runId}`);
 
@@ -136,13 +136,13 @@ test.describe.serial('Payroll console', () => {
     await expect(page.getByTestId('workflow-status-panel')).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId('workflow-step-row')).toHaveCount(1);
 
-    // The seeded PayrollRun workflow template uses a `ROLE: TENANT_ADMIN`
-    // approver rule (see global-setup.ts) — the SAME admin who submitted
-    // the run is eligible to approve it, so no re-login is needed.
-    await Promise.all([
-      page.waitForResponse((res) => res.url().includes('/actions') && res.request().method() === 'POST'),
-      page.getByTestId('approve-button').click(),
-    ]);
+    // The seeded PayrollRun workflow template uses a `ROLE: TENANT_ADMIN` approver rule (see global-setup.ts).
+    // Since step 7.2 nobody approves their OWN request, so a SECOND tenant admin (the legitimate approver) approves
+    // from a separate session — the requester's page below stays logged in and just refreshes.
+    await approveAs(browser, fixtures.tenantASlug, fixtures.approverAEmail, async (approver) => {
+      await approver.goto(`/payroll/${runId}`);
+      await expect(approver.getByTestId('workflow-status-panel')).toBeVisible({ timeout: 10000 });
+    });
 
     // The `PayrollRun.status` flip to APPROVED happens via a fire-and-forget
     // `workflow.approved` event listener (see docs/conventions/payroll.md)
