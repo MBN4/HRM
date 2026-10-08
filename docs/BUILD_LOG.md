@@ -4362,3 +4362,20 @@ of mixed attendance (13 green, 3 yellow, 2 late-red, 2 early-out, 1 half-day, 9 
 **Verification**: `attendance-status.e2e-spec.ts` **21/21** with real instants against a real
 Part-1 policy (each rule, weekend US vs QA, holiday, leave, IN_PROGRESS, override shifts the
 result, Doha-local time, midnight-crossing shift, RBAC/chain/branch/cross-tenant, range validation).
+
+## 8.1 Part 3 — Live attendance clock + colour-coded monthly graph (2026-10-09)
+
+Frontend only (`apps/portal`), consuming Part 2's `GET /attendance/status` unchanged — no backend,
+classification, policy, auth or RLS change. Design + RTL/reduced-motion/reason-mapping notes:
+[`conventions/attendance-ui.md`](./conventions/attendance-ui.md).
+**New:** `components/attendance/{AnalogClock,MonthlyAttendanceGraph,MemberMonthView}.tsx`,
+`lib/attendance-status.ts`, `tests/attendance-ui.spec.ts`, `apps/api/scripts/demo-clock-in.ts`
+(+ `demo:clock-in` script). **Changed:** `ClockWidget.tsx` (now status-driven: live analog clock + elapsed +
+goal ring while clocked in; resulting status / Half-day-Short-day callout after clock-out; same
+`clock-toggle-button`), `/dashboard` (clock card widened, compact own-month graph), `/attendance` (full graph
+
+- manager/HR member picker), `lib/api/attendance.ts` (typed client), `@hrm/shared` i18n (en + ar:
+  `attendance.live/dayStatus/reason/tooltip/month.*`), portal `global-setup.ts` fixtures (4 dedicated members).
+  **Verification:** see below.
+
+* `attendance-ui.spec.ts` **10/10** (real API/DB: live clock ticking + elapsed anchored to server clock-in, clock-out → Half-day status, UI clock-in → live, reduced-motion whole-second ticks, seeded month colours/legend/tooltips, light+dark incl. axe, QA-branch RTL mirroring + Fri/Sat neutral from the API, employee sees own only, manager picks a report / out-of-chain refused). Full portal suite: 145 pass; 3 fail in payroll/recruitment/statutory-reports approval flows — payroll + recruitment fail identically on a clean checkout (pre-existing), statutory-reports depends on the same payroll approval path.

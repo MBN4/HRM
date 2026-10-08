@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { PERMISSIONS } from '@hrm/shared';
 import { useI18n } from '../../../i18n/I18nProvider';
 import { useAuth } from '../../../lib/auth/AuthContext';
@@ -14,6 +14,7 @@ import { listMyAnnouncements } from '../../../lib/api/announcements';
 import { getAnalyticsDashboard } from '../../../lib/api/analytics';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
+import { MonthlyAttendanceGraph } from '../../../components/attendance/MonthlyAttendanceGraph';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { formatDate, formatDateTime, formatPercent, formatNumber } from '../../../lib/format';
 import { CalendarCheck, ClipboardCheck, Users } from 'lucide-react';
@@ -24,6 +25,7 @@ export default function DashboardPage() {
   const { employee, employeeLoading } = useSession();
   const { can } = useAuth();
   const canAnalytics = can(PERMISSIONS.ANALYTICS_READ);
+  const [clockEvents, setClockEvents] = useState(0);
 
   const { data: balances } = useAsync(() => (employee ? getLeaveBalances({ employeeId: employee.id }) : Promise.resolve([])), [employee?.id]);
   const { data: pendingApprovals } = useAsync(() => getMyPendingApprovals(), []);
@@ -58,70 +60,88 @@ export default function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card>
+        <Card className="lg:col-span-2" data-testid="dashboard-clock-card">
           <CardHeader>
             <CardTitle>{t('dashboard.clockWidget.title')}</CardTitle>
           </CardHeader>
           <CardBody>
-            <ClockWidget locale={locale} />
+            <ClockWidget locale={locale} onClockEvent={() => setClockEvents((n) => n + 1)} />
           </CardBody>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('dashboard.leaveBalance.title')}</CardTitle>
-            <Link href="/leave" className="text-xs font-semibold text-brand-700 hover:underline">
-              {t('common.viewAll')}
-            </Link>
-          </CardHeader>
-          <CardBody>
-            {!balances || balances.length === 0 ? (
-              <p className="text-sm text-ink-400">{t('common.noData')}</p>
-            ) : (
-              <ul className="space-y-4">
-                {balances.map((b) => {
-                  const total = b.entitledDays + b.accruedDays + b.carriedOverDays;
-                  const pct = total > 0 ? Math.min(100, (b.usedDays / total) * 100) : 0;
-                  return (
-                    <li key={b.leaveType} className="text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-ink-600">{t(`leave.type.${b.leaveType}`)}</span>
-                        <span className="font-semibold text-ink-900">{b.availableDays}</span>
-                      </div>
-                      <div
-                        role="progressbar"
-                        aria-label={t(`leave.type.${b.leaveType}`)}
-                        aria-valuemin={0}
-                        aria-valuemax={total}
-                        aria-valuenow={b.usedDays}
-                        className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sand-200"
-                      >
-                        <div className="h-full rounded-full bg-chart-1 transition-all duration-500" style={{ width: `${pct}%` }} />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardBody>
-        </Card>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('dashboard.leaveBalance.title')}</CardTitle>
+              <Link href="/leave" className="text-xs font-semibold text-brand-700 hover:underline">
+                {t('common.viewAll')}
+              </Link>
+            </CardHeader>
+            <CardBody>
+              {!balances || balances.length === 0 ? (
+                <p className="text-sm text-ink-400">{t('common.noData')}</p>
+              ) : (
+                <ul className="space-y-4">
+                  {balances.map((b) => {
+                    const total = b.entitledDays + b.accruedDays + b.carriedOverDays;
+                    const pct = total > 0 ? Math.min(100, (b.usedDays / total) * 100) : 0;
+                    return (
+                      <li key={b.leaveType} className="text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-ink-600">{t(`leave.type.${b.leaveType}`)}</span>
+                          <span className="font-semibold text-ink-900">{b.availableDays}</span>
+                        </div>
+                        <div
+                          role="progressbar"
+                          aria-label={t(`leave.type.${b.leaveType}`)}
+                          aria-valuemin={0}
+                          aria-valuemax={total}
+                          aria-valuenow={b.usedDays}
+                          className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-sand-200"
+                        >
+                          <div className="h-full rounded-full bg-chart-1 transition-all duration-500" style={{ width: `${pct}%` }} />
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CardBody>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('dashboard.pendingApprovals.title')}</CardTitle>
-            <Link href="/approvals" className="text-xs font-semibold text-brand-700 hover:underline">
-              {t('common.viewAll')}
-            </Link>
-          </CardHeader>
-          <CardBody>
-            <div className="flex items-center gap-4">
-              <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-                <ClipboardCheck className="h-6 w-6" aria-hidden />
-              </span>
-              <p className="text-4xl font-bold tracking-tight text-ink-900">{pendingApprovals?.length ?? 0}</p>
-            </div>
-          </CardBody>
-        </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('dashboard.pendingApprovals.title')}</CardTitle>
+              <Link href="/approvals" className="text-xs font-semibold text-brand-700 hover:underline">
+                {t('common.viewAll')}
+              </Link>
+            </CardHeader>
+            <CardBody>
+              <div className="flex items-center gap-4">
+                <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                  <ClipboardCheck className="h-6 w-6" aria-hidden />
+                </span>
+                <p className="text-4xl font-bold tracking-tight text-ink-900">{pendingApprovals?.length ?? 0}</p>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+
+        {employee && (
+          <Card className="lg:col-span-3" data-testid="dashboard-month-card">
+            <CardHeader>
+              <CardTitle>{t('attendance.month.title')}</CardTitle>
+              <Link href="/attendance" className="text-xs font-semibold text-brand-700 hover:underline">
+                {t('common.viewAll')}
+              </Link>
+            </CardHeader>
+            <CardBody>
+              <div className="mx-auto max-w-xl">
+                <MonthlyAttendanceGraph compact refreshKey={clockEvents} />
+              </div>
+            </CardBody>
+          </Card>
+        )}
       </div>
 
       {canAnalytics && (workforceLoading || workforceHasData) && (

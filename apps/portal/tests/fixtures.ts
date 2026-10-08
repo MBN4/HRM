@@ -45,6 +45,15 @@ export interface PortalTestFixtures {
   whDepartmentName: string;
   whEmployeeCode: string;
   whEmployeeName: string;
+  ginaEmail: string;
+  ginaName: string;
+  ginaEmployeeCode: string;
+  qadirEmail: string;
+  clayEmail: string;
+  livEmail: string;
+  prevMonthKey: string;
+  ginaSeeded: { date: string; kind: string; status: string }[];
+  qadirSeeded: { date: string; kind: string; status: string }[];
 }
 
 export const FIXTURES_PATH = `${__dirname}/.fixtures.json`;

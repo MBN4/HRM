@@ -118,6 +118,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/team-hierarchy-approvals.md`](./docs/conventions/team-hierarchy-approvals.md) | The management chain (`User.managerId`) driving approvals: the extended `MANAGER` rule (direct manager → escalate past unavailable → CEO), the new CEO role + CEO-approves-anything, HR hard-excluded from approving, no self-approval, cycle guard, live re-routing on deactivate/reassign, and the `/hierarchy` org-chart UI. (7.2)                                                                       |
 | [`docs/conventions/working-hours.md`](./docs/conventions/working-hours.md)                       | Configurable working-hours policy (company → team/department → member, Country Pack fallback), the resolver service + `/working-hours/effective`, `working_hours.manage`, and the `/working-hours` admin screen — Part 1 of the attendance-classification series. (8.1)                                                                                                                                     |
 | [`docs/conventions/attendance-status.md`](./docs/conventions/attendance-status.md)               | Attendance day-status classification (GREEN/YELLOW/RED/NEUTRAL/IN_PROGRESS) computed on read from the working-hours policy + records, the reason values, `GET /attendance/status`, and how Part 3 consumes it. (8.1 Part 2)                                                                                                                                                                                 |
+| [`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md)                       | The live analog clock (server-anchored elapsed, goal ring, reduced-motion), the colour-coded monthly graph (status→colour, reason→i18n mapping, RTL calendar mirroring), the manager/HR member picker, and the demo helpers. (8.1 Part 3)                                                                                                                                                                   |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                           |
 
 ## 5. Build log summary
@@ -1003,6 +1004,12 @@ each day classified GREEN / YELLOW / RED / NEUTRAL / IN_PROGRESS against the Par
 working-hours policy, computed on read (nothing stored), via `GET /attendance/status`
 and the exported `AttendanceStatusService`. See
 [`docs/conventions/attendance-status.md`](./docs/conventions/attendance-status.md).
+
+**8.1 Part 3 — Live clock + monthly attendance graph (2026-10-09)** — frontend only
+(`apps/portal`), consuming Part 2's `GET /attendance/status` unchanged: a live analog clock with
+server-anchored elapsed time + goal ring on `/dashboard`, and a colour-coded, RTL-mirroring month calendar
+(dashboard + `/attendance`) with a manager/HR "pick a member" view. See
+[`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

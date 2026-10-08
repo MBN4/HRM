@@ -510,6 +510,7 @@ async function main() {
   for (const l of demoLogins) console.log(`  ${l.email}  — ${l.branch}`);
   console.log('Approval chain (step 7.2), password', DEMO_PASSWORD + ': intern@ -> lead@ -> pm@ -> (top) -> ceo@acme-demo.local ; hr@acme-demo.local is HR (never approves).');
   console.log('Attendance status (Part 2): intern@acme-demo.local has ~30 days of mixed GREEN/YELLOW/RED/NEUTRAL days — GET /attendance/status?from&to (US HQ, New York time).');
+  console.log('Live clock + monthly graph (Part 3): sign in as intern@acme-demo.local -> /dashboard & /attendance. For a RUNNING clock: pnpm --filter @hrm/api run demo:clock-in [email] [hoursAgo]  (e.g. intern@acme-demo.local 3).');
   console.log('Working hours (/working-hours, sign in as hr@acme-demo.local or ceo@): company 09:00 8+1; Engineering (US HQ) team 10:00; Ivy Intern member 07:30 7+1.');
   console.log('Team-access demo users (/users):');
   for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);

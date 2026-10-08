@@ -14,6 +14,7 @@
     "test": "jest --passWithNoTests",
     "seed:load-test": "ts-node -r dotenv/config -r tsconfig-paths/register scripts/seed-load-test-data.ts dotenv_config_path=.env",
     "seed:demo": "ts-node -r dotenv/config -r tsconfig-paths/register scripts/seed-demo-data.ts dotenv_config_path=.env",
+    "demo:clock-in": "ts-node -r dotenv/config -r tsconfig-paths/register scripts/demo-clock-in.ts dotenv_config_path=.env",
     "demo:rollup": "ts-node -r dotenv/config -r tsconfig-paths/register scripts/demo-rollup.ts dotenv_config_path=.env"
   },
   "dependencies": {

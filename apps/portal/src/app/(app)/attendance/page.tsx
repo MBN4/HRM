@@ -14,6 +14,7 @@ import { StatusBadge } from '../../../components/ui/Badge';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { PageSpinner } from '../../../components/ui/Spinner';
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
+import { MemberMonthView } from '../../../components/attendance/MemberMonthView';
 import { RegularizeForm } from '../../../components/attendance/RegularizeForm';
 
 function dateOffset(days: number): string {
@@ -26,6 +27,7 @@ export default function AttendancePage() {
   const { t, locale } = useI18n();
   const { employee, employeeLoading } = useSession();
   const [regularizing, setRegularizing] = useState(false);
+  const [clockEvents, setClockEvents] = useState(0);
 
   const { data: records, loading: recordsLoading, reload: reloadRecords } = useAsync(
     () => (employee ? listAttendanceRecords({ employeeId: employee.id, from: dateOffset(-30), to: dateOffset(1) }) : Promise.resolve([])),
@@ -39,7 +41,7 @@ export default function AttendancePage() {
   if (employeeLoading) return <PageSpinner />;
 
   return (
-    <div className="max-w-4xl space-y-6">
+    <div className="max-w-4xl space-y-6" data-testid="attendance-page">
       <div className="flex items-center justify-between">
         <h1 className="page-title">{t('attendance.title')}</h1>
         {employee && (
@@ -55,7 +57,16 @@ export default function AttendancePage() {
           <CardTitle>{t('attendance.today')}</CardTitle>
         </CardHeader>
         <CardBody>
-          <ClockWidget locale={locale} />
+          <ClockWidget locale={locale} onClockEvent={() => setClockEvents((n) => n + 1)} />
+        </CardBody>
+      </Card>
+
+      <Card data-testid="attendance-month-card">
+        <CardHeader>
+          <CardTitle>{t('attendance.month.title')}</CardTitle>
+        </CardHeader>
+        <CardBody>
+          <MemberMonthView refreshKey={clockEvents} />
         </CardBody>
       </Card>
 

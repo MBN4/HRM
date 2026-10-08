@@ -2,6 +2,7 @@ import { writeFileSync } from 'fs';
 import { hash } from '@node-rs/argon2';
 import { prisma, seedCountryPacks, seedStatutoryReportDefinitions, seedSystemRolesAndPermissions, SYSTEM_ROLES } from '@hrm/db';
 import { FIXTURES_PATH, TEST_PASSWORD } from './fixtures';
+import { branchLocalToUtc } from '../../api/src/attendance/attendance-timezone.util';
 
 const ARGON2ID = 2;
 
@@ -564,6 +565,77 @@ export default async function globalSetup(): Promise<void> {
     },
   });
 
+
+  // Step 8.1 Part 3 (attendance-ui.spec.ts) — dedicated members so the clock/graph specs never disturb (or
+  // are disturbed by) the shared Eve/Amal fixtures other specs clock in/out with.
+  //  - Gina Graph (US): a COLOURFUL previous calendar month (G/Y/R/early-out/half-day + weekends), reports to managerA.
+  //  - Qadir Graph (QA, Fri/Sat weekend, RTL): the same idea in Doha time, for the RTL calendar proof.
+  //  - Clay Clock (US): starts NOT clocked in — the spec clocks in/out through the real UI.
+  //  - Liv Live (US): an OPEN record from ~2h ago, so the live clock is already running on first load.
+  async function makeEmployee(email: string, code: string, first: string, last: string, branchId: string, roleId: string) {
+    const user = await makeUser(tenantA.id, email, roleId);
+    const employee = await prisma.employee.create({
+      data: {
+        tenantId: tenantA.id, userId: user.id, employeeCode: code, firstName: first, lastName: last, branchId,
+        managerId: managerAEmployee.id, employmentType: 'FULL_TIME', joinDate: new Date('2020-01-01'),
+        statutoryFields: first === 'Qadir' ? { QATAR_ID: 'QID-000099', VISA_SPONSORSHIP: 'yes' } : { SSN: '000-00-0099', W4: 'on-file' },
+      },
+    });
+    return employee;
+  }
+  const ginaEmployee = await makeEmployee('gina-graph@portal-e2e-a.test', 'PE-GG-1', 'Gina', 'Graph', branchAUs.id, employeeRoleA.id);
+  const qadirEmployee = await makeEmployee('qadir-graph@portal-e2e-a.test', 'PE-GG-2', 'Qadir', 'Graph', branchAQa.id, employeeRoleA.id);
+  await makeEmployee('clay-clock@portal-e2e-a.test', 'PE-CC-1', 'Clay', 'Clock', branchAUs.id, employeeRoleA.id);
+  const livEmployee = await makeEmployee('liv-live@portal-e2e-a.test', 'PE-LL-1', 'Liv', 'Live', branchAUs.id, employeeRoleA.id);
+  await prisma.workingHoursPolicy.createMany({
+    data: [ginaEmployee, qadirEmployee].map((e) => ({
+      tenantId: tenantA.id, scope: 'MEMBER' as const, targetKey: e.id, employeeId: e.id,
+      startTime: '07:30', workHours: 7, breakHours: 1, graceMinutes: 30, halfDayThresholdHours: 4,
+    })),
+  });
+  // The PREVIOUS calendar month (always fully in the past, so the seeded days are stable no matter what day the suite runs).
+  const nowUtc = new Date();
+  const prevMonthStart = new Date(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth() - 1, 1));
+  const prevMonthDays = new Date(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), 0)).getUTCDate();
+  const scenario: Record<string, { in: string; out: string; status: 'GREEN' | 'YELLOW' | 'RED' }> = {
+    G: { in: '07:25', out: '15:35', status: 'GREEN' },
+    Y: { in: '07:50', out: '15:55', status: 'YELLOW' },
+    R: { in: '08:35', out: '16:40', status: 'RED' }, // 65 min late
+    E: { in: '07:28', out: '13:10', status: 'RED' }, // left early
+    H: { in: '07:30', out: '10:50', status: 'RED' }, // half day
+  };
+  const pattern = ['G', 'G', 'Y', 'G', 'R', 'G', 'G', 'Y', 'G', 'E', 'G', 'G', 'H', 'G', 'R', 'G', 'G', 'Y', 'G', 'G', 'E', 'G'];
+  async function seedMonth(employeeId: string, branchId: string, tz: string, weekend: number[]) {
+    const seeded: { date: string; kind: string; status: string }[] = [];
+    let idx = 0;
+    for (let i = 0; i < prevMonthDays; i += 1) {
+      const d = new Date(prevMonthStart.getTime() + i * 86_400_000);
+      if (weekend.includes(d.getUTCDay())) continue;
+      const kind = pattern[idx % pattern.length];
+      idx += 1;
+      const sc = scenario[kind];
+      await prisma.attendanceRecord.create({
+        data: {
+          tenantId: tenantA.id, employeeId, branchId, workDate: d,
+          clockInAt: branchLocalToUtc(d, sc.in, tz), clockInSource: 'WEB',
+          clockOutAt: branchLocalToUtc(d, sc.out, tz), clockOutSource: 'WEB', status: 'CLOSED',
+        },
+      });
+      seeded.push({ date: d.toISOString().slice(0, 10), kind, status: sc.status });
+    }
+    return seeded;
+  }
+  const ginaSeeded = await seedMonth(ginaEmployee.id, branchAUs.id, 'America/New_York', [0, 6]);
+  const qadirSeeded = await seedMonth(qadirEmployee.id, branchAQa.id, 'Asia/Qatar', [5, 6]);
+  await prisma.attendanceRecord.create({
+    data: {
+      tenantId: tenantA.id, employeeId: livEmployee.id, branchId: branchAUs.id,
+      workDate: new Date(`${new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(Date.now() - 2 * 3_600_000))}T00:00:00Z`),
+      clockInAt: new Date(Date.now() - 2 * 3_600_000), clockInSource: 'WEB', status: 'OPEN',
+    },
+  });
+  const prevMonthKey = prevMonthStart.toISOString().slice(0, 7);
+
   const fixtures = {
     tenantASlug: TENANT_A_SLUG,
     tenantBSlug: TENANT_B_SLUG,
@@ -613,6 +685,15 @@ export default async function globalSetup(): Promise<void> {
     whDepartmentName: whDepartment.name,
     whEmployeeCode: 'PE-WH-1',
     whEmployeeName: 'Wanda Hours',
+    ginaEmail: 'gina-graph@portal-e2e-a.test',
+    ginaName: 'Gina Graph',
+    ginaEmployeeCode: 'PE-GG-1',
+    qadirEmail: 'qadir-graph@portal-e2e-a.test',
+    clayEmail: 'clay-clock@portal-e2e-a.test',
+    livEmail: 'liv-live@portal-e2e-a.test',
+    prevMonthKey,
+    ginaSeeded,
+    qadirSeeded,
   };
   writeFileSync(FIXTURES_PATH, JSON.stringify(fixtures, null, 2));
 
