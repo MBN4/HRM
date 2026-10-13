@@ -63,6 +63,6 @@ import { AttendanceSummaryService } from './summary/attendance-summary.service';
   // the same "consumer imports the reused module" direction
   // operations-modules.md's Expense→Payroll `ExchangeRateService` export
   // already establishes.
-  exports: [AttendanceClockService, AttendanceStatusService, BIOMETRIC_DEVICE_ADAPTER],
+  exports: [AttendanceClockService, AttendanceStatusService, ShiftsService, ShiftResolutionService, BIOMETRIC_DEVICE_ADAPTER],
 })
 export class AttendanceModule {}

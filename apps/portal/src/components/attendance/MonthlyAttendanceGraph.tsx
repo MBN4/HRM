@@ -62,6 +62,17 @@ function DayTooltip({ day, locale, id, align }: { day: ClassifiedDay; locale: st
           <li key={r}>{t(reasonKey(r))}</li>
         ))}
       </ul>
+      {day.shift && (
+        <p className="mb-1.5 opacity-90" data-testid={`day-shift-${day.date}`}>
+          {t('attendance.tooltip.shift')}: {day.shift.name} <bdi dir="ltr">{day.shift.startTime}–{day.shift.endTime}</bdi>
+          {day.shift.crossesMidnight ? ' +1' : ''}
+        </p>
+      )}
+      {day.expectedStartTime && day.status !== 'NEUTRAL' && (
+        <p className="mb-1.5 opacity-90">
+          {t('attendance.tooltip.expectedStart')}: <bdi dir="ltr">{day.expectedStartTime}</bdi>
+        </p>
+      )}
       {(day.clockIn || day.clockOut) && (
         <dl className="space-y-0.5 opacity-90">
           <div className="flex justify-between gap-3">

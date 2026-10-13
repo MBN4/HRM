@@ -53,6 +53,12 @@ export const NOTIFICATION_EVENT_TYPES = [
   // User-keyed and an external candidate/signer has no User row to key on.
   'esignature.request_sent',
   'esignature.completed',
+  // Step 8.2 (shift scheduling) — emitted by RosterService/ShiftSwapService, see
+  // docs/conventions/shift-scheduling.md. Every payload carries the target's own
+  // `employeeUserId` directly (no DB query in the recipient resolver).
+  'roster.published',
+  'roster.changed',
+  'shift_swap.requested',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -86,4 +92,7 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'billing.amc_invoice_created': ['IN_APP', 'EMAIL'],
   'esignature.request_sent': ['IN_APP', 'EMAIL'],
   'esignature.completed': ['IN_APP', 'EMAIL'],
+  'roster.published': ['IN_APP', 'EMAIL'],
+  'roster.changed': ['IN_APP', 'EMAIL'],
+  'shift_swap.requested': ['IN_APP'],
 };

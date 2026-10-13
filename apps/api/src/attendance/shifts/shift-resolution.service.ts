@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import type { Prisma, ShiftDefinition } from '@hrm/db';
+import { WorkingHoursResolverService } from '../../working-hours/working-hours-resolver.service';
 import { addUtcDays, resolveWorkDate, toBranchLocal } from '../attendance-timezone.util';
+import { pickRosterAssignment } from './roster-pick.util';
 
 export interface ClockInShiftResolution {
   shift: ShiftDefinition | null;
@@ -9,28 +11,41 @@ export interface ClockInShiftResolution {
 }
 
 /**
- * Resolves shifts/rosters — see docs/conventions/attendance.md. "Most
- * recent assignment whose range covers this date wins", the same
- * "most specific/most recent" resolution shape used elsewhere in this
- * schema (analogous to CountryPack's highest-version-active pick, 0.5),
- * rather than requiring non-overlapping assignments to be enforced at
- * write time.
+ * Resolves the shift that applies on a day — see docs/conventions/attendance.md and (for the
+ * 8.2 reconciliation) docs/conventions/shift-scheduling.md:
+ *
+ *   published dated roster row (narrowest span, then latest start)  ??  standing shift
+ *     (member > team > company, via WorkingHoursResolverService)  ??  null
+ *
+ * A rostered DAY OFF resolves to `null` (no shift) deliberately — it must not fall through to
+ * the standing shift. DRAFT roster rows are invisible here: only a published roster is live.
  */
 @Injectable()
 export class ShiftResolutionService {
-  async resolveForDate(tx: Prisma.TransactionClient, employeeId: string, calendarDate: Date): Promise<ShiftDefinition | null> {
-    const assignment = await tx.rosterAssignment.findFirst({
+  constructor(@Optional() private readonly workingHours?: WorkingHoursResolverService) {}
+
+  async resolveForDate(
+    tx: Prisma.TransactionClient,
+    employeeId: string,
+    calendarDate: Date,
+    /** A pre-resolved standing shift (undefined = look it up) — lets resolveForClockIn look it up once for its two days. */
+    standing?: ShiftDefinition | null,
+  ): Promise<ShiftDefinition | null> {
+    const candidates = await tx.rosterAssignment.findMany({
       where: {
         employeeId,
+        status: 'PUBLISHED',
         effectiveFrom: { lte: calendarDate },
         OR: [{ effectiveTo: null }, { effectiveTo: { gte: calendarDate } }],
       },
-      orderBy: { effectiveFrom: 'desc' },
     });
-    if (!assignment) {
-      return null;
+    const assignment = pickRosterAssignment(candidates, calendarDate);
+    if (assignment) {
+      if (assignment.dayOff || !assignment.shiftDefinitionId) return null;
+      return tx.shiftDefinition.findUnique({ where: { id: assignment.shiftDefinitionId } });
     }
-    return tx.shiftDefinition.findUnique({ where: { id: assignment.shiftDefinitionId } });
+    if (standing !== undefined) return standing;
+    return (await this.workingHours?.standingShift(tx, employeeId)) ?? null;
   }
 
   /**
@@ -57,12 +72,18 @@ export class ShiftResolutionService {
     const local = toBranchLocal(clockInAt, timeZone);
     const yesterday = addUtcDays(local.calendarDate, -1);
 
-    const shiftYesterday = await this.resolveForDate(tx, employeeId, yesterday);
-    if (shiftYesterday && resolveWorkDate(clockInAt, timeZone, shiftYesterday).getTime() === yesterday.getTime()) {
+    // The standing shift is the same for both days — look it up once.
+    const standing = (await this.workingHours?.standingShift(tx, employeeId)) ?? null;
+
+    const shiftYesterday = await this.resolveForDate(tx, employeeId, yesterday, standing);
+    if (
+      shiftYesterday &&
+      resolveWorkDate(clockInAt, timeZone, shiftYesterday).getTime() === yesterday.getTime()
+    ) {
       return { shift: shiftYesterday, workDate: yesterday };
     }
 
-    const shiftToday = await this.resolveForDate(tx, employeeId, local.calendarDate);
+    const shiftToday = await this.resolveForDate(tx, employeeId, local.calendarDate, standing);
     return { shift: shiftToday, workDate: local.calendarDate };
   }
 }

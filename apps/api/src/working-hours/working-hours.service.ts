@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@hrm/db';
 import type { UpsertWorkingHoursPolicyInput, WorkingHoursScopeName } from '@hrm/shared';
-import { EffectiveWorkingHours, WorkingHoursResolverService } from './working-hours-resolver.service';
+import { EffectiveWorkingHours, policyFromRow, WorkingHoursResolverService } from './working-hours-resolver.service';
 
 export interface WorkingHoursActor {
   userId: string;
@@ -27,6 +27,7 @@ export class WorkingHoursService {
       include: {
         department: { select: { id: true, name: true, branchId: true } },
         employee: { select: { id: true, employeeCode: true, firstName: true, lastName: true, branchId: true } },
+        shiftDefinition: true,
       },
       orderBy: [{ scope: 'asc' }, { createdAt: 'asc' }],
     });
@@ -35,23 +36,28 @@ export class WorkingHoursService {
       const branchId = row.department?.branchId ?? row.employee?.branchId;
       return !!branchId && actor.branchIds.includes(branchId);
     });
-    return visible.map((row) => ({
-      id: row.id,
-      scope: row.scope,
-      target:
-        row.scope === 'TEAM' && row.department
-          ? { id: row.department.id, label: row.department.name }
-          : row.scope === 'MEMBER' && row.employee
-            ? { id: row.employee.id, label: `${row.employee.firstName} ${row.employee.lastName}`, code: row.employee.employeeCode }
-            : null,
-      startTime: row.startTime,
-      workHours: row.workHours,
-      breakHours: row.breakHours,
-      requiredHours: Math.round((row.workHours + row.breakHours) * 100) / 100,
-      graceMinutes: row.graceMinutes,
-      halfDayThresholdHours: row.halfDayThresholdHours,
-      updatedAt: row.updatedAt,
-    }));
+    return visible.map((row) => {
+      // A shift-linked (standing) row reads its hours LIVE from the shift (step 8.2); `shift` names it.
+      const hours = policyFromRow(row);
+      return {
+        id: row.id,
+        scope: row.scope,
+        target:
+          row.scope === 'TEAM' && row.department
+            ? { id: row.department.id, label: row.department.name }
+            : row.scope === 'MEMBER' && row.employee
+              ? { id: row.employee.id, label: `${row.employee.firstName} ${row.employee.lastName}`, code: row.employee.employeeCode }
+              : null,
+        shift: row.shiftDefinition ? { id: row.shiftDefinition.id, name: row.shiftDefinition.name } : null,
+        startTime: hours.startTime,
+        workHours: hours.workHours,
+        breakHours: hours.breakHours,
+        requiredHours: hours.requiredHours,
+        graceMinutes: hours.graceMinutes,
+        halfDayThresholdHours: row.shiftDefinition ? row.shiftDefinition.halfDayThresholdHours : row.halfDayThresholdHours,
+        updatedAt: row.updatedAt,
+      };
+    });
   }
 
   /** Dropdown data for the admin UI: departments + employees the caller may target. */
@@ -152,6 +158,8 @@ export class WorkingHoursService {
       breakHours: input.breakHours,
       graceMinutes: input.graceMinutes,
       halfDayThresholdHours: input.halfDayThresholdHours ?? null,
+      // Setting custom hours replaces any standing-shift link on this row (one mechanism, never a mix).
+      shiftDefinitionId: null,
       updatedByUserId: actor.userId,
     };
     const row = await tx.workingHoursPolicy.upsert({
@@ -159,7 +167,7 @@ export class WorkingHoursService {
       update: data,
       create: { tenantId, scope, targetKey, ...target, ...data },
     });
-    return { id: row.id, scope: row.scope, ...data, requiredHours: Math.round((row.workHours + row.breakHours) * 100) / 100 };
+    return { id: row.id, scope: row.scope, ...data, requiredHours: Math.round((input.workHours + input.breakHours) * 100) / 100 };
   }
 
   private async remove(tx: Prisma.TransactionClient, scope: WorkingHoursScopeName, targetKey: string) {

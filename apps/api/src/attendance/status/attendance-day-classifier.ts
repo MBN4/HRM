@@ -28,6 +28,8 @@ export const DAY_REASONS = [
   'HOLIDAY',
   'ON_LEAVE',
   'NOT_EMPLOYED',
+  // Step 8.2: the published roster explicitly gives the day off (beats the Country Pack weekend).
+  'DAY_OFF',
   'FUTURE',
   'NOT_CLOCKED_IN',
   // IN_PROGRESS
@@ -59,14 +61,36 @@ export interface ClassifyDayInput {
   weekendDays: readonly Weekday[];
   publicHolidays: PublicHolidaysCalendar;
   onApprovedLeave: boolean;
+  /**
+   * Step 8.2. `rostered`: a published dated roster assignment applies to this day — an explicit
+   * "you work" that outranks the Country Pack weekend/holiday (a rostered weekend night shift is a
+   * working day). `dayOff`: the roster explicitly gives the day off.
+   */
+  rostered?: boolean;
+  dayOff?: boolean;
+  /** The named shift this day is judged against (roster cell or standing), for display. */
+  shift?: ClassifiedShift | null;
   /** False before the join date / after the termination date. */
   employed: boolean;
   /** Records attributed to this `workDate` (one row per shift). */
   records: DayRecord[];
 }
 
+export interface ClassifiedShift {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  crossesMidnight: boolean;
+}
+
 export interface ClassifiedDay {
   date: string;
+  /** The shift this day was judged against (a dated roster cell or the standing shift), or null for plain working-hours. */
+  shift: ClassifiedShift | null;
+  /** "HH:mm" branch-local start the day was judged against. */
+  expectedStartTime: string;
+  graceMinutes: number;
   status: DayStatus;
   /** The primary machine-readable reason; `reasons` lists every rule that fired. */
   reason: DayReason;
@@ -106,6 +130,9 @@ export function classifyDay(input: ClassifyDayInput): ClassifiedDay {
 
   const base = {
     date: dateStr(input.date),
+    shift: input.shift ?? null,
+    expectedStartTime: policy.startTime,
+    graceMinutes: policy.graceMinutes,
     isLate: false,
     minutesLate: 0,
     isEarlyOut: false,
@@ -131,8 +158,12 @@ export function classifyDay(input: ClassifyDayInput): ClassifiedDay {
 
   // 2. Not counted good or bad.
   if (!input.employed) return make('NEUTRAL', ['NOT_EMPLOYED']);
-  if (isWeekend(input.date, input.weekendDays)) return make('NEUTRAL', ['WEEKEND']);
-  if (isPublicHoliday(input.date, input.publicHolidays)) return make('NEUTRAL', ['HOLIDAY']);
+  if (input.dayOff) return make('NEUTRAL', ['DAY_OFF']);
+  // A rostered day is an explicit "you work" — it outranks the Country Pack weekend/holiday.
+  if (!input.rostered && isWeekend(input.date, input.weekendDays))
+    return make('NEUTRAL', ['WEEKEND']);
+  if (!input.rostered && isPublicHoliday(input.date, input.publicHolidays))
+    return make('NEUTRAL', ['HOLIDAY']);
   if (input.onApprovedLeave) return make('NEUTRAL', ['ON_LEAVE']);
   if (input.date.getTime() > input.today.getTime()) return make('NEUTRAL', ['FUTURE']);
 

@@ -54,6 +54,17 @@ export interface PortalTestFixtures {
   clayEmail: string;
   livEmail: string;
   prevMonthKey: string;
+  ritaEmail: string;
+  ritaEmployeeId: string;
+  ritaEmployeeCode: string;
+  samEmail: string;
+  samEmployeeId: string;
+  tiaEmail: string;
+  tiaEmployeeId: string;
+  qaManagerEmail: string;
+  qaReportEmail: string;
+  qaReportEmployeeId: string;
+  qaReportEmployeeCode: string;
   ginaSeeded: { date: string; kind: string; status: string }[];
   qadirSeeded: { date: string; kind: string; status: string }[];
 }

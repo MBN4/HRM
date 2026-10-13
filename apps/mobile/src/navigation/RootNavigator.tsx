@@ -12,6 +12,7 @@ import { AttendanceRegularizeScreen } from '../screens/AttendanceRegularizeScree
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { AnnouncementsScreen } from '../screens/AnnouncementsScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { ScheduleScreen } from '../screens/ScheduleScreen';
 import { colors } from '../theme/tokens';
 import type { RootStackParamList } from './types';
 
@@ -54,6 +55,7 @@ export function RootNavigator() {
         <Stack.Screen name="AttendanceRegularize" component={AttendanceRegularizeScreen} options={{ title: t('attendance.regularizeTitle') }} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: t('notifications.title') }} />
         <Stack.Screen name="Announcements" component={AnnouncementsScreen} options={{ title: t('announcements.title') }} />
+        <Stack.Screen name="Schedule" component={ScheduleScreen} options={{ title: t('nav.mySchedule') }} />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t('settings.title') }} />
       </Stack.Navigator>
     </SessionProvider>

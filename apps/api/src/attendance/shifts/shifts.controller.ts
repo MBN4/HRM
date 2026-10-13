@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Post, Query, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Post, Query, UseInterceptors } from '@nestjs/common';
 import { createRosterAssignmentSchema, createShiftDefinitionSchema, CreateRosterAssignmentInput, CreateShiftDefinitionInput, PERMISSIONS } from '@hrm/shared';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { RequirePermissions } from '../../auth/decorators/require-permissions.decorator';
@@ -15,7 +15,12 @@ function requireTenantId(tenantId: string | null): string {
   return tenantId;
 }
 
-/** Shift definitions + roster assignment — see docs/conventions/attendance.md. */
+/**
+ * Shift definitions + the LEGACY (1.3) range-based roster assignment — see docs/conventions/attendance.md.
+ * Step 8.2: the writes now need `scheduling.manage` PLUS tenant-wide authority (`working_hours.manage`: HR /
+ * admin / CEO) — they used to need only `attendance.write`, which every EMPLOYEE holds. The supported,
+ * hierarchy-scoped API for managers is `/scheduling/*` (docs/conventions/shift-scheduling.md).
+ */
 @Controller('attendance')
 export class ShiftsController {
   constructor(
@@ -25,9 +30,10 @@ export class ShiftsController {
 
   @Post('shifts')
   @UseInterceptors(PermissionsGuard, AuditInterceptor)
-  @RequirePermissions(PERMISSIONS.ATTENDANCE_WRITE)
+  @RequirePermissions(PERMISSIONS.SCHEDULING_MANAGE)
   @AuditLog('ShiftDefinition', 'CREATE')
   async createShift(@Body(new ZodValidationPipe(createShiftDefinitionSchema)) body: CreateShiftDefinitionInput) {
+    this.requireTenantWide();
     const tenantId = requireTenantId(this.tenantContext.tenantId);
     return this.shifts.createShift(this.tenantContext.getTx(), tenantId, body);
   }
@@ -41,9 +47,10 @@ export class ShiftsController {
 
   @Post('rosters')
   @UseInterceptors(PermissionsGuard, AuditInterceptor)
-  @RequirePermissions(PERMISSIONS.ATTENDANCE_WRITE)
+  @RequirePermissions(PERMISSIONS.SCHEDULING_MANAGE)
   @AuditLog('RosterAssignment', 'CREATE')
   async createRosterAssignment(@Body(new ZodValidationPipe(createRosterAssignmentSchema)) body: CreateRosterAssignmentInput) {
+    this.requireTenantWide();
     const tenantId = requireTenantId(this.tenantContext.tenantId);
     return this.shifts.createRosterAssignment(this.tenantContext.getTx(), tenantId, this.tenantContext.getBranchIds(), body);
   }
@@ -55,6 +62,17 @@ export class ShiftsController {
     if (!employeeId) {
       throw new BadRequestException('employeeId is required.');
     }
+    // Your own roster, or (scheduling.manage) someone else's — it used to be readable for anyone by id.
+    const target = await this.tenantContext.getTx().employee.findUnique({ where: { id: employeeId }, select: { userId: true } });
+    if (target && target.userId !== this.tenantContext.userId && !this.tenantContext.hasPermission(PERMISSIONS.SCHEDULING_MANAGE)) {
+      throw new ForbiddenException("scheduling.manage is required to read another employee's roster.");
+    }
     return this.shifts.listRosterForEmployee(this.tenantContext.getTx(), employeeId);
+  }
+
+  private requireTenantWide() {
+    if (!this.tenantContext.hasPermission(PERMISSIONS.WORKING_HOURS_MANAGE)) {
+      throw new ForbiddenException('Defining shifts and range assignments needs tenant-wide scheduling authority (HR / admin / CEO). Managers use /scheduling.');
+    }
   }
 }

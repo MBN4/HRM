@@ -15,6 +15,7 @@ import { getAnalyticsDashboard } from '../../../lib/api/analytics';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { ClockWidget } from '../../../components/attendance/ClockWidget';
 import { MonthlyAttendanceGraph } from '../../../components/attendance/MonthlyAttendanceGraph';
+import { UpcomingShiftsCard } from '../../../components/scheduling/UpcomingShiftsCard';
 import { EmptyState } from '../../../components/ui/EmptyState';
 import { formatDate, formatDateTime, formatPercent, formatNumber } from '../../../lib/format';
 import { CalendarCheck, ClipboardCheck, Users } from 'lucide-react';
@@ -125,6 +126,8 @@ export default function DashboardPage() {
               </div>
             </CardBody>
           </Card>
+
+          {employee && <UpcomingShiftsCard />}
         </div>
 
         {employee && (

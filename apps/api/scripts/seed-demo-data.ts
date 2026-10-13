@@ -439,6 +439,222 @@ async function main() {
   const internEmp = await prisma.employee.findUnique({ where: { tenantId_employeeCode: { tenantId, employeeCode: 'CHAIN-INTERN' } } });
   if (internEmp) await whUpsert('MEMBER', internEmp.id, { employeeId: internEmp.id }, { startTime: '07:30', workHours: 7, breakHours: 1, graceMinutes: 30, halfDayThresholdHours: 4 });
 
+  // ---- shift scheduling & rostering (step 8.2) ----------------------------------
+  // Three NAMED shifts (one overnight crossing midnight, one afternoon-into-night, one night),
+  // STANDING assignments (US HQ Operations -> Morning, US HQ Sales -> the 16:00-01:00 shift,
+  // Doha Operations -> Morning), and a DATED roster for the next two weeks with a rotation: the
+  // first 7 days are PUBLISHED (employees see them), the following 7 are DRAFT (so the calendar
+  // shows both states and "copy last week"/"publish" have something to do). Ivy Intern keeps her
+  // MEMBER hours (member standing beats team). pm@ manages lead@ who manages the US Sales
+  // people (Employee.managerId), so pm@/lead@ see a populated roster; hr@/ceo@ see everyone.
+  // Idempotent: shifts/standing are upserted; the demo roster cells carry a "[demo roster]" note
+  // and are deleted-and-recreated.
+  {
+    const shiftSpecs = [
+      {
+        name: 'Morning',
+        startTime: '09:00',
+        endTime: '17:00',
+        breakMinutes: 60,
+        graceMinutes: 15,
+        color: '#1f8a70',
+        minStaffing: 2,
+      },
+      {
+        name: 'Sales Afternoon',
+        startTime: '16:00',
+        endTime: '01:00',
+        breakMinutes: 60,
+        graceMinutes: 15,
+        color: '#c77d0a',
+        minStaffing: 2,
+      },
+      {
+        name: 'Night',
+        startTime: '22:00',
+        endTime: '06:00',
+        breakMinutes: 30,
+        graceMinutes: 10,
+        color: '#4a5bd1',
+        minStaffing: 1,
+      },
+    ];
+    const shiftIds: Record<string, string> = {};
+    for (const spec of shiftSpecs) {
+      const [sh, sm] = spec.startTime.split(':').map(Number);
+      const [eh, em] = spec.endTime.split(':').map(Number);
+      const data = { ...spec, crossesMidnight: sh * 60 + sm >= eh * 60 + em };
+      const row = await prisma.shiftDefinition.upsert({
+        where: { tenantId_name: { tenantId, name: spec.name } },
+        update: data,
+        create: { tenantId, ...data },
+      });
+      shiftIds[spec.name] = row.id;
+    }
+
+    const standingUpsert = (departmentId: string, shiftId: string) =>
+      prisma.workingHoursPolicy.upsert({
+        where: { tenantId_scope_targetKey: { tenantId, scope: 'TEAM', targetKey: departmentId } },
+        update: {
+          shiftDefinitionId: shiftId,
+          startTime: null,
+          workHours: null,
+          breakHours: null,
+          halfDayThresholdHours: null,
+          updatedByUserId: whAdmin.id,
+        },
+        create: {
+          tenantId,
+          scope: 'TEAM',
+          targetKey: departmentId,
+          departmentId,
+          shiftDefinitionId: shiftId,
+          updatedByUserId: whAdmin.id,
+        },
+      });
+    const dohaBranch = await prisma.branch.findUnique({
+      where: { tenantId_name: { tenantId, name: 'Acme Doha Office' } },
+    });
+    const deptOf = (branchId: string | undefined, name: string) =>
+      branchId
+        ? prisma.department.findUnique({
+            where: { tenantId_branchId_name: { tenantId, branchId, name } },
+          })
+        : Promise.resolve(null);
+    const [hqOps, hqSales, dohaOps] = await Promise.all([
+      deptOf(usHq?.id, 'Operations'),
+      deptOf(usHq?.id, 'Sales'),
+      deptOf(dohaBranch?.id, 'Operations'),
+    ]);
+    if (hqOps) await standingUpsert(hqOps.id, shiftIds['Morning']);
+    if (hqSales) await standingUpsert(hqSales.id, shiftIds['Sales Afternoon']);
+    if (dohaOps) await standingUpsert(dohaOps.id, shiftIds['Morning']);
+
+    // A shift swap approves through the real workflow engine: the manager chain.
+    const swapTemplate = await prisma.workflowTemplate.findFirst({
+      where: { tenantId, entityType: 'ShiftSwap', isActive: true },
+    });
+    if (!swapTemplate) {
+      const tpl = await prisma.workflowTemplate.create({
+        data: {
+          tenantId,
+          name: 'Shift Swap Approval',
+          entityType: 'ShiftSwap',
+          version: 1,
+          isActive: true,
+        },
+      });
+      await prisma.workflowStep.create({
+        data: {
+          tenantId,
+          templateId: tpl.id,
+          name: 'Manager approval',
+          order: 1,
+          approverRule: { type: 'MANAGER' },
+        },
+      });
+    }
+
+    // People: US Sales (managed by Leo Teamlead via Employee.managerId) + Doha Operations.
+    const leoEmp = await prisma.employee.findUnique({
+      where: { tenantId_employeeCode: { tenantId, employeeCode: 'CHAIN-LEAD' } },
+    });
+    const pickActive = async (departmentId: string | undefined, take: number) =>
+      departmentId
+        ? prisma.employee.findMany({
+            where: { tenantId, departmentId, status: 'ACTIVE', userId: null },
+            orderBy: { employeeCode: 'asc' },
+            take,
+          })
+        : [];
+    const salesTeam = await pickActive(hqSales?.id, 6);
+    const dohaTeam = await pickActive(dohaOps?.id, 5);
+    if (leoEmp && hqSales) {
+      await prisma.employee.update({
+        where: { id: leoEmp.id },
+        data: { departmentId: hqSales.id },
+      });
+      for (const e of salesTeam)
+        await prisma.employee.update({ where: { id: e.id }, data: { managerId: leoEmp.id } });
+    }
+    // The Doha HR login's own employee is rostered too, so "My schedule" is populated in RTL.
+    const dohaLogin = await prisma.user.findUnique({
+      where: { tenantId_email: { tenantId, email: 'demo.qa@acme-demo.local' } },
+    });
+    const dohaSelf = dohaLogin
+      ? await prisma.employee.findFirst({ where: { tenantId, userId: dohaLogin.id } })
+      : null;
+    if (dohaSelf && dohaOps)
+      await prisma.employee.update({
+        where: { id: dohaSelf.id },
+        data: { departmentId: dohaOps.id },
+      });
+    const dohaPeople = [...(dohaSelf ? [dohaSelf] : []), ...dohaTeam];
+    const usPeople = [...(leoEmp ? [leoEmp] : []), ...salesTeam];
+
+    const rosterEmployeeIds = [...usPeople, ...dohaPeople].map((e) => e.id);
+    await prisma.rosterAssignment.deleteMany({
+      where: { tenantId, employeeId: { in: rosterEmployeeIds }, note: '[demo roster]' },
+    });
+
+    // Two weeks starting today. Rotation: group A = Morning Mon-Fri week 1 / Sales Afternoon week 2, group B the reverse;
+    // one person has a rostered mid-week day off; one covers "Night this weekend". Everyone else's weekend stays off (Country Pack).
+    const cells: {
+      tenantId: string;
+      employeeId: string;
+      shiftDefinitionId: string | null;
+      dayOff: boolean;
+      effectiveFrom: Date;
+      effectiveTo: Date;
+      status: 'DRAFT' | 'PUBLISHED';
+      publishedAt: Date | null;
+      createdByUserId: string;
+      note: string;
+    }[] = [];
+    const addCell = (employeeId: string, date: Date, shift: string | null, week: number) =>
+      cells.push({
+        tenantId,
+        employeeId,
+        shiftDefinitionId: shift ? shiftIds[shift] : null,
+        dayOff: shift === null,
+        effectiveFrom: date,
+        effectiveTo: date,
+        status: week === 0 ? 'PUBLISHED' : 'DRAFT',
+        publishedAt: week === 0 ? new Date() : null,
+        createdByUserId: whAdmin.id,
+        note: '[demo roster]',
+      });
+    const plan = (
+      people: { id: string }[],
+      weekend: number[],
+      weekendNightIdx: number,
+      dayOffIdx: number,
+    ) => {
+      for (let d = 0; d < 14; d += 1) {
+        const date = new Date(todayUtc.getTime() + d * DAY_MS);
+        const week = Math.floor(d / 7);
+        const dow = date.getUTCDay();
+        people.forEach((p, i) => {
+          const isWeekend = weekend.includes(dow);
+          if (isWeekend) {
+            if (i === (weekendNightIdx + week) % people.length) addCell(p.id, date, 'Night', week);
+            return;
+          }
+          if (i === dayOffIdx && dow === 3) return addCell(p.id, date, null, week);
+          const groupA = i % 2 === 0;
+          const morning = (groupA && week === 0) || (!groupA && week === 1);
+          addCell(p.id, date, morning ? 'Morning' : 'Sales Afternoon', week);
+        });
+      }
+    };
+    plan(usPeople, [0, 6], 1, 2);
+    plan(dohaPeople, [5, 6], 0, 1);
+    await prisma.rosterAssignment.createMany({ data: cells });
+    console.log(
+      `Shift scheduling (8.2): 3 shifts, standing (US Ops/Doha Ops -> Morning, US Sales -> Sales Afternoon 16:00-01:00), ${cells.length} roster cells for ${rosterEmployeeIds.length} people (week 1 published, week 2 draft).`,
+    );
+  }
+
   // ---- a COLOURFUL month of attendance for Ivy Intern (step 8.1, Part 2) --------
   // Ivy's effective policy is her MEMBER override (07:30, 7+1 => 8h required, grace 30m,
   // half-day < 4h), New York time. One record per working day for the last ~30 days with a
@@ -512,6 +728,7 @@ async function main() {
   console.log('Attendance status (Part 2): intern@acme-demo.local has ~30 days of mixed GREEN/YELLOW/RED/NEUTRAL days — GET /attendance/status?from&to (US HQ, New York time).');
   console.log('Live clock + monthly graph (Part 3): sign in as intern@acme-demo.local -> /dashboard & /attendance. For a RUNNING clock: pnpm --filter @hrm/api run demo:clock-in [email] [hoursAgo]  (e.g. intern@acme-demo.local 3).');
   console.log('Working hours (/working-hours, sign in as hr@acme-demo.local or ceo@): company 09:00 8+1; Engineering (US HQ) team 10:00; Ivy Intern member 07:30 7+1.');
+  console.log('Shift scheduling (8.2): sign in as pm@ / lead@ (manager: /scheduling shows their reports), hr@ or ceo@ (everyone, define shifts) or demo.qa@acme-demo.local (Doha, Arabic RTL — also has "My schedule"); employees see /schedule.');
   console.log('Team-access demo users (/users):');
   for (const u of teamUsers) console.log(`  ${u.email}  — ${u.role}${u.status === 'DISABLED' ? ' (deactivated)' : ''}${u.mustChange ? ` — MUST CHANGE PASSWORD, temp password: ${DEMO_TEMP_PASSWORD}` : `, password: ${DEMO_PASSWORD}`}`);
   console.log('Next: pnpm --filter @hrm/api run demo:rollup');

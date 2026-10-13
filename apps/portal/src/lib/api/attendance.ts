@@ -80,12 +80,27 @@ export type DayReason =
   | 'HOLIDAY'
   | 'ON_LEAVE'
   | 'NOT_EMPLOYED'
+  | 'DAY_OFF'
   | 'FUTURE'
   | 'NOT_CLOCKED_IN'
   | 'CLOCKED_IN';
 
+/** Step 8.2 — the named shift a day was judged against (a published roster cell or the standing shift). */
+export interface ClassifiedShift {
+  id: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  crossesMidnight: boolean;
+}
+
 export interface ClassifiedDay {
   date: string;
+  /** Step 8.2: the shift this day was judged against, or null for plain working-hours. */
+  shift?: ClassifiedShift | null;
+  /** Step 8.2: "HH:mm" branch-local expected start the day was judged against. */
+  expectedStartTime?: string;
+  graceMinutes?: number;
   status: DayStatus;
   reason: DayReason;
   reasons: DayReason[];

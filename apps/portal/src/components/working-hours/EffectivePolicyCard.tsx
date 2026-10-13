@@ -14,6 +14,7 @@ import { Select } from '../ui/Select';
 
 const LAYERS: WorkingHoursSource[] = ['MEMBER', 'TEAM', 'COMPANY', 'COUNTRY_PACK'];
 const TONE: Record<WorkingHoursSource, 'info' | 'success' | 'warning' | 'neutral'> = {
+  ROSTER: 'success',
   MEMBER: 'info',
   TEAM: 'success',
   COMPANY: 'warning',
@@ -73,7 +74,7 @@ export function EffectivePolicyCard({ targets, version }: { targets: WorkingHour
         {employeeId && data && p && (
           <div className="space-y-4" aria-live="polite">
             <ol className="flex flex-wrap items-center gap-2" aria-label={t('workingHours.precedence.label')} data-testid="wh-precedence" data-winner={data.source}>
-              {LAYERS.map((layer, i) => {
+              {(data.source === 'ROSTER' ? (['ROSTER', ...LAYERS] as WorkingHoursSource[]) : LAYERS).map((layer, i, all) => {
                 const win = layer === data.source;
                 return (
                   <li key={layer} className="flex items-center gap-2" data-layer={layer} data-winner={win ? 'true' : 'false'} aria-current={win ? 'true' : undefined}>
@@ -85,7 +86,7 @@ export function EffectivePolicyCard({ targets, version }: { targets: WorkingHour
                       {win && <Check className="h-4 w-4" aria-hidden />}
                       {i + 1}. {t(`workingHours.source.${layer}.short`)}
                     </span>
-                    {i < LAYERS.length - 1 && <ArrowRight className="h-4 w-4 text-ink-400 rtl:rotate-180" aria-hidden />}
+                    {i < all.length - 1 && <ArrowRight className="h-4 w-4 text-ink-400 rtl:rotate-180" aria-hidden />}
                   </li>
                 );
               })}
@@ -97,6 +98,7 @@ export function EffectivePolicyCard({ targets, version }: { targets: WorkingHour
                 <Badge tone={TONE[data.source]}>{t(`workingHours.source.${data.source}`)}</Badge>
               </span>
               <span className="text-sm text-ink-500">
+                {data.shift && <span className="me-2 font-medium text-ink-800" data-testid="wh-effective-shift">{t('workingHours.effective.shift', { name: data.shift.name })}</span>}
                 {data.source === 'TEAM' && sourceDept
                   ? inherited
                     ? t('workingHours.source.TEAM.inherited', { team: sourceDept.name })

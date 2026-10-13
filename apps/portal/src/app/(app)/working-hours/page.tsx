@@ -15,6 +15,7 @@ import {
   type WorkingHoursPolicy,
 } from '../../../lib/api/working-hours';
 import { Alert } from '../../../components/ui/Alert';
+import { Badge } from '../../../components/ui/Badge';
 import { Button } from '../../../components/ui/Button';
 import { Card, CardBody, CardHeader, CardTitle } from '../../../components/ui/Card';
 import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
@@ -99,7 +100,14 @@ export default function WorkingHoursPage() {
                     {label}
                     {!isTeam && p.target?.code ? <span className="ms-1 text-ink-500">({p.target.code})</span> : null}
                   </td>
-                  <td className="px-3 py-3 text-ink-700">{p.startTime}</td>
+                  <td className="px-3 py-3 text-ink-700">
+                    {p.startTime}
+                    {p.shift && (
+                      <span className="ms-2 align-middle" data-testid={`wh-shift-badge-${p.target?.id}`}>
+                        <Badge tone="info">{t('workingHours.table.shift', { name: p.shift.name })}</Badge>
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-3 text-ink-700">{s.workBreak}</td>
                   <td className="px-3 py-3 text-ink-700">{p.graceMinutes} min</td>
                   <td className="px-3 py-3 text-ink-700">{s.half}</td>

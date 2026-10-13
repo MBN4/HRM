@@ -161,6 +161,15 @@ export const PERMISSIONS = {
   // (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER explicitly); deliberately NOT
   // MANAGER/EMPLOYEE. See docs/conventions/leave.md § Default leave allocation.
   LEAVE_DEFAULTS_MANAGE: 'leave.defaults.manage',
+
+  // Step 8.2 (shift scheduling & rostering) — build/publish rosters, set standing
+  // shifts, define shifts. Seeded to TENANT_ADMIN/CEO (ALL_PERMISSIONS), HR_MANAGER and
+  // MANAGER. It is SCOPED, not global: a MANAGER (no `working_hours.manage`) can only roster
+  // people in their own reporting chain and cannot define shifts or set team/company standing
+  // shifts; HR/admin/CEO act across their branch scope. Reading your OWN schedule and
+  // requesting a swap need only `attendance.read`/`attendance.write`.
+  // See docs/conventions/shift-scheduling.md.
+  SCHEDULING_MANAGE: 'scheduling.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -242,6 +251,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.STATUTORY_REPORT_READ,
     PERMISSIONS.WORKING_HOURS_MANAGE,
     PERMISSIONS.LEAVE_DEFAULTS_MANAGE,
+    PERMISSIONS.SCHEDULING_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -273,6 +283,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.BENEFITS_READ,
     PERMISSIONS.BENEFITS_ENROLL,
     PERMISSIONS.ESIGNATURE_SIGN,
+    PERMISSIONS.SCHEDULING_MANAGE,
   ],
   [SYSTEM_ROLES.EMPLOYEE]: [
     PERMISSIONS.EMPLOYEE_READ,

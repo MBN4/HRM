@@ -9,8 +9,17 @@ import { z } from 'zod';
 export const WORKING_HOURS_SCOPES = ['COMPANY', 'TEAM', 'MEMBER'] as const;
 export type WorkingHoursScopeName = (typeof WORKING_HOURS_SCOPES)[number];
 
-/** Where an effective policy came from, most specific first. `COUNTRY_PACK` = no policy row applied. */
-export const WORKING_HOURS_SOURCES = ['MEMBER', 'TEAM', 'COMPANY', 'COUNTRY_PACK'] as const;
+/**
+ * Where an effective policy came from, most specific first. `ROSTER` (step 8.2) = a PUBLISHED dated
+ * roster assignment for that exact day; `COUNTRY_PACK` = no policy row applied.
+ */
+export const WORKING_HOURS_SOURCES = [
+  'ROSTER',
+  'MEMBER',
+  'TEAM',
+  'COMPANY',
+  'COUNTRY_PACK',
+] as const;
 export type WorkingHoursSource = (typeof WORKING_HOURS_SOURCES)[number];
 
 /** Defaults used when a Country Pack has to supply the fallback (it has no start time / break / grace of its own). */

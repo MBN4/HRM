@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { Bell, ChevronRight, Megaphone, Settings as SettingsIcon } from 'lucide-react-native';
+import { Bell, CalendarCheck, ChevronRight, Megaphone, Settings as SettingsIcon } from 'lucide-react-native';
 import { useI18n } from '../i18n/I18nContext';
 import { Screen } from '../components/ui/Screen';
 import { colors, radius, spacing, typography } from '../theme/tokens';
@@ -14,6 +14,7 @@ export function MoreScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const items: { key: keyof RootStackParamList; icon: React.ReactNode; label: string }[] = [
+    { key: 'Schedule', icon: <CalendarCheck size={20} color={colors.ink[500]} />, label: t('nav.mySchedule') },
     { key: 'Notifications', icon: <Bell size={20} color={colors.ink[500]} />, label: t('nav.notifications') },
     { key: 'Announcements', icon: <Megaphone size={20} color={colors.ink[500]} />, label: t('nav.announcements') },
     { key: 'Settings', icon: <SettingsIcon size={20} color={colors.ink[500]} />, label: t('nav.settings') },

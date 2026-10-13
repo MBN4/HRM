@@ -4392,3 +4392,29 @@ going forward only (raise-only on existing rows; earned/used never rewritten), a
 `statutory-reports.spec.ts`: since 7.2 the submitter can't approve their own request, so these now approve as a
 SECOND tenant admin (`approver@portal-e2e-a.test`, new fixture; `approveAs()` helper in `tests/helpers.ts`; the API call
 in the statutory spec logs in as that user). No product code or hierarchy rule changed.
+
+## 8.2 — Shift scheduling & rostering (2026-10-13)
+
+Design + the reconciled shift ↔ working-hours model: [`conventions/shift-scheduling.md`](./conventions/shift-scheduling.md).
+**Schema** (migration `20261011090000_add_shift_scheduling`, additive): `ShiftDefinition` + grace / half-day / colour /
+min-staffing; `WorkingHoursPolicy.shiftDefinitionId` (standing shift; custom fields nullable, DB CHECK "shift XOR custom
+set"); `RosterAssignment` + DRAFT/PUBLISHED `status`, `dayOff`, note, creator, partial unique index for one single-day cell
+per employee/date; new RLS'd `shift_swap_requests`; `scheduling.manage` backfilled (admin/CEO/HR/manager).
+**Shared**: `scheduling.validator.ts` (`shiftToWorkingHours`, zod schemas), `ROSTER` source, 3 notification events + en/ar templates.
+**API**: new `SchedulingModule` (`/scheduling/*`: shifts, standing, roster grid, cells, copy, publish, coverage, my-schedule,
+colleagues, swaps via the real workflow engine + listener); resolver made roster-aware (`resolve(date)`, `resolveRange`,
+`resolveStandingBatch`); `ShiftResolutionService` = published roster → standing shift; classification judges each day against its
+own shift (new `DAY_OFF` reason; rostered weekend = working day). **Security fix**: legacy `POST /attendance/shifts|rosters` were open to
+every employee (`attendance.write`) — now `scheduling.manage` + tenant-wide; reading others' rosters needs `scheduling.manage`.
+**Portal/mobile**: `/scheduling` (+ coverage/shifts/standing), `/schedule`, dashboard card, approvals/attendance/working-hours
+touch-ups, mobile "My schedule". **Demo**: 3 shifts, standing teams, 2-week roster (week 1 published, week 2 draft), swap template.
+
+**Verification** (all run): `scheduling.e2e-spec.ts` **36/36** (overnight shifts, standing precedence ladder, draft vs publish,
+classification incl. overnight + rostered weekend + day off, clock-in standing shift + post-midnight attribution, swap approve/decline/
+reject/stale/withdraw, manager chain scope, branch-restricted, cross-tenant + RLS). Full API suite `--runInBand`: 816/819 — the 3 failures
+are the known `PLATFORM_MODE_ENABLED` test and two `privacy-residency` tests that pass alone (flaky under concurrent load). Re-run after
+cleanup: scheduling + working-hours + attendance-status + attendance units **113/113**. Portal Playwright `scheduling.spec.ts` **14/14**
+(incl. QA-branch RTL), accessibility 12/12, full portal suite 185/186 with the one failure (a `/users` pagination assumption broken by new
+fixtures) fixed and re-run 13/13. Mobile: typecheck, jest 19/19, eslint — **not run on a device**.
+**Known gaps**: coverage `off` lumps weekends/holidays with day-offs; grid `standing.startTime` null for Country-Pack default; no
+draft-edit layer on a published week; roster grid not load-tested at the 1,000-person cap; mobile RTL unverified on a device.

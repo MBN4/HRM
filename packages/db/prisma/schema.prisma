@@ -156,6 +156,7 @@ model Tenant {
   leaveAccrualRuns               LeaveAccrualRun[]
   shiftDefinitions               ShiftDefinition[]
   rosterAssignments              RosterAssignment[]
+  shiftSwapRequests              ShiftSwapRequest[]
   attendanceRecords              AttendanceRecord[]
   attendanceRegularizations      AttendanceRegularization[]
   attendanceDailySummaries       AttendanceDailySummary[]
@@ -1764,6 +1765,8 @@ model Employee {
   leaveRequests             LeaveRequest[]
   leaveAccrualRuns          LeaveAccrualRun[]
   rosterAssignments         RosterAssignment[]
+  shiftSwapsRequested       ShiftSwapRequest[]         @relation("ShiftSwapRequester")
+  shiftSwapsReceived        ShiftSwapRequest[]         @relation("ShiftSwapCounterpart")
   attendanceRecords         AttendanceRecord[]
   attendanceRegularizations AttendanceRegularization[]
   attendanceDailySummaries  AttendanceDailySummary[]
@@ -2084,47 +2087,121 @@ enum AttendanceRecordStatus {
 // every read) purely for query/documentation convenience; the actual
 // day-attribution logic re-derives it from startTime/endTime directly where
 // it matters (see docs/conventions/attendance.md).
+//
+// Step 8.2 (shift scheduling) — a shift is ALSO the named carrier of the
+// working-hours parameters: start/break/grace/half-day map 1:1 onto
+// `WorkingHoursPolicy`'s fields (requiredHours = duration of start->end;
+// workHours = required - break), so a shift never redefines them — see
+// docs/conventions/shift-scheduling.md for the reconciled model.
 model ShiftDefinition {
-  id              String   @id @default(uuid()) @db.Uuid
-  tenantId        String   @map("tenant_id") @db.Uuid
-  name            String
-  startTime       String   @map("start_time") @db.VarChar(5)
-  endTime         String   @map("end_time") @db.VarChar(5)
-  breakMinutes    Int      @default(0) @map("break_minutes")
-  crossesMidnight Boolean  @default(false) @map("crosses_midnight")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  name                  String
+  startTime             String   @map("start_time") @db.VarChar(5)
+  endTime               String   @map("end_time") @db.VarChar(5)
+  breakMinutes          Int      @default(0) @map("break_minutes")
+  crossesMidnight       Boolean  @default(false) @map("crosses_midnight")
+  // Late grace window in minutes (the working-hours `graceMinutes`).
+  graceMinutes          Int      @default(15) @map("grace_minutes")
+  // Null = derive (requiredHours / 2) exactly like WorkingHoursPolicy.
+  halfDayThresholdHours Float?   @map("half_day_threshold_hours")
+  // Optional UI colour ("#rrggbb") for the roster grid.
+  color                 String?  @db.VarChar(7)
+  // Optional coverage target: fewer people than this on a day = a visible gap.
+  minStaffing           Int?     @map("min_staffing")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  rosterAssignments RosterAssignment[]
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rosterAssignments   RosterAssignment[]
+  standingAssignments WorkingHoursPolicy[]
+  swapRequestsFrom    ShiftSwapRequest[]   @relation("ShiftSwapRequesterShift")
+  swapRequestsTo      ShiftSwapRequest[]   @relation("ShiftSwapCounterpartShift")
 
   @@unique([tenantId, id])
   @@unique([tenantId, name])
   @@map("shift_definitions")
 }
 
-// Assigns one employee to one shift for a date range (`effectiveTo: null` =
-// ongoing). Resolution (`ShiftResolutionService`) picks, for a given
-// employee + branch-local calendar date, the assignment with the latest
-// `effectiveFrom` whose range covers that date — the same "most specific/
-// most recent wins" shape used nowhere else in this schema verbatim, but
-// analogous to CountryPack's highest-version-active resolution (0.5).
-model RosterAssignment {
-  id                String    @id @default(uuid()) @db.Uuid
-  tenantId          String    @map("tenant_id") @db.Uuid
-  employeeId        String    @map("employee_id") @db.Uuid
-  shiftDefinitionId String    @map("shift_definition_id") @db.Uuid
-  effectiveFrom     DateTime  @map("effective_from") @db.Date
-  effectiveTo       DateTime? @map("effective_to") @db.Date
-  createdAt         DateTime  @default(now()) @map("created_at")
+enum RosterAssignmentStatus {
+  DRAFT
+  PUBLISHED
+}
 
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  employee        Employee        @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
-  shiftDefinition ShiftDefinition @relation(fields: [tenantId, shiftDefinitionId], references: [tenantId, id], onDelete: Cascade)
+// A DATED roster assignment: one employee on one shift for a date range
+// (`effectiveTo: null` = ongoing). The scheduling calendar (step 8.2) writes
+// SINGLE-DAY rows (effectiveFrom == effectiveTo) — a "cell" — optionally a
+// `dayOff` cell (no shift). Only PUBLISHED rows are live: clock-in,
+// regularization, working-hours resolution and day-status classification all
+// ignore DRAFT rows. Pre-8.2 rows default to PUBLISHED. Resolution picks the
+// NARROWEST covering row, then the latest `effectiveFrom` (pickRosterAssignment).
+model RosterAssignment {
+  id                String                 @id @default(uuid()) @db.Uuid
+  tenantId          String                 @map("tenant_id") @db.Uuid
+  employeeId        String                 @map("employee_id") @db.Uuid
+  shiftDefinitionId String?                @map("shift_definition_id") @db.Uuid
+  dayOff            Boolean                @default(false) @map("day_off")
+  effectiveFrom     DateTime               @map("effective_from") @db.Date
+  effectiveTo       DateTime?              @map("effective_to") @db.Date
+  status            RosterAssignmentStatus @default(PUBLISHED)
+  publishedAt       DateTime?              @map("published_at")
+  createdByUserId   String?                @map("created_by_user_id") @db.Uuid
+  note              String?
+  createdAt         DateTime               @default(now()) @map("created_at")
+  updatedAt         DateTime               @default(now()) @updatedAt @map("updated_at")
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee        Employee         @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  shiftDefinition ShiftDefinition? @relation(fields: [tenantId, shiftDefinitionId], references: [tenantId, id], onDelete: Cascade)
 
   @@unique([tenantId, id])
   @@index([tenantId, employeeId, effectiveFrom])
+  @@index([tenantId, effectiveFrom, effectiveTo])
   @@map("roster_assignments")
+}
+
+enum ShiftSwapStatus {
+  AWAITING_PEER
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  DECLINED
+  CANCELED
+}
+
+// A request to hand off / swap ONE assigned day (step 8.2). The colleague
+// must agree first (AWAITING_PEER), then a real 0.7 WorkflowInstance
+// (entityType "ShiftSwap") routes it to the requester's manager chain —
+// no bespoke approval logic. `requesterShiftId`/`counterpartShiftId` snapshot
+// each side's effective shift at request time (null = no shift that day) so
+// approval can detect a roster that changed underneath it.
+model ShiftSwapRequest {
+  id                    String          @id @default(uuid()) @db.Uuid
+  tenantId              String          @map("tenant_id") @db.Uuid
+  requesterEmployeeId   String          @map("requester_employee_id") @db.Uuid
+  counterpartEmployeeId String          @map("counterpart_employee_id") @db.Uuid
+  date                  DateTime        @db.Date
+  requesterShiftId      String?         @map("requester_shift_id") @db.Uuid
+  counterpartShiftId    String?         @map("counterpart_shift_id") @db.Uuid
+  reason                String?
+  status                ShiftSwapStatus @default(AWAITING_PEER)
+  workflowInstanceId    String?         @map("workflow_instance_id") @db.Uuid
+  peerRespondedAt       DateTime?       @map("peer_responded_at")
+  decidedAt             DateTime?       @map("decided_at")
+  decisionNote          String?         @map("decision_note")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester        Employee         @relation("ShiftSwapRequester", fields: [tenantId, requesterEmployeeId], references: [tenantId, id], onDelete: Cascade)
+  counterpart      Employee         @relation("ShiftSwapCounterpart", fields: [tenantId, counterpartEmployeeId], references: [tenantId, id], onDelete: Cascade)
+  requesterShift   ShiftDefinition? @relation("ShiftSwapRequesterShift", fields: [tenantId, requesterShiftId], references: [tenantId, id], onDelete: Restrict)
+  counterpartShift ShiftDefinition? @relation("ShiftSwapCounterpartShift", fields: [tenantId, counterpartShiftId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, requesterEmployeeId, status])
+  @@index([tenantId, counterpartEmployeeId, status], map: "shift_swap_requests_tenant_id_counterpart_employee_id_stat_idx")
+  @@map("shift_swap_requests")
 }
 
 // The high-volume clock-in/out record — see docs/conventions/attendance.md
@@ -5620,26 +5697,34 @@ model WorkingHoursPolicy {
   employeeId   String?           @map("employee_id") @db.Uuid
   targetKey    String            @map("target_key")
 
-  // Expected clock-in, branch-local wall clock "HH:mm".
-  startTime             String @map("start_time")
+  // Step 8.2 — when set, this row is a STANDING SHIFT assignment: the hours
+  // come LIVE from the shift (never copied), and the custom fields below are
+  // NULL (a DB CHECK enforces "a shift OR a full custom set"). Precedence
+  // (member > team > company) is unchanged — one mechanism, two row kinds.
+  shiftDefinitionId String? @map("shift_definition_id") @db.Uuid
+
+  // Expected clock-in, branch-local wall clock "HH:mm" (null = shift-linked).
+  startTime             String? @map("start_time")
   // Stored separately so "8 work + 1 break" is explicit; required = work + break.
-  workHours             Float  @map("work_hours")
-  breakHours            Float  @map("break_hours")
+  workHours             Float?  @map("work_hours")
+  breakHours            Float?  @map("break_hours")
   // Late grace window in minutes.
-  graceMinutes          Int    @default(15) @map("grace_minutes")
+  graceMinutes          Int     @default(15) @map("grace_minutes")
   // Below this many worked hours = a half/short day. Null = derive
   // (requiredHours / 2) at resolution time.
-  halfDayThresholdHours Float? @map("half_day_threshold_hours")
+  halfDayThresholdHours Float?  @map("half_day_threshold_hours")
 
   updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
-  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  department Department? @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: Cascade)
-  employee   Employee?   @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  department      Department?      @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: Cascade)
+  employee        Employee?        @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+  shiftDefinition ShiftDefinition? @relation(fields: [tenantId, shiftDefinitionId], references: [tenantId, id], onDelete: Restrict)
 
   @@unique([tenantId, scope, targetKey])
   @@index([tenantId, scope])
+  @@index([tenantId, shiftDefinitionId])
   @@map("working_hours_policies")
 }

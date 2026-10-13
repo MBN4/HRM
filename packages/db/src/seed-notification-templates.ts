@@ -190,6 +190,71 @@ const TEMPLATES: TemplateSeed[] = [
     locale: 'ar',
     body: 'وقّع الجميع الآن على "{{requestTitle}}".',
   },
+  // Step 8.2 — shift scheduling (docs/conventions/shift-scheduling.md).
+  {
+    eventType: 'roster.published',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: 'Your schedule for {{from}} to {{to}} was published ({{days}} day(s)). Open "My schedule" to see your shifts.',
+  },
+  {
+    eventType: 'roster.published',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'تم نشر جدولك من {{from}} إلى {{to}} ({{days}} يوم). افتح "جدولي" لعرض نوباتك.',
+  },
+  {
+    eventType: 'roster.published',
+    channel: 'EMAIL',
+    locale: 'en',
+    subject: 'Your schedule was published',
+    body: 'Your schedule for {{from}} to {{to}} ({{days}} day(s)) was published. Sign in to see your shifts.',
+  },
+  {
+    eventType: 'roster.published',
+    channel: 'EMAIL',
+    locale: 'ar',
+    subject: 'تم نشر جدولك',
+    body: 'تم نشر جدولك من {{from}} إلى {{to}} ({{days}} يوم). سجّل الدخول لعرض نوباتك.',
+  },
+  {
+    eventType: 'roster.changed',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: 'Your shift on {{date}} changed: {{previousShift}} → {{shiftName}}.',
+  },
+  {
+    eventType: 'roster.changed',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'تغيّرت نوبتك في {{date}}: {{previousShift}} ← {{shiftName}}.',
+  },
+  {
+    eventType: 'roster.changed',
+    channel: 'EMAIL',
+    locale: 'en',
+    subject: 'Your shift on {{date}} changed',
+    body: 'Your shift on {{date}} changed from {{previousShift}} to {{shiftName}}.',
+  },
+  {
+    eventType: 'roster.changed',
+    channel: 'EMAIL',
+    locale: 'ar',
+    subject: 'تغيّرت نوبتك في {{date}}',
+    body: 'تغيّرت نوبتك في {{date}} من {{previousShift}} إلى {{shiftName}}.',
+  },
+  {
+    eventType: 'shift_swap.requested',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: '{{requesterName}} asked you to take their {{shiftName}} shift on {{date}}. Open "My schedule" to answer.',
+  },
+  {
+    eventType: 'shift_swap.requested',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'طلب منك {{requesterName}} تولّي نوبة {{shiftName}} في {{date}}. افتح "جدولي" للرد.',
+  },
 ];
 
 /**

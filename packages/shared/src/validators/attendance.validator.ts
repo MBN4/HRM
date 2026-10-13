@@ -76,16 +76,6 @@ export const manualPunchSchema = z
   .strict();
 export type ManualPunchInput = z.infer<typeof manualPunchSchema>;
 
-export const createShiftDefinitionSchema = z
-  .object({
-    name: z.string().min(1).max(200),
-    startTime: z.string().regex(HHMM_REGEX, 'startTime must be "HH:mm"'),
-    endTime: z.string().regex(HHMM_REGEX, 'endTime must be "HH:mm"'),
-    breakMinutes: z.number().int().nonnegative().optional(),
-  })
-  .strict();
-export type CreateShiftDefinitionInput = z.infer<typeof createShiftDefinitionSchema>;
-
 export const createRosterAssignmentSchema = z
   .object({
     employeeId: z.string().uuid(),

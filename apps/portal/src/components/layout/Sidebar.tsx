@@ -5,6 +5,7 @@ import {
   Bell,
   Boxes,
   Briefcase,
+  CalendarCheck,
   CalendarClock,
   CalendarDays,
   CalendarRange,
@@ -25,6 +26,7 @@ import {
   ShieldCheck,
   Target,
   Clock3,
+  Rows3,
   Upload,
   User,
   UserCog,
@@ -52,6 +54,8 @@ export function Sidebar() {
     { href: '/profile', label: t('nav.profile'), icon: User },
     { href: '/leave', label: t('nav.leave'), icon: CalendarDays },
     { href: '/attendance', label: t('nav.attendance'), icon: CalendarClock },
+    // Step 8.2 — the employee's own roster/standing shifts (anyone who can read attendance).
+    ...(can(PERMISSIONS.ATTENDANCE_READ) ? [{ href: '/schedule', label: t('nav.mySchedule'), icon: CalendarCheck }] : []),
     { href: '/expenses', label: t('nav.expenses'), icon: Receipt },
     { href: '/benefits', label: t('nav.benefits'), icon: HeartPulse },
     { href: '/assets', label: t('nav.assets'), icon: Boxes },
@@ -142,6 +146,10 @@ export function Sidebar() {
   // Working hours (step 8.1) — see docs/conventions/.
   if (can(PERMISSIONS.WORKING_HOURS_MANAGE)) {
     adminItems.push({ href: '/working-hours', label: t('nav.workingHours'), icon: Clock3 });
+  }
+  // Shift scheduling & rostering (step 8.2) — see docs/conventions/shift-scheduling.md.
+  if (can(PERMISSIONS.SCHEDULING_MANAGE)) {
+    adminItems.push({ href: '/scheduling', label: t('nav.scheduling'), icon: Rows3 });
   }
   // Default leave allocation (step 8.1 Part 4) — see docs/conventions/leave.md.
   if (can(PERMISSIONS.LEAVE_DEFAULTS_MANAGE)) {

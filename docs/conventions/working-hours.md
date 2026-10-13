@@ -62,9 +62,12 @@ weekend days)` (US 40/5 = **8**, Qatar 48/5 = **9.6**), and `startTime` 09:00,
 `@hrm/shared`. No country code is ever branched on — the same function yields
 different results from different packs (proven by test).
 
-`date` is accepted and echoed but **does not affect the result yet** (policies are
-not effective-dated); the parameter is there so Part 2+ call sites don't change
-when versioning is added.
+`date` is echoed back and — since step 8.2 — **consults the published dated roster**: a roster cell for
+that exact day outranks every policy layer (`source: 'ROSTER'`, with `shift`/`rostered`/`dayOff`). Policies
+themselves are still not effective-dated. A policy row may also be a **standing shift** (`shiftDefinitionId`:
+the hours are read live from the shift; custom fields are NULL) — see [shift-scheduling.md](./shift-scheduling.md)
+for the reconciled shift ↔ working-hours model. `resolveRange()` resolves a whole window in a fixed number of
+queries.
 
 ## API (`/working-hours`, tenant-scoped, RLS)
 

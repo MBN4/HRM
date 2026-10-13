@@ -146,6 +146,14 @@ export class NotificationRecipientResolverService {
       case 'esignature.completed':
         return typeof payload.createdByUserId === 'string' ? [payload.createdByUserId] : [];
 
+      // Step 8.2 — see docs/conventions/shift-scheduling.md. All three carry the target's
+      // own `employeeUserId` directly (no DB query), the SAME shape `lms.course_assigned`
+      // and `esignature.request_sent` use.
+      case 'roster.published':
+      case 'roster.changed':
+      case 'shift_swap.requested':
+        return typeof payload.employeeUserId === 'string' ? [payload.employeeUserId] : [];
+
       default:
         return [];
     }

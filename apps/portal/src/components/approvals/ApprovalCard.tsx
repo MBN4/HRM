@@ -31,6 +31,13 @@ function SnapshotSummary({ approval, locale }: { approval: PendingApproval; loca
       </p>
     );
   }
+  if (approval.detail.instance.entityType === 'ShiftSwap') {
+    return (
+      <p className="text-sm text-ink-600" data-testid="approval-shiftswap">
+        {t('approvals.shiftSwap.summary')}: {formatDate(snapshot.date as string, locale)}
+      </p>
+    );
+  }
   return null;
 }
 

@@ -14,6 +14,8 @@ export interface WorkingHoursPolicy {
   graceMinutes: number;
   /** null = derived (requiredHours / 2). */
   halfDayThresholdHours: number | null;
+  /** Step 8.2: set when this row is a STANDING SHIFT assignment (its hours are read live from the shift). */
+  shift?: { id: string; name: string } | null;
   updatedAt: string;
 }
 
@@ -30,7 +32,7 @@ export interface WorkingHoursInput {
   halfDayThresholdHours: number | null;
 }
 
-export type WorkingHoursSource = 'MEMBER' | 'TEAM' | 'COMPANY' | 'COUNTRY_PACK';
+export type WorkingHoursSource = 'ROSTER' | 'MEMBER' | 'TEAM' | 'COMPANY' | 'COUNTRY_PACK';
 
 export interface EffectiveWorkingHours {
   employeeId: string;
@@ -49,6 +51,10 @@ export interface EffectiveWorkingHours {
   source: WorkingHoursSource;
   policyId: string | null;
   sourceDepartmentId: string | null;
+  /** Step 8.2: the named shift behind the winning layer (a roster cell's, or a standing shift), else null. */
+  shift?: { id: string; name: string; startTime: string; endTime: string; crossesMidnight: boolean; color: string | null } | null;
+  rostered?: boolean;
+  dayOff?: boolean;
 }
 
 export const listWorkingHoursPolicies = () => apiFetch<WorkingHoursPolicy[]>('/working-hours/policies');

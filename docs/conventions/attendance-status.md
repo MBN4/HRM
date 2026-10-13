@@ -9,6 +9,12 @@ monthly graph, Part 4 = leave allocation). Builds on
 [attendance.md](./attendance.md) (records, branch-timezone handling, weekend/holiday
 derivation) and `WorkingHoursResolverService`; changes none of them.
 
+> **Step 8.2 update** — the policy inputs below are now resolved **per day**: a published dated roster cell
+> (or a standing shift) can give a day its own start / required hours / grace (`policySource: 'ROSTER'`),
+> `ClassifiedDay` gains `shift` / `expectedStartTime` / `graceMinutes`, a rostered day off is NEUTRAL
+> **`DAY_OFF`**, and a rostered shift on a Country-Pack weekend/holiday is a working day (not NEUTRAL). The
+> rules themselves are unchanged. See [shift-scheduling.md](./shift-scheduling.md) § 5.
+
 ## Computed on read — never stored
 
 The colour is **derived** from the stored `AttendanceRecord`s + the resolved policy

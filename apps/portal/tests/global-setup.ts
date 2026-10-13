@@ -301,6 +301,9 @@ export default async function globalSetup(): Promise<void> {
     // the API level (see apps/api/test/operations-modules.e2e-spec.ts);
     // this suite's own expense spec only needs to prove the UI WIRING.
     [tenantA.id, 'EXPENSE_CLAIM'],
+    // Step 8.2 — a shift swap's manager approval is a real 0.7 `WorkflowInstance` (`ShiftSwapService.respond` starts it
+    // with the REQUESTER's User as `requesterId`), so a MANAGER rule resolves through `User.managerId` like Leave's.
+    [tenantA.id, 'ShiftSwap'],
   ] as const) {
     const template = await prisma.workflowTemplate.create({
       data: { tenantId, name: `${entityType} approval`, entityType, version: 1, isActive: true },
@@ -641,6 +644,35 @@ export default async function globalSetup(): Promise<void> {
   });
   const prevMonthKey = prevMonthStart.toISOString().slice(0, 7);
 
+  // Step 8.2 (scheduling.spec.ts) — dedicated people so the roster specs never disturb (or are disturbed by) the shared
+  // fixtures. Rita/Sam/Tia are US employees under managerA (Employee.managerId AND User.managerId, so both the
+  // reporting-chain grid and the MANAGER-rule swap approval resolve to Mona). Qamar is a QA-branch (Doha / Arabic / RTL)
+  // MANAGER with one QA report, Rashid — the RTL proof's scheduler and schedule owner.
+  const managerAUserId = managerAUser.id;
+  async function makeReport(email: string, code: string, first: string, last: string, branchId: string, mgrEmployeeId: string, mgrUserId: string) {
+    const user = await makeUser(tenantA.id, email, employeeRoleA.id);
+    await prisma.user.update({ where: { id: user.id }, data: { managerId: mgrUserId } });
+    const employee = await prisma.employee.create({
+      data: {
+        tenantId: tenantA.id, userId: user.id, employeeCode: code, firstName: first, lastName: last, branchId,
+        managerId: mgrEmployeeId, employmentType: 'FULL_TIME', joinDate: new Date('2020-01-01'),
+        statutoryFields: branchId === branchAQa.id ? { QATAR_ID: 'QID-000077', VISA_SPONSORSHIP: 'yes' } : { SSN: '000-00-0077', W4: 'on-file' },
+      },
+    });
+    return employee;
+  }
+  const ritaEmployee = await makeReport('rita-roster@portal-e2e-a.test', 'PE-RR-1', 'Rita', 'Roster', branchAUs.id, managerAEmployee.id, managerAUserId);
+  const samEmployee = await makeReport('sam-swap@portal-e2e-a.test', 'PE-SW-1', 'Sam', 'Swap', branchAUs.id, managerAEmployee.id, managerAUserId);
+  const tiaEmployee = await makeReport('tia-trade@portal-e2e-a.test', 'PE-SW-2', 'Tia', 'Trade', branchAUs.id, managerAEmployee.id, managerAUserId);
+  const qaManagerUser = await makeUser(tenantA.id, 'qa-manager@portal-e2e-a.test', managerRoleA.id);
+  const qaManagerEmployee = await prisma.employee.create({
+    data: {
+      tenantId: tenantA.id, userId: qaManagerUser.id, employeeCode: 'PE-QM-1', firstName: 'Qamar', lastName: 'Manager', branchId: branchAQa.id,
+      employmentType: 'FULL_TIME', joinDate: new Date('2020-01-01'), statutoryFields: { QATAR_ID: 'QID-000078', VISA_SPONSORSHIP: 'yes' },
+    },
+  });
+  const rashidEmployee = await makeReport('rashid-roster@portal-e2e-a.test', 'PE-QM-2', 'Rashid', 'Rota', branchAQa.id, qaManagerEmployee.id, qaManagerUser.id);
+
   const fixtures = {
     tenantASlug: TENANT_A_SLUG,
     tenantBSlug: TENANT_B_SLUG,
@@ -698,6 +730,17 @@ export default async function globalSetup(): Promise<void> {
     clayEmail: 'clay-clock@portal-e2e-a.test',
     livEmail: 'liv-live@portal-e2e-a.test',
     prevMonthKey,
+    ritaEmail: 'rita-roster@portal-e2e-a.test',
+    ritaEmployeeId: ritaEmployee.id,
+    ritaEmployeeCode: 'PE-RR-1',
+    samEmail: 'sam-swap@portal-e2e-a.test',
+    samEmployeeId: samEmployee.id,
+    tiaEmail: 'tia-trade@portal-e2e-a.test',
+    tiaEmployeeId: tiaEmployee.id,
+    qaManagerEmail: 'qa-manager@portal-e2e-a.test',
+    qaReportEmail: 'rashid-roster@portal-e2e-a.test',
+    qaReportEmployeeId: rashidEmployee.id,
+    qaReportEmployeeCode: 'PE-QM-2',
     ginaSeeded,
     qadirSeeded,
   };

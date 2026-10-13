@@ -61,7 +61,10 @@ export class AttendanceStatusService {
     const from = parseYmd(query.from);
     const to = parseYmd(query.to);
 
-    const effective = await this.workingHours.resolve(tx, tenantId, employee.id, query.from);
+    // ONE standing resolution + ONE roster query for the whole range (never per day); each day
+    // is then judged against ITS OWN effective schedule: published roster cell > standing shift/policy.
+    const range = await this.workingHours.resolveRange(tx, tenantId, employee.id, from, to);
+    const effective = range.standing;
     const pack = await resolveAttendancePackConfig(tx, tenantId, employee.branchId);
 
     const [records, leaves] = await Promise.all([
@@ -91,18 +94,22 @@ export class AttendanceStatusService {
 
     const days = eachDay(from, to).map((date) => {
       const key = date.toISOString().slice(0, 10);
+      const day = range.forDate(date);
       return classifyDay({
         date,
         today,
         now,
         timeZone: effective.timezone,
         policy: {
-          startTime: effective.policy.startTime,
-          requiredHours: effective.policy.requiredHours,
-          graceMinutes: effective.policy.graceMinutes,
-          halfDayThresholdHours: effective.policy.halfDayThresholdHours,
+          startTime: day.policy.startTime,
+          requiredHours: day.policy.requiredHours,
+          graceMinutes: day.policy.graceMinutes,
+          halfDayThresholdHours: day.policy.halfDayThresholdHours,
         },
-        policySource: effective.source,
+        policySource: day.source,
+        rostered: day.rostered,
+        dayOff: day.dayOff,
+        shift: day.shift,
         weekendDays: pack.weekendDays,
         publicHolidays: pack.publicHolidays,
         onApprovedLeave: leaveDays.has(key),

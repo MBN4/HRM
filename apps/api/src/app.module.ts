@@ -47,6 +47,7 @@ import { TenancyModule } from './tenancy/tenancy.module';
 import { UsersModule } from './users/users.module';
 import { WorkflowModule } from './workflow/workflow.module';
 import { WorkingHoursModule } from './working-hours/working-hours.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { WorkingHoursModule } from './working-hours/working-hours.module';
     LeaveModule,
     AttendanceModule,
     WorkingHoursModule,
+    SchedulingModule,
     AnalyticsModule,
     PayrollModule,
     PerformanceModule,

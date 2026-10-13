@@ -81,6 +81,16 @@ export class NotificationDispatchListener {
     this.dispatch(payload);
   }
 
+  @OnEvent('roster.*')
+  handleRoster(payload: { type: string; [key: string]: unknown }): void {
+    this.dispatch(payload);
+  }
+
+  @OnEvent('shift_swap.*')
+  handleShiftSwap(payload: { type: string; [key: string]: unknown }): void {
+    this.dispatch(payload);
+  }
+
   private dispatch(payload: { type: string; [key: string]: unknown }): void {
     this.notifications.handleDomainEvent(payload.type, payload).catch((error: unknown) => {
       this.logger.error(`Failed to dispatch notifications for event "${payload.type}": ${String(error)}`);

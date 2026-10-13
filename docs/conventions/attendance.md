@@ -55,6 +55,13 @@ summary-computation job.
 
 ## Shifts, rosters, and overtime
 
+> **Step 8.2 update** — shifts now carry the working-hours parameters (grace / half-day) and can be a
+> _standing_ assignment (a team/member/company `WorkingHoursPolicy` row linked to a shift); `RosterAssignment`
+> gained single-day "cells", a DRAFT/PUBLISHED status and a `dayOff` flag. `ShiftResolutionService.resolveForDate`
+> is now _published roster (narrowest span wins) → standing shift → none_, so everything below that says "the
+> assignment with the latest `effectiveFrom`" should be read with that refinement. Full model:
+> [shift-scheduling.md](./shift-scheduling.md).
+
 - **`ShiftDefinition`** is a tenant-defined template (`startTime`/
   `endTime` as "HH:mm" branch-local wall-clock strings, `crossesMidnight`
   denormalized at write time from `startTime >= endTime`). **

@@ -128,6 +128,8 @@ test.describe('Team access: HR creates a user -> forced first-login password cha
   test('the admin cannot act on their own row (no actions offered)', async ({ page }) => {
     await login(page, fixtures.tenantASlug, fixtures.adminAEmail);
     await page.goto('/users');
+    // The list is paginated newest-first; later steps add fixture users (e.g. 8.2's scheduling people), so find the admin by search.
+    await page.getByTestId('user-search').fill(fixtures.adminAEmail);
     const self = page.getByTestId(`user-row-${fixtures.adminAEmail}`);
     await expect(self).toBeVisible();
     await expect(self).toContainText('You');

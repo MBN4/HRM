@@ -6,6 +6,7 @@ export type RootStackParamList = {
   AttendanceRegularize: undefined;
   Notifications: undefined;
   Announcements: undefined;
+  Schedule: undefined;
   Settings: undefined;
 };
 
