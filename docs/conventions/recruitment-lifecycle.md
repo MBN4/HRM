@@ -410,3 +410,5 @@ explicitly bounded well below the cumulative-total figure the engine's own
 documented double-counting bug would have produced; and cross-tenant
 isolation via RLS across every new table, including the public careers
 route).
+
+> **Step 9.1 extension:** resume parsing + candidate screening build on this module — see [resume-parsing-screening.md](./resume-parsing-screening.md). The "no resume download route" gap noted in frontend-admin-console.md is closed by `GET /recruitment/candidates/:id/resume`.

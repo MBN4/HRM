@@ -120,6 +120,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/attendance-status.md`](./docs/conventions/attendance-status.md)               | Attendance day-status classification (GREEN/YELLOW/RED/NEUTRAL/IN_PROGRESS) computed on read from the working-hours policy + records, the reason values, `GET /attendance/status`, and how Part 3 consumes it. (8.1 Part 2)                                                                                                                                                                                  |
 | [`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md)                       | The live analog clock (server-anchored elapsed, goal ring, reduced-motion), the colour-coded monthly graph (status→colour, reason→i18n mapping, RTL calendar mirroring), the manager/HR member picker, and the demo helpers. (8.1 Part 3)                                                                                                                                                                    |
 | [`docs/conventions/shift-scheduling.md`](./docs/conventions/shift-scheduling.md)                 | Shift scheduling & rostering: the reconciled shift-vs-working-hours model (a shift carries the policy parameters; a standing assignment is a policy row linked to a shift; one precedence chain), the dated roster calendar (draft/publish, day off, copy-week, coverage, past-day rule), scope via the hierarchy, classification against the day's effective shift, and swap via the workflow engine. (8.2) |
+| [`docs/conventions/resume-parsing-screening.md`](./docs/conventions/resume-parsing-screening.md) | Resume parsing + candidate screening (extends 2.3 ATS): the swappable `RESUME_PARSER` seam + the dependency-free default parser and its honest accuracy limits, the async BullMQ parse flow + graceful failure, screening criteria as config data, the pure transparent scorer, human-in-the-loop (scores never move a stage), PII/privacy. (9.1)                                                            |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                            |
 
 ## 5. Build log summary
@@ -1029,6 +1030,14 @@ API (shifts, standing, roster grid, cells, copy-week, publish, coverage, my-sche
 classification/clock-in judge each day against its effective shift (overnight + rostered weekends correct), portal
 `/scheduling` + `/schedule`, mobile "My schedule", demo seed. Also closed a hole: any employee could `POST /attendance/shifts|rosters`.
 See [`docs/conventions/shift-scheduling.md`](./docs/conventions/shift-scheduling.md).
+
+**9.1 — Resume parsing & candidate screening (2026-10-14)** — not a numbered phase step; an additive extension of the
+2.3 recruitment/ATS module: resumes (public apply or recruiter upload) are parsed ASYNC (BullMQ `resume-parse`) behind a swappable
+`RESUME_PARSER` seam (default: dependency-free heuristic parser, honest limits documented; external/LLM adapters are a seam only)
+into an editable `ParsedResume` on the candidate; per-requisition screening criteria are config data; applicants get a transparent
+0–100 match score (matched/missed per criterion), a ranked/filterable list, and scoring NEVER changes a stage — a human decides.
+Failed parses leave the candidate usable (manual entry). New `/recruitment/screening/[requisitionId]` + candidate-page panel;
+no new permissions. See [`docs/conventions/resume-parsing-screening.md`](./docs/conventions/resume-parsing-screening.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

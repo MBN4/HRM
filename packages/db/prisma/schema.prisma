@@ -177,6 +177,7 @@ model Tenant {
   reviews                        Review[]
   appraisalRatingDistributions   AppraisalRatingDistributionSnapshot[]
   jobRequisitions                JobRequisition[]
+  screeningCriteria              ScreeningCriteria[]
   jobPostings                    JobPosting[]
   candidates                     Candidate[]
   applications                   Application[]
@@ -3269,11 +3270,12 @@ model JobRequisition {
   createdAt          DateTime             @default(now()) @map("created_at")
   updatedAt          DateTime             @updatedAt @map("updated_at")
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch      Branch       @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
-  department  Department?  @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: SetNull)
-  designation Designation? @relation(fields: [tenantId, designationId], references: [tenantId, id], onDelete: SetNull)
-  postings    JobPosting[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch             @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  department        Department?        @relation(fields: [tenantId, departmentId], references: [tenantId, id], onDelete: SetNull)
+  designation       Designation?       @relation(fields: [tenantId, designationId], references: [tenantId, id], onDelete: SetNull)
+  postings          JobPosting[]
+  screeningCriteria ScreeningCriteria?
 
   @@unique([tenantId, id])
   @@index([tenantId, status])
@@ -3335,6 +3337,21 @@ model Candidate {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
+  // Resume parsing (step 9.1 — docs/conventions/resume-parsing-screening.md).
+  // `parsedData` is the structured `ParsedResume` (validated by a shared zod
+  // schema on every write AND read); a recruiter's edit overwrites it in
+  // place and stamps `parsedDataEditedAt` — screening always scores the
+  // CURRENT value, so an edit is what gets screened.
+  resumeFileName     String?           @map("resume_file_name")
+  resumeContentType  String?           @map("resume_content_type")
+  parseStatus        ResumeParseStatus @default(NONE) @map("parse_status")
+  parsedData         Json?             @map("parsed_data")
+  parseError         String?           @map("parse_error")
+  parserName         String?           @map("parser_name")
+  parsedAt           DateTime?         @map("parsed_at")
+  parsedDataEditedAt DateTime?         @map("parsed_data_edited_at")
+  parsedDataEditedBy String?           @map("parsed_data_edited_by") @db.Uuid
+
   tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   applications        Application[]
   onboardingProcesses OnboardingProcess[]
@@ -3342,6 +3359,13 @@ model Candidate {
   @@unique([tenantId, id])
   @@unique([tenantId, email])
   @@map("candidates")
+}
+
+enum ResumeParseStatus {
+  NONE
+  PENDING
+  PARSED
+  FAILED
 }
 
 enum ApplicationStage {
@@ -3368,6 +3392,15 @@ model Application {
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
 
+  // Screening (step 9.1) — an ASSISTIVE score only. `screeningResult` holds
+  // the full per-criterion breakdown (matched/missed + points) so a score is
+  // never a black box. `belowThreshold` is a FLAG for a human; nothing here
+  // ever changes `stage`.
+  screeningScore  Int?      @map("screening_score")
+  screeningResult Json?     @map("screening_result")
+  belowThreshold  Boolean   @default(false) @map("below_threshold")
+  screenedAt      DateTime? @map("screened_at")
+
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   candidate  Candidate   @relation(fields: [tenantId, candidateId], references: [tenantId, id], onDelete: Cascade)
   jobPosting JobPosting  @relation(fields: [tenantId, jobPostingId], references: [tenantId, id], onDelete: Cascade)
@@ -3377,7 +3410,28 @@ model Application {
   @@unique([tenantId, id])
   @@unique([tenantId, candidateId, jobPostingId])
   @@index([tenantId, jobPostingId, stage])
+  @@index([tenantId, jobPostingId, screeningScore])
   @@map("applications")
+}
+
+// Screening criteria for one requisition (step 9.1) — CONFIG DATA, never
+// code. `config` is a `ScreeningCriteriaConfig` (required/preferred skills,
+// min years, min education, keyword must-haves, weights, a below-threshold
+// flag cut-off), re-validated by a shared zod schema on every write and read.
+model ScreeningCriteria {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  requisitionId   String   @map("requisition_id") @db.Uuid
+  config          Json
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requisition JobRequisition @relation(fields: [tenantId, requisitionId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, requisitionId])
+  @@map("screening_criteria")
 }
 
 enum InterviewStatus {

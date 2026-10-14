@@ -152,6 +152,7 @@ export default function RecruitmentPage() {
                       <th className="py-2 text-start font-medium">{t('recruitment.employmentType')}</th>
                       <th className="py-2 text-start font-medium">{t('recruitment.headcount')}</th>
                       <th className="py-2 text-start font-medium">{t('common.status')}</th>
+                      <th className="py-2 text-start font-medium">{t('screening.openScreening')}</th>
                       {canManage && <th className="py-2 text-start font-medium">{t('common.actions')}</th>}
                     </tr>
                   </thead>
@@ -173,6 +174,13 @@ export default function RecruitmentPage() {
                           <td className="py-2.5 text-ink-600">{req.headcount}</td>
                           <td className="py-2.5">
                             <StatusBadge status={req.status} label={t(`recruitment.requisitionStatus.${req.status}`)} />
+                          </td>
+                          <td className="py-2.5">
+                            {['APPROVED', 'CLOSED'].includes(req.status) && (
+                              <Button data-testid="open-screening-button" size="sm" variant="secondary" onClick={() => router.push(`/recruitment/screening/${req.id}`)}>
+                                {t('screening.openScreening')}
+                              </Button>
+                            )}
                           </td>
                           {canManage && (
                             <td className="py-2.5">
@@ -205,7 +213,7 @@ export default function RecruitmentPage() {
                         </tr>
                         {expandedRequisitionId === req.id && req.workflowInstanceId && (
                           <tr>
-                            <td colSpan={canManage ? 6 : 5} className="bg-sand-50 px-3 py-3">
+                            <td colSpan={canManage ? 7 : 6} className="bg-sand-50 px-3 py-3">
                               <WorkflowStatusPanel workflowInstanceId={req.workflowInstanceId} />
                             </td>
                           </tr>

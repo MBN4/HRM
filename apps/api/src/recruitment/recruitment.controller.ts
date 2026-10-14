@@ -14,7 +14,7 @@ import {
   updateApplicationStageSchema,
   UpdateApplicationStageInput,
 } from '@hrm/shared';
-import type { Interview, Offer } from '@hrm/db';
+import type { Application, Candidate, Interview, Offer } from '@hrm/db';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
@@ -147,28 +147,28 @@ export class RecruitmentController {
   @Get('candidates')
   @UseInterceptors(PermissionsGuard)
   @RequirePermissions(PERMISSIONS.RECRUITMENT_READ)
-  async listCandidates() {
+  async listCandidates(): Promise<Candidate[]> {
     return this.candidates.list(this.tenantContext.getTx());
   }
 
   @Get('candidates/:id')
   @UseInterceptors(PermissionsGuard)
   @RequirePermissions(PERMISSIONS.RECRUITMENT_READ)
-  async getCandidate(@Param('id') id: string) {
+  async getCandidate(@Param('id') id: string): Promise<Candidate> {
     return this.candidates.findById(this.tenantContext.getTx(), id);
   }
 
   @Get('applications')
   @UseInterceptors(PermissionsGuard)
   @RequirePermissions(PERMISSIONS.RECRUITMENT_READ)
-  async listApplications(@Query('jobPostingId') jobPostingId?: string, @Query('candidateId') candidateId?: string, @Query('stage') stage?: string) {
+  async listApplications(@Query('jobPostingId') jobPostingId?: string, @Query('candidateId') candidateId?: string, @Query('stage') stage?: string): Promise<Application[]> {
     return this.applications.list(this.tenantContext.getTx(), { jobPostingId, candidateId, stage });
   }
 
   @Get('applications/:id')
   @UseInterceptors(PermissionsGuard)
   @RequirePermissions(PERMISSIONS.RECRUITMENT_READ)
-  async getApplication(@Param('id') id: string) {
+  async getApplication(@Param('id') id: string): Promise<Application> {
     return this.applications.findById(this.tenantContext.getTx(), id);
   }
 
@@ -176,7 +176,7 @@ export class RecruitmentController {
   @UseInterceptors(PermissionsGuard, AuditInterceptor)
   @RequirePermissions(PERMISSIONS.RECRUITMENT_WRITE)
   @AuditLog('Application', 'STAGE_CHANGE')
-  async updateApplicationStage(@Param('id') id: string, @Body(new ZodValidationPipe(updateApplicationStageSchema)) body: UpdateApplicationStageInput) {
+  async updateApplicationStage(@Param('id') id: string, @Body(new ZodValidationPipe(updateApplicationStageSchema)) body: UpdateApplicationStageInput): Promise<Application> {
     const tx = this.tenantContext.getTx();
     const before = await this.applications.findById(tx, id);
     this.auditCapture.setBefore(before);

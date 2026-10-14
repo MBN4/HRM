@@ -25,6 +25,8 @@
 import { hash } from '@node-rs/argon2';
 import { prisma, SYSTEM_ROLES } from '@hrm/db';
 import { branchLocalToUtc } from '../src/attendance/attendance-timezone.util';
+import { scoreResume } from '../src/recruitment/screening/screening-scorer.util';
+import { parsedResumeSchema, screeningCriteriaConfigSchema } from '@hrm/shared';
 import type { AttendanceDayStatus, EmploymentType, Gender, LeaveRequestStatus, LeaveType } from '@hrm/db';
 
 if (process.env.NODE_ENV === 'production') {
@@ -697,6 +699,95 @@ async function main() {
         },
       });
     }
+  }
+
+  // ---- resume screening demo (step 9.1) --------------------------------------
+  // One APPROVED requisition + PUBLISHED posting with screening criteria and eight applicants whose PARSED resumes
+  // differ (skills / years / education), scored by the REAL scorer — so /recruitment/screening/<requisition> shows a
+  // ranked list immediately. The data is inserted already-parsed (no resume file / queue job is needed).
+  const screeningCreator = adminUser ?? (await prisma.user.findFirst({ where: { tenantId } }));
+  if (usHq && screeningCreator) {
+    const SCREENING_TITLE = 'Senior Backend Engineer (Screening Demo)';
+    const requisition =
+      (await prisma.jobRequisition.findFirst({ where: { tenantId, title: SCREENING_TITLE } })) ??
+      (await prisma.jobRequisition.create({
+        data: { tenantId, title: SCREENING_TITLE, branchId: usHq.id, employmentType: 'FULL_TIME', headcount: 2, justification: 'Demo requisition for resume screening.', status: 'APPROVED', approvedAt: new Date(), createdByUserId: screeningCreator.id },
+      }));
+    const posting = await prisma.jobPosting.upsert({
+      where: { tenantId_publicSlug: { tenantId, publicSlug: 'demo-senior-backend-engineer' } },
+      update: {},
+      create: { tenantId, requisitionId: requisition.id, title: SCREENING_TITLE, description: 'Build and scale our payments APIs (TypeScript / NestJS / PostgreSQL).', publicSlug: 'demo-senior-backend-engineer', status: 'PUBLISHED', publishedAt: new Date() },
+    });
+    const criteria = screeningCriteriaConfigSchema.parse({
+      requiredSkills: ['TypeScript', 'NestJS', 'PostgreSQL'],
+      preferredSkills: ['AWS', 'Docker', 'Kubernetes'],
+      minYearsExperience: 5,
+      minEducation: 'BACHELOR',
+      keywordMustHaves: ['api'],
+      belowThresholdScore: 50,
+    });
+    await prisma.screeningCriteria.upsert({
+      where: { tenantId_requisitionId: { tenantId, requisitionId: requisition.id } },
+      update: { config: criteria, updatedByUserId: screeningCreator.id },
+      create: { tenantId, requisitionId: requisition.id, config: criteria, updatedByUserId: screeningCreator.id },
+    });
+
+    type DemoCandidate = { first: string; last: string; skills: string[]; years: number | null; level: 'HIGH_SCHOOL' | 'DIPLOMA' | 'BACHELOR' | 'MASTER' | 'DOCTORATE'; title: string; company: string; summary: string; stage?: 'APPLIED' | 'SCREEN' | 'INTERVIEW' | 'REJECTED'; failed?: boolean };
+    const demoCandidates: DemoCandidate[] = [
+      { first: 'Sara', last: 'Ahmed', skills: ['TypeScript', 'NestJS', 'PostgreSQL', 'AWS', 'Docker', 'Kubernetes', 'React'], years: 9, level: 'MASTER', title: 'Staff Software Engineer', company: 'Acme Payments', summary: 'Built payments APIs serving millions of requests a day.', stage: 'INTERVIEW' },
+      { first: 'Daniel', last: 'Reyes', skills: ['TypeScript', 'Node.js', 'PostgreSQL', 'React', 'Docker'], years: 6, level: 'BACHELOR', title: 'Senior Developer', company: 'Brightside', summary: 'Full-stack API development on Node.', stage: 'SCREEN' },
+      { first: 'Priya', last: 'Nair', skills: ['Python', 'Django', 'PostgreSQL', 'AWS'], years: 5, level: 'BACHELOR', title: 'Backend Engineer', company: 'DataLoom', summary: 'REST API design in Python.' },
+      { first: 'Omar', last: 'Haddad', skills: ['JavaScript', 'React', 'Node.js'], years: 3, level: 'BACHELOR', title: 'Web Developer', company: 'PixelWorks', summary: 'Frontend-leaning developer.' },
+      { first: 'Lena', last: 'Fischer', skills: ['React', 'TypeScript', 'CSS'], years: 4, level: 'DIPLOMA', title: 'Frontend Engineer', company: 'Studio North', summary: 'Design-system focused UI engineer.' },
+      { first: 'Bilal', last: 'Khan', skills: ['Python', 'Excel'], years: 1, level: 'DIPLOMA', title: 'Junior Developer', company: 'Initech', summary: 'Internal scripting and reporting.', stage: 'REJECTED' },
+      { first: 'Mei', last: 'Tanaka', skills: ['Java', 'Spring Boot', 'MySQL', 'Kubernetes'], years: 12, level: 'DOCTORATE', title: 'Principal Engineer', company: 'Kaisha Systems', summary: 'Enterprise Java platform APIs.' },
+      { first: 'Zed', last: 'Broken', skills: [], years: null, level: 'HIGH_SCHOOL', title: '', company: '', summary: '', failed: true },
+    ];
+    for (const c of demoCandidates) {
+      const email = `${c.first}.${c.last}@demo-candidates.example`.toLowerCase();
+      const now = new Date();
+      const parsed = c.failed
+        ? null
+        : parsedResumeSchema.parse({
+            fullName: `${c.first} ${c.last}`,
+            email,
+            skills: c.skills,
+            experience: [{ title: c.title, company: c.company, startDate: String(now.getUTCFullYear() - Math.round(c.years ?? 0)), endDate: 'present', description: c.summary }],
+            education: [{ degree: `${c.level === 'MASTER' ? 'MSc' : c.level === 'DOCTORATE' ? 'PhD' : c.level === 'BACHELOR' ? 'BSc' : 'Diploma'} in Computer Science`, level: c.level }],
+            totalYearsExperience: c.years,
+            links: [],
+            summary: c.summary,
+            rawText: `${c.first} ${c.last} ${c.title} ${c.company} ${c.summary} ${c.skills.join(' ')}`,
+          });
+      const candidateData = {
+        firstName: c.first,
+        lastName: c.last,
+        source: 'demo',
+        parseStatus: parsed ? ('PARSED' as const) : ('FAILED' as const),
+        parsedData: parsed ?? undefined,
+        parseError: parsed ? null : 'Unsupported file type — please upload a PDF, DOCX or TXT resume.',
+        parserName: parsed ? 'demo-seed' : 'built-in-heuristic-v1',
+        parsedAt: parsed ? now : null,
+      };
+      const candidate = await prisma.candidate.upsert({
+        where: { tenantId_email: { tenantId, email } },
+        update: candidateData,
+        create: { tenantId, email, ...candidateData },
+      });
+      const result = parsed ? scoreResume({ parsed, config: criteria, basedOnEditedData: false }) : null;
+      const screening = {
+        screeningScore: result?.score ?? null,
+        screeningResult: result ? (result as unknown as object) : undefined,
+        belowThreshold: result?.belowThreshold ?? false,
+        screenedAt: result ? now : null,
+      };
+      await prisma.application.upsert({
+        where: { tenantId_candidateId_jobPostingId: { tenantId, candidateId: candidate.id, jobPostingId: posting.id } },
+        update: { ...screening, stage: c.stage ?? 'APPLIED' },
+        create: { tenantId, candidateId: candidate.id, jobPostingId: posting.id, stage: c.stage ?? 'APPLIED', ...screening },
+      });
+    }
+    console.log(`Resume screening demo: requisition "${SCREENING_TITLE}" (id ${requisition.id}) -> portal /recruitment/screening/${requisition.id} (sign in as hr@acme-demo.local or ceo@).`);
   }
 
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------

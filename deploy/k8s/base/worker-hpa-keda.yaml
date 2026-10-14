@@ -69,6 +69,14 @@ spec:
     - type: redis
       metadata:
         address: 'redis:6379'
+        listName: 'bull:resume-parse:wait'
+        listLength: '10'
+        activationListLength: '1'
+      authenticationRef:
+        name: hrm-redis-auth
+    - type: redis
+      metadata:
+        address: 'redis:6379'
         listName: 'bull:employee-import:wait'
         listLength: '3'
         activationListLength: '1'

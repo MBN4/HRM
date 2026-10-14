@@ -4418,3 +4418,37 @@ cleanup: scheduling + working-hours + attendance-status + attendance units **113
 fixtures) fixed and re-run 13/13. Mobile: typecheck, jest 19/19, eslint — **not run on a device**.
 **Known gaps**: coverage `off` lumps weekends/holidays with day-offs; grid `standing.startTime` null for Country-Pack default; no
 draft-edit layer on a published week; roster grid not load-tested at the 1,000-person cap; mobile RTL unverified on a device.
+
+## 9.1 — Resume parsing & candidate screening (2026-10-14)
+
+Design, the parser seam, the default parser's honest accuracy limits, scoring model and async flow:
+[`conventions/resume-parsing-screening.md`](./conventions/resume-parsing-screening.md). An **extension** of the 2.3
+recruitment/ATS module — auth, RLS, the workflow engine and the public-but-tenant-scoped careers route are untouched.
+**Schema** (migrations `20261014090000_add_resume_parsing_screening` + `…090100_enable_rls_for_screening_criteria`, additive):
+`Candidate` + parse columns (`parseStatus` enum, `parsedData` JSON, `parseError`, `parserName`, `parsedAt`, edit stamps,
+resume file name/type); `Application` + `screeningScore` (indexed) / `screeningResult` / `belowThreshold` / `screenedAt`;
+new RLS'd `screening_criteria` (one per requisition). **Shared**: `resume-screening.validator.ts` (`ParsedResume`,
+`ScreeningCriteriaConfig`, `ScreeningResult`, ranked-query schema, education ranking), ~100 en+ar `screening.*` strings,
+`rawText` added to the audit redaction pattern. **API** (`apps/api/src/recruitment/…`): `RESUME_PARSER` seam +
+`BuiltInResumeParser` (pdf-parse v2 in a worker thread, fflate DOCX, regex/dictionary heuristics) + `UnavailableResumeParser`
+(documented seam, `RESUME_PARSER_PROVIDER`); `ResumeParsingService` + `ResumeParseProcessor` (new `resume-parse` BullMQ queue, KEDA
+trigger added); pure `scoreResume`; `ScreeningService`/`ScreeningController` (criteria CRUD, ranked list, per-application view,
+parsed-data edit, upload/re-parse/download, recruiter "add applicant"); shared `CandidateIntakeService` (public apply now
+dedupes before uploading; apply response strips screening output); `toCandidateView` strips `rawText`; explicit return types on
+5 `RecruitmentController` methods (their inferred types now reference Prisma's `JsonValue` and broke `nest build`'s declaration
+emit); `candidateId` added to the domain-event audit entity-id list. **Portal**: `/recruitment/screening/[requisitionId]`
+(criteria editor, ranked/filterable table, "why this score", add applicant, polling while parsing) + `ParsedResumePanel`/
+per-application score on the candidate page + a "Screening" entry point on `/recruitment`. **Demo**: `seed:demo` adds
+"Senior Backend Engineer (Screening Demo)" with criteria + 8 parsed applicants (one FAILED parse).
+**New deps** (`apps/api`): `pdf-parse@2.4.5` (pulls `pdfjs-dist` + a prebuilt `@napi-rs/canvas` — verify the Docker image
+build on the target base image), `fflate@0.8.3`.
+
+**Verification** (all run): `resume-screening.e2e-spec.ts` **23/23** (real pdfkit PDF + DOCX parsed async by the real BullMQ
+worker; unparseable + scanned files FAILED gracefully; criteria → scores → ranking → matched/missed; filters; edits re-score
+from edited data; manual entry; stages untouched by scoring; recruiter upload/add-applicant/re-parse; RBAC; cross-tenant; public apply
+leaks no score); unit specs (parser + extractor, scorer) 15/15; pre-existing `recruitment-lifecycle.e2e-spec.ts` still passes.
+Portal Playwright `screening.spec.ts` (see below). **Bugs caught on the way**: `pdf-parse@1.1.1` (2018 pdf.js) rejected ordinary
+modern PDFs ("bad XRef entry") → moved to v2; pdf.js' worker bootstrap needs real ESM dynamic import → parsing runs in a
+`worker_threads` Worker (also a resilience win); month-range arithmetic off by one (inclusive months).
+**Known gaps**: screening questionnaires not built (fast-follow); no LLM/API parser adapter (seam only); no OCR; synchronous
+re-score bounded at 5,000 applications; replacing a resume orphans the old object; mobile untouched.

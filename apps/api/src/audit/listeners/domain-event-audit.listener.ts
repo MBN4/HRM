@@ -19,6 +19,7 @@ const ENTITY_ID_FIELDS = [
   'cycleId',
   'assignmentId',
   'offerId',
+  'candidateId',
   'taskId',
   'ticketId',
   'enrollmentId',

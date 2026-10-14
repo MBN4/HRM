@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import Link from 'next/link';
 import { PERMISSIONS } from '@hrm/shared';
 import { useI18n } from '../../../../../i18n/I18nProvider';
 import { useAuth } from '../../../../../lib/auth/AuthContext';
@@ -15,6 +16,9 @@ import { Modal } from '../../../../../components/ui/Modal';
 import { PageSpinner } from '../../../../../components/ui/Spinner';
 import { ScheduleInterviewForm } from '../../../../../components/recruitment/ScheduleInterviewForm';
 import { SubmitScorecardForm } from '../../../../../components/recruitment/SubmitScorecardForm';
+import { getApplicationScreening } from '../../../../../lib/api/screening';
+import { ParsedResumePanel } from '../../../../../components/recruitment/ParsedResumePanel';
+import { ScoreBar, ScreeningBreakdown } from '../../../../../components/recruitment/ScreeningScore';
 import type { Application, Interview } from '../../../../../lib/api/types';
 
 function InterviewBlock({ interview, canWrite }: { interview: Interview; canWrite: boolean }) {
@@ -71,9 +75,10 @@ function InterviewBlock({ interview, canWrite }: { interview: Interview; canWrit
   );
 }
 
-function ApplicationBlock({ application, canWrite }: { application: Application; canWrite: boolean }) {
+function ApplicationBlock({ application, canWrite, version }: { application: Application; canWrite: boolean; version: number }) {
   const { t } = useI18n();
   const [scheduling, setScheduling] = useState(false);
+  const { data: screening } = useAsync(() => getApplicationScreening(application.id), [application.id, version]);
   const { data: interviews, loading, reload } = useAsync(() => listInterviewsForApplication(application.id), [application.id]);
 
   return (
@@ -87,6 +92,24 @@ function ApplicationBlock({ application, canWrite }: { application: Application;
         )}
       </CardHeader>
       <CardBody className="space-y-3">
+        {screening && (
+          <div className="space-y-2" data-testid="application-screening">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+                {t('screening.applicationScore')} — {screening.jobPosting.title}
+              </p>
+              <Link href={`/recruitment/screening/${screening.jobPosting.requisitionId}`} className="text-xs text-brand-700 hover:underline">
+                {t('screening.openScreening')}
+              </Link>
+            </div>
+            <ScoreBar
+              score={screening.screeningScore}
+              belowThreshold={screening.belowThreshold}
+              notScoredLabel={!screening.criteria ? t('screening.notScoredNoCriteria') : t('screening.notScoredNoParse')}
+            />
+            {screening.screening && <ScreeningBreakdown result={screening.screening} />}
+          </div>
+        )}
         <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">{t('recruitment.interviews')}</p>
         {loading ? (
           <PageSpinner />
@@ -124,7 +147,13 @@ export default function CandidateDetailPage({ params }: { params: { id: string }
   const canView = can(PERMISSIONS.RECRUITMENT_READ) || can(PERMISSIONS.RECRUITMENT_MANAGE);
   const canWrite = can(PERMISSIONS.RECRUITMENT_WRITE);
 
-  const { data: candidate, loading, error } = useAsync(() => (canView ? getCandidate(params.id) : Promise.resolve(null)), [canView, params.id]);
+  const [version, setVersion] = useState(0);
+  const { data: candidate, loading, error, reload: reloadCandidate } = useAsync(() => (canView ? getCandidate(params.id) : Promise.resolve(null)), [canView, params.id]);
+  // Re-fetch the candidate (and bump `version` so every application's screening view re-fetches too) after a parse finishes or a recruiter edits the parsed data.
+  const refresh = useCallback(() => {
+    reloadCandidate();
+    setVersion((v) => v + 1);
+  }, [reloadCandidate]);
   const { data: applications, loading: loadingApplications } = useAsync(
     () => (canView ? listApplications({ candidateId: params.id }) : Promise.resolve([])),
     [canView, params.id],
@@ -134,7 +163,7 @@ export default function CandidateDetailPage({ params }: { params: { id: string }
     return <Alert tone="info">{t('error.forbidden')}</Alert>;
   }
 
-  if (loading) return <PageSpinner />;
+  if (loading && !candidate) return <PageSpinner />;
   if (error) return <Alert tone="error">{error}</Alert>;
   if (!candidate) return <Alert tone="info">{t('error.notFound')}</Alert>;
 
@@ -145,8 +174,27 @@ export default function CandidateDetailPage({ params }: { params: { id: string }
           {candidate.firstName} {candidate.lastName}
         </h1>
         <p className="text-sm text-ink-500">{candidate.email}</p>
-        {candidate.resumeStorageKey && <p className="mt-1 text-xs text-ink-400">{t('recruitment.resumeOnFile')}</p>}
       </div>
+
+      <Card>
+        <CardBody>
+          <ParsedResumePanel
+            candidateId={candidate.id}
+            hasResume={!!candidate.resumeStorageKey}
+            resumeFileName={candidate.resumeFileName}
+            parse={{
+              status: candidate.parseStatus ?? 'NONE',
+              error: candidate.parseError ?? null,
+              parserName: candidate.parserName ?? null,
+              editedAt: candidate.parsedDataEditedAt ?? null,
+              parsedAt: candidate.parsedAt ?? null,
+            }}
+            parsed={candidate.parsedData ?? null}
+            canWrite={canWrite}
+            onChanged={refresh}
+          />
+        </CardBody>
+      </Card>
 
       <div>
         <h2 className="mb-2 text-sm font-semibold text-ink-900">{t('recruitment.applications')}</h2>
@@ -157,7 +205,7 @@ export default function CandidateDetailPage({ params }: { params: { id: string }
         ) : (
           <div className="space-y-4">
             {applications.map((application) => (
-              <ApplicationBlock key={application.id} application={application} canWrite={canWrite} />
+              <ApplicationBlock key={application.id} application={application} canWrite={canWrite} version={version} />
             ))}
           </div>
         )}

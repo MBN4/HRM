@@ -113,6 +113,8 @@ const STATUS_TONE: Record<string, Tone> = {
   // not already covered above (PENDING/COMPLETED/FAILED are reused as-is)
   // — additive only.
   GENERATING: 'info',
+  // Resume parsing (step 9.1) — ResumeParseStatus not already covered above (NONE/PENDING/FAILED are reused as-is) — additive only.
+  PARSED: 'success',
 };
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

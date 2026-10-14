@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Application, JobPosting, Prisma } from '@hrm/db';
 import type { ApplyToPostingInput } from '@hrm/shared';
-import { StorageService } from '../../storage/storage.service';
-import { CandidateService } from '../candidates/candidate.service';
-import { ApplicationService } from '../applications/application.service';
+import { CandidateIntakeService } from '../candidates/candidate-intake.service';
 import { MAX_LIST_RESULTS } from '../recruitment.constants';
+
+/** What the public apply route returns — an `Application` without any recruiter-only screening output. */
+export type PublicApplication = Omit<Application, 'screeningScore' | 'screeningResult' | 'belowThreshold' | 'screenedAt'>;
 
 export interface ApplyResumeFile {
   buffer: Buffer;
@@ -24,11 +25,7 @@ export interface ApplyResumeFile {
  */
 @Injectable()
 export class CareersService {
-  constructor(
-    private readonly storage: StorageService,
-    private readonly candidates: CandidateService,
-    private readonly applications: ApplicationService,
-  ) {}
+  constructor(private readonly intake: CandidateIntakeService) {}
 
   async listPublished(tx: Prisma.TransactionClient): Promise<JobPosting[]> {
     return tx.jobPosting.findMany({ where: { status: 'PUBLISHED' }, orderBy: { publishedAt: 'desc' }, take: MAX_LIST_RESULTS });
@@ -48,16 +45,12 @@ export class CareersService {
     slug: string,
     input: ApplyToPostingInput,
     resume?: ApplyResumeFile,
-  ): Promise<Application> {
+  ): Promise<PublicApplication> {
     const posting = await this.getPublishedBySlug(tx, slug);
-    const candidate = await this.candidates.upsertByEmail(tx, tenantId, { ...input, source: 'careers_page' });
-
-    if (resume) {
-      const key = `candidates/${tenantId}/${candidate.id}/resume-${Date.now()}-${resume.originalname}`;
-      await this.storage.uploadObject({ key, body: resume.buffer, contentType: resume.mimetype });
-      await this.candidates.setResumeStorageKey(tx, candidate.id, key);
-    }
-
-    return this.applications.apply(tx, tenantId, posting.id, candidate.id);
+    const application = await this.intake.intake(tx, tenantId, posting, input, 'careers_page', resume);
+    // Screening output is recruiter-only: this route is unauthenticated, so an applicant
+    // must never be handed their own (or a returning applicant's) score/breakdown.
+    const { screeningScore: _s, screeningResult: _r, belowThreshold: _b, screenedAt: _t, ...publicView } = application;
+    return publicView;
   }
 }

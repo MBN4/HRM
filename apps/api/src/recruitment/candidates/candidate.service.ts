@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Candidate, Prisma } from '@hrm/db';
 import { MAX_LIST_RESULTS } from '../recruitment.constants';
+import { toCandidateView } from './candidate-view.util';
 
 export interface UpsertCandidateInput {
   firstName: string;
@@ -39,10 +40,19 @@ export class CandidateService {
   }
 
   async list(tx: Prisma.TransactionClient): Promise<Candidate[]> {
-    return tx.candidate.findMany({ orderBy: { createdAt: 'desc' }, take: MAX_LIST_RESULTS });
+    return (await tx.candidate.findMany({ orderBy: { createdAt: 'desc' }, take: MAX_LIST_RESULTS })).map(toCandidateView);
   }
 
   async findById(tx: Prisma.TransactionClient, id: string): Promise<Candidate> {
+    const candidate = await tx.candidate.findUnique({ where: { id } });
+    if (!candidate) {
+      throw new NotFoundException(`Candidate "${id}" was not found.`);
+    }
+    return toCandidateView(candidate);
+  }
+
+  /** The unstripped row, for callers (screening, the parse worker) that need `parsedData.rawText`. */
+  async requireRaw(tx: Prisma.TransactionClient, id: string): Promise<Candidate> {
     const candidate = await tx.candidate.findUnique({ where: { id } });
     if (!candidate) {
       throw new NotFoundException(`Candidate "${id}" was not found.`);

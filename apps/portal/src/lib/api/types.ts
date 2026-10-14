@@ -597,8 +597,16 @@ export interface Candidate {
   lastName: string;
   email: string;
   phone: string | null;
-  /** No download route exists for this — a documented limitation, see docs/conventions/frontend-admin-console.md. */
+  /** Download via `downloadCandidateResume` (step 9.1); this key itself is never used client-side. */
   resumeStorageKey: string | null;
+  resumeFileName?: string | null;
+  /** Step 9.1 — async resume parsing. `parsedData` is the `ParsedResume` shape minus the server-only `rawText`. */
+  parseStatus?: 'NONE' | 'PENDING' | 'PARSED' | 'FAILED';
+  parsedData?: import('@hrm/shared').ParsedResume | null;
+  parseError?: string | null;
+  parserName?: string | null;
+  parsedAt?: string | null;
+  parsedDataEditedAt?: string | null;
   source: string | null;
   createdAt: string;
   updatedAt: string;

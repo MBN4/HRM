@@ -35,6 +35,7 @@ export * from './validators/payroll.validator';
 export * from './validators/performance.validator';
 export * from './validators/checklist.validator';
 export * from './validators/recruitment.validator';
+export * from './validators/resume-screening.validator';
 export * from './validators/onboarding.validator';
 export * from './validators/offboarding.validator';
 export * from './validators/expense.validator';
