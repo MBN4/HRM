@@ -1385,3 +1385,200 @@ export interface ExternalSigningLinkView {
   requestTitle: string;
   documentMimeType: string;
 }
+
+// ---- Engagement & culture (step 10.1) — see docs/conventions/engagement-culture.md -----------------------------
+
+export interface RecognitionCategory {
+  id: string;
+  name: string;
+  description: string | null;
+  points: number;
+  isActive: boolean;
+}
+
+export type RecognitionVisibility = 'PUBLIC' | 'PRIVATE';
+
+export interface RecognitionView {
+  id: string;
+  message: string;
+  visibility: RecognitionVisibility;
+  createdAt: string;
+  category: { id: string; name: string };
+  giver: { id: string; name: string };
+  recipients: { id: string; name: string }[];
+  points: number;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  employeeId: string;
+  name: string;
+  points: number;
+  count: number;
+}
+
+export interface Leaderboard {
+  from: string;
+  to: string;
+  entries: LeaderboardEntry[];
+}
+
+export interface RecognitionProfile {
+  employee: { id: string; name: string };
+  isSelf: boolean;
+  totalPoints: number;
+  receivedCount: number;
+  byCategory: { categoryId: string; name: string; count: number; points: number }[];
+  recent: RecognitionView[];
+}
+
+export type SurveyQuestionType = 'RATING' | 'SINGLE_CHOICE' | 'MULTI_CHOICE' | 'TEXT';
+export type SurveyAudienceType = 'ORG' | 'BRANCH' | 'DEPARTMENT' | 'TEAM';
+export type SurveyState = 'DRAFT' | 'NOT_YET_OPEN' | 'OPEN' | 'CLOSED';
+
+export interface MySurvey {
+  surveyId: string;
+  title: string;
+  description: string | null;
+  anonymous: boolean;
+  closesAt: string | null;
+  state: Exclude<SurveyState, 'DRAFT'>;
+  status: 'PENDING' | 'SUBMITTED';
+  submittedOn: string | null;
+}
+
+export interface SurveyQuestionView {
+  id: string;
+  order: number;
+  type: SurveyQuestionType;
+  prompt: string;
+  required: boolean;
+  scaleMin: number | null;
+  scaleMax: number | null;
+  options: { id: string; label: string }[] | null;
+}
+
+export interface SurveyForTaking {
+  id: string;
+  title: string;
+  description: string | null;
+  anonymous: boolean;
+  closesAt: string | null;
+  state: Exclude<SurveyState, 'DRAFT'>;
+  assignmentStatus: 'PENDING' | 'SUBMITTED';
+  questions: SurveyQuestionView[];
+}
+
+export interface SurveySummary {
+  id: string;
+  title: string;
+  description: string | null;
+  status: 'DRAFT' | 'OPEN' | 'CLOSED';
+  state: SurveyState;
+  anonymous: boolean;
+  audienceType: SurveyAudienceType;
+  audienceIds: string[];
+  opensAt: string | null;
+  closesAt: string | null;
+  publishedAt: string | null;
+  closedAt: string | null;
+  assignedCount: number;
+  responseCount: number;
+  responseRate: number;
+  createdAt: string;
+}
+
+export interface SurveyDetail extends SurveySummary {
+  questions: SurveyQuestionView[];
+}
+
+export interface SurveyAnswerInput {
+  questionId: string;
+  ratingValue?: number;
+  optionIds?: string[];
+  text?: string;
+}
+
+export interface SurveyResultQuestion {
+  id: string;
+  order: number;
+  type: SurveyQuestionType;
+  prompt: string;
+  scaleMin?: number | null;
+  scaleMax?: number | null;
+  answered?: number;
+  average?: number | null;
+  distribution?: { value: number; count: number }[];
+  options?: { id: string; label: string; count: number; percent: number }[];
+  textAnswers?: string[];
+}
+
+export interface SurveyResults {
+  survey: SurveySummary;
+  anonymityThreshold: number | null;
+  suppressed: boolean;
+  questions: SurveyResultQuestion[];
+}
+
+export interface SurveyRespondent {
+  userId: string;
+  employeeId: string | null;
+  name: string;
+  status: 'PENDING' | 'SUBMITTED';
+  submittedOn: string | null;
+}
+
+export type FeedPostType = 'RECOGNITION' | 'ANNOUNCEMENT' | 'CELEBRATION';
+export type FeedScope = 'ALL' | 'ORG' | 'TEAM';
+export type ReactionType = 'LIKE' | 'CELEBRATE';
+export type CelebrationKind = 'BIRTHDAY' | 'WORK_ANNIVERSARY' | 'NEW_JOINER';
+
+export interface FeedReactions {
+  LIKE: number;
+  CELEBRATE: number;
+  mine: ReactionType | null;
+}
+
+export interface FeedPost {
+  id: string;
+  type: FeedPostType;
+  scopeType: 'ORG' | 'BRANCH' | 'DEPARTMENT';
+  scopeId: string | null;
+  title: string | null;
+  body: string;
+  pinned: boolean;
+  createdAt: string;
+  author: { userId: string; name: string } | null;
+  recognition: RecognitionView | null;
+  celebration: { kind: CelebrationKind; subject: { id: string; name: string } | null; meta: { years?: number } | null } | null;
+  reactions: FeedReactions;
+  commentCount: number;
+}
+
+export interface FeedPage {
+  posts: FeedPost[];
+  nextBefore: string | null;
+}
+
+export interface FeedComment {
+  id: string;
+  postId: string;
+  body: string;
+  createdAt: string;
+  author: { userId: string; name: string };
+  mine: boolean;
+}
+
+export interface EngagementOverview {
+  period: { from: string; to: string };
+  recognition: {
+    received: number;
+    public: number;
+    private: number;
+    uniqueGivers: number;
+    topCategories: { categoryId: string; name: string; count: number }[];
+    topRecipients: { employeeId: string; name: string; points: number }[];
+  };
+  surveys: { draft: number; open: number; closed: number; openSurveys: SurveySummary[] };
+  feed: { posts: number; comments: number; reactions: number };
+}

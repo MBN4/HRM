@@ -15,3 +15,4 @@ export const PARTITION_ARCHIVAL_QUEUE = 'partition-archival';
 export const STATUTORY_REPORT_QUEUE = 'statutory-report';
 export const PRIVACY_QUEUE = 'privacy';
 export const RESUME_PARSE_QUEUE = 'resume-parse';
+export const ENGAGEMENT_CELEBRATIONS_QUEUE = 'engagement-celebrations';

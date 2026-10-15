@@ -790,6 +790,204 @@ async function main() {
     console.log(`Resume screening demo: requisition "${SCREENING_TITLE}" (id ${requisition.id}) -> portal /recruitment/screening/${requisition.id} (sign in as hr@acme-demo.local or ceo@).`);
   }
 
+  // ---- engagement & culture (step 10.1) ----------------------------------------------
+  // Recognition categories + a few recognitions (some PUBLIC -> feed posts), a company feed
+  // (announcements, a team-scoped post, celebrations, reactions, comments) and two surveys: an OPEN
+  // identified "pulse" with two responses and an OPEN ANONYMOUS one with three (so its aggregates are
+  // above the anonymity threshold). Every row has a FIXED id so a re-run refreshes instead of
+  // duplicating; balances/tallies are recomputed from the rows. Sign in as hr@ / ceo@ (admin),
+  // pm@ / lead@ / intern@ (employees) or demo.qa@ (Doha, Arabic RTL). See docs/conventions/engagement-culture.md.
+  {
+    const eid = (n: number) => `00000000-0000-4000-8000-${String(900000000000 + n)}`; // fixed demo row ids
+    const userOf = (email: string) => prisma.user.findUniqueOrThrow({ where: { tenantId_email: { tenantId, email } } });
+    const empOf = async (email: string) => {
+      const u = await userOf(email);
+      return prisma.employee.findFirstOrThrow({ where: { tenantId, userId: u.id } });
+    };
+    const [ceo, pm, lead, intern, hrE, qa] = await Promise.all(['ceo@', 'pm@', 'lead@', 'intern@', 'hr@', 'demo.qa@'].map((x) => empOf(`${x}acme-demo.local`)));
+    const hrUser = await userOf('hr@acme-demo.local');
+    const sample = allEmployees.filter((e) => e.status === 'ACTIVE' && !e.code.startsWith('CHAIN')).slice(0, 8);
+    const sampleEmps = await prisma.employee.findMany({ where: { id: { in: sample.map((e) => e.id) } } });
+
+    // categories (tenant DATA)
+    const catDefs = [
+      { name: 'Teamwork', description: 'Pitching in and lifting the team', points: 5 },
+      { name: 'Going above & beyond', description: 'Exceptional effort', points: 10 },
+      { name: 'Customer focus', description: 'Putting customers first', points: 5 },
+      { name: 'Innovation', description: 'New ideas that move us forward', points: 8 },
+      { name: 'Mentorship', description: 'Helping others grow', points: 3 },
+    ];
+    const cat: Record<string, string> = {};
+    for (const c of catDefs) {
+      const row = await prisma.recognitionCategory.upsert({ where: { tenantId_name: { tenantId, name: c.name } }, update: { description: c.description, points: c.points, isActive: true }, create: { tenantId, ...c } });
+      cat[c.name] = row.id;
+    }
+
+    // recognitions (fixed ids; dates spread over the last ~3 weeks)
+    const recs = [
+      { n: 1, giver: lead, to: [intern], cat: 'Teamwork', vis: 'PUBLIC' as const, ago: 1, msg: 'Ivy jumped in to finish the release checklist after hours — thank you!' },
+      { n: 2, giver: pm, to: [lead], cat: 'Going above & beyond', vis: 'PUBLIC' as const, ago: 2, msg: 'Leo untangled the migration weekend and kept everyone calm. Huge.' },
+      { n: 3, giver: ceo, to: [pm, lead], cat: 'Innovation', vis: 'PUBLIC' as const, ago: 4, msg: 'The new onboarding flow cut setup time in half. Brilliant work from you both.' },
+      { n: 4, giver: hrE, to: [qa], cat: 'Customer focus', vis: 'PUBLIC' as const, ago: 6, msg: 'Thank you for handling the Doha client escalation with such care.' },
+      { n: 5, giver: lead, to: [intern], cat: 'Mentorship', vis: 'PRIVATE' as const, ago: 3, msg: 'Quietly proud of how fast you are growing. Keep going.' },
+      { n: 6, giver: intern, to: [lead], cat: 'Mentorship', vis: 'PUBLIC' as const, ago: 9, msg: 'Leo always makes time to explain the "why". Great mentor.' },
+      ...(sampleEmps.length >= 6
+        ? [
+            { n: 7, giver: sampleEmps[0], to: [sampleEmps[1], sampleEmps[2]], cat: 'Teamwork', vis: 'PUBLIC' as const, ago: 12, msg: 'You two carried the quarter-end close. Thank you!' },
+            { n: 8, giver: sampleEmps[3], to: [sampleEmps[4]], cat: 'Customer focus', vis: 'PUBLIC' as const, ago: 15, msg: 'Fantastic support call — the customer sent a thank-you note.' },
+            { n: 9, giver: sampleEmps[5], to: [sampleEmps[1]], cat: 'Going above & beyond', vis: 'PUBLIC' as const, ago: 18, msg: 'Stayed late to fix the payroll export. Legend.' },
+          ]
+        : []),
+    ];
+    for (const r of recs) {
+      const when = new Date(todayUtc.getTime() - r.ago * DAY_MS + 10 * 3600_000);
+      const id = eid(100 + r.n);
+      const points = catDefs.find((c) => c.name === r.cat)!.points;
+      await prisma.recognition.upsert({
+        where: { id },
+        update: { message: r.msg, visibility: r.vis, createdAt: when, removedAt: null },
+        create: { id, tenantId, giverEmployeeId: r.giver.id, categoryId: cat[r.cat], message: r.msg, visibility: r.vis, createdAt: when },
+      });
+      for (const to of r.to) {
+        await prisma.recognitionRecipient.upsert({
+          where: { recognitionId_recipientEmployeeId: { recognitionId: id, recipientEmployeeId: to.id } },
+          update: { points, occurredAt: when, removedAt: null },
+          create: { tenantId, recognitionId: id, recipientEmployeeId: to.id, categoryId: cat[r.cat], points, occurredAt: when },
+        });
+      }
+      if (r.vis === 'PUBLIC') {
+        const giverUser = r.giver.userId;
+        await prisma.feedPost.upsert({
+          where: { recognitionId: id },
+          update: { createdAt: when, removedAt: null },
+          create: { tenantId, type: 'RECOGNITION', scopeType: 'ORG', authorUserId: giverUser, body: r.msg, recognitionId: id, createdAt: when },
+        });
+      }
+    }
+    // balances recomputed from the rows (the running tally)
+    const grouped = await prisma.recognitionRecipient.groupBy({ by: ['recipientEmployeeId'], where: { tenantId, removedAt: null }, _sum: { points: true }, _count: { _all: true } });
+    for (const g of grouped) {
+      await prisma.recognitionBalance.upsert({
+        where: { tenantId_employeeId: { tenantId, employeeId: g.recipientEmployeeId } },
+        update: { totalPoints: g._sum.points ?? 0, receivedCount: g._count._all },
+        create: { tenantId, employeeId: g.recipientEmployeeId, totalPoints: g._sum.points ?? 0, receivedCount: g._count._all },
+      });
+    }
+
+    // company feed: announcements, a team-scoped post, celebrations
+    const engDept = await prisma.department.findFirst({ where: { tenantId, branchId: hqBranch.id, name: 'Engineering' } });
+    await prisma.employee.update({ where: { id: lead.id }, data: { dateOfBirth: new Date(Date.UTC(1988, todayUtc.getUTCMonth(), todayUtc.getUTCDate())) } });
+    const year = todayUtc.getUTCFullYear();
+    const posts = [
+      { n: 201, type: 'ANNOUNCEMENT' as const, scopeType: 'ORG' as const, scopeId: null as string | null, title: 'Welcome to the Engagement hub', body: 'Recognize a colleague, answer the Q4 pulse survey and keep an eye on this feed for company news. 🎉', pinned: true, ago: 0 },
+      { n: 202, type: 'ANNOUNCEMENT' as const, scopeType: 'ORG' as const, scopeId: null, title: 'Town hall this Friday', body: 'Join us at 3pm for the quarterly town hall — questions welcome in the comments.', pinned: false, ago: 2 },
+      ...(engDept ? [{ n: 203, type: 'ANNOUNCEMENT' as const, scopeType: 'DEPARTMENT' as const, scopeId: engDept.id as string | null, title: 'Engineering offsite', body: 'Engineering offsite next month — details coming. (Visible to the Engineering team only.)', pinned: false, ago: 1 }] : []),
+    ];
+    for (const p of posts) {
+      const when = new Date(todayUtc.getTime() - p.ago * DAY_MS + 9 * 3600_000);
+      await prisma.feedPost.upsert({
+        where: { id: eid(p.n) },
+        update: { title: p.title, body: p.body, pinned: p.pinned, createdAt: when, removedAt: null },
+        create: { id: eid(p.n), tenantId, type: p.type, scopeType: p.scopeType, scopeId: p.scopeId, authorUserId: hrUser.id, title: p.title, body: p.body, pinned: p.pinned, createdAt: when },
+      });
+    }
+    const celebrations = [
+      { n: 211, kind: 'BIRTHDAY' as const, subject: lead, key: `BIRTHDAY:${lead.id}:${year}`, meta: undefined },
+      { n: 212, kind: 'WORK_ANNIVERSARY' as const, subject: pm, key: `WORK_ANNIVERSARY:${pm.id}:${year}`, meta: { years: 1 } },
+      { n: 213, kind: 'NEW_JOINER' as const, subject: intern, key: `NEW_JOINER:${intern.id}`, meta: undefined },
+    ];
+    for (const c of celebrations) {
+      await prisma.feedPost.upsert({
+        where: { tenantId_celebrationKey: { tenantId, celebrationKey: c.key } },
+        update: { removedAt: null },
+        create: { id: eid(c.n), tenantId, type: 'CELEBRATION', scopeType: 'ORG', body: '', celebrationKind: c.kind, subjectEmployeeId: c.subject.id, celebrationKey: c.key, meta: c.meta, createdAt: new Date(todayUtc.getTime() + 6 * 3600_000) },
+      });
+    }
+
+    // reactions + comments
+    const reactors = await Promise.all(['pm@', 'lead@', 'intern@', 'ceo@', 'hr@'].map((x) => userOf(`${x}acme-demo.local`)));
+    const reactTargets = [eid(201), eid(202), eid(211), eid(212), eid(213)];
+    const firstRec = await prisma.feedPost.findMany({ where: { tenantId, type: 'RECOGNITION', recognitionId: { in: recs.map((r) => eid(100 + r.n)) } }, select: { id: true }, take: 3 });
+    for (const [i, postId] of [...reactTargets, ...firstRec.map((x) => x.id)].entries()) {
+      for (const [j, u] of reactors.entries()) {
+        if ((i + j) % 3 === 2) continue; // not everyone reacts to everything
+        await prisma.feedReaction.upsert({
+          where: { postId_userId: { postId, userId: u.id } },
+          update: {},
+          create: { tenantId, postId, userId: u.id, type: (i + j) % 2 === 0 ? 'CELEBRATE' : 'LIKE' },
+        });
+      }
+    }
+    const commentDefs = [
+      { n: 301, post: eid(202), by: 'intern@', text: 'Looking forward to it!' },
+      { n: 302, post: eid(211), by: 'pm@', text: 'Happy birthday, Leo! 🎂' },
+      { n: 303, post: eid(213), by: 'lead@', text: 'Welcome aboard, Ivy!' },
+      { n: 304, post: eid(212), by: 'ceo@', text: 'Thank you for a great year, Priya.' },
+    ];
+    for (const c of commentDefs) {
+      const u = await userOf(`${c.by}acme-demo.local`);
+      await prisma.feedComment.upsert({ where: { id: eid(c.n) }, update: { removedAt: null }, create: { id: eid(c.n), tenantId, postId: c.post, authorUserId: u.id, body: c.text } });
+    }
+
+    // surveys — recreated from fixed ids (cascade drops questions/assignments/responses/tallies)
+    await prisma.survey.deleteMany({ where: { id: { in: [eid(401), eid(402)] } } });
+    const orgUsers = await prisma.employee.findMany({ where: { tenantId, status: 'ACTIVE', userId: { not: null } }, select: { userId: true } });
+    const assignees = orgUsers.map((e) => e.userId as string);
+    const mkSurvey = async (n: number, title: string, description: string, anonymous: boolean, qs: { type: 'RATING' | 'SINGLE_CHOICE' | 'MULTI_CHOICE' | 'TEXT'; prompt: string; required?: boolean; scaleMin?: number; scaleMax?: number; options?: { id: string; label: string }[] }[]) => {
+      const surveyId = eid(n);
+      await prisma.survey.create({
+        data: { id: surveyId, tenantId, title, description, anonymous, status: 'OPEN', audienceType: 'ORG', audienceIds: [], opensAt: daysAgo(2), closesAt: new Date(todayUtc.getTime() + 14 * DAY_MS), createdByUserId: hrUser.id, publishedAt: daysAgo(2), assignedCount: assignees.length, responseCount: 0 },
+      });
+      const questions: { id: string; type: string; scaleMin: number | null; scaleMax: number | null; options: { id: string }[] | null }[] = [];
+      for (const [i, q] of qs.entries()) {
+        const row = await prisma.surveyQuestion.create({ data: { id: eid(n * 10 + i + 1), tenantId, surveyId, order: i + 1, type: q.type, prompt: q.prompt, required: q.required ?? true, scaleMin: q.type === 'RATING' ? (q.scaleMin ?? 1) : null, scaleMax: q.type === 'RATING' ? (q.scaleMax ?? 5) : null, options: q.options } });
+        questions.push({ id: row.id, type: q.type, scaleMin: row.scaleMin, scaleMax: row.scaleMax, options: q.options ?? null });
+        if (q.type === 'RATING') for (let v = row.scaleMin!; v <= row.scaleMax!; v += 1) await prisma.surveyTally.create({ data: { tenantId, surveyId, questionId: row.id, bucket: String(v) } });
+        if (q.options) for (const o of q.options) await prisma.surveyTally.create({ data: { tenantId, surveyId, questionId: row.id, bucket: o.id } });
+      }
+      await prisma.surveyAssignment.createMany({ data: assignees.map((userId) => ({ tenantId, surveyId, userId })) });
+      return { surveyId, questions };
+    };
+    // Mirrors SurveyResponseService.submit: an anonymous survey stores NO respondent id.
+    const respond = async (s: { surveyId: string; questions: { id: string; type: string; options: { id: string }[] | null }[] }, anonymous: boolean, userId: string, answers: Record<number, number | string | string[]>) => {
+      await prisma.surveyAssignment.updateMany({ where: { surveyId: s.surveyId, userId }, data: { status: 'SUBMITTED', submittedOn: todayUtc } });
+      const response = await prisma.surveyResponse.create({ data: { tenantId, surveyId: s.surveyId, respondentUserId: anonymous ? null : userId, submittedOn: todayUtc } });
+      for (const [idx, value] of Object.entries(answers)) {
+        const q = s.questions[Number(idx)];
+        if (q.type === 'RATING') {
+          await prisma.surveyAnswer.create({ data: { tenantId, responseId: response.id, surveyId: s.surveyId, questionId: q.id, ratingValue: value as number } });
+          await prisma.surveyTally.updateMany({ where: { surveyId: s.surveyId, questionId: q.id, bucket: String(value) }, data: { count: { increment: 1 } } });
+        } else if (q.type === 'TEXT') {
+          await prisma.surveyAnswer.create({ data: { tenantId, responseId: response.id, surveyId: s.surveyId, questionId: q.id, textValue: value as string } });
+        } else {
+          const ids = Array.isArray(value) ? value : [value as string];
+          await prisma.surveyAnswer.create({ data: { tenantId, responseId: response.id, surveyId: s.surveyId, questionId: q.id, optionIds: ids } });
+          for (const id of ids) await prisma.surveyTally.updateMany({ where: { surveyId: s.surveyId, questionId: q.id, bucket: id }, data: { count: { increment: 1 } } });
+        }
+      }
+      await prisma.survey.update({ where: { id: s.surveyId }, data: { responseCount: { increment: 1 } } });
+    };
+    const perks = [{ id: 'remote', label: 'Remote work' }, { id: 'gym', label: 'Gym membership' }, { id: 'learning', label: 'Learning budget' }];
+    const pulse = await mkSurvey(401, 'Q4 Engagement Pulse', 'A quick check-in on how work feels right now. Takes 2 minutes. (Identified — your name is recorded with your answers.)', false, [
+      { type: 'RATING', prompt: 'How satisfied are you working here? (1 = not at all, 5 = extremely)' },
+      { type: 'RATING', prompt: 'How likely are you to recommend us as a place to work? (1–10)', scaleMin: 1, scaleMax: 10 },
+      { type: 'SINGLE_CHOICE', prompt: 'Which perk matters most to you?', options: perks },
+      { type: 'MULTI_CHOICE', prompt: 'Which of these would help you do your best work?', required: false, options: [{ id: 'focus', label: 'More focus time' }, { id: 'tools', label: 'Better tools' }, { id: 'clarity', label: 'Clearer priorities' }] },
+      { type: 'TEXT', prompt: 'Anything we should start, stop or continue?', required: false },
+    ]);
+    await respond(pulse, false, (await userOf('intern@acme-demo.local')).id, { 0: 4, 1: 8, 2: 'learning', 3: ['focus', 'clarity'], 4: 'Continue the mentoring — it makes a real difference.' });
+    await respond(pulse, false, (await userOf('lead@acme-demo.local')).id, { 0: 5, 1: 9, 2: 'remote', 3: ['tools'], 4: 'Start: a monthly demo day.' });
+    const anon = await mkSurvey(402, 'Anonymous culture check', 'Candid, anonymous feedback. Your name is NOT stored with your answers.', true, [
+      { type: 'RATING', prompt: 'I feel comfortable raising concerns with my manager.' },
+      { type: 'RATING', prompt: 'Decisions here are communicated clearly.' },
+      { type: 'TEXT', prompt: 'What is one thing leadership should hear?', required: false },
+    ]);
+    await respond(anon, true, (await userOf('pm@acme-demo.local')).id, { 0: 5, 1: 4, 2: 'More visibility into roadmap trade-offs, please.' });
+    await respond(anon, true, (await userOf('ceo@acme-demo.local')).id, { 0: 4, 1: 4 });
+    await respond(anon, true, (await userOf('hr@acme-demo.local')).id, { 0: 3, 1: 3, 2: 'Meetings run long; tighter agendas would help.' });
+    console.log('Engagement demo (10.1): recognition + feed at /recognition and /feed, surveys at /surveys (employees) and /engagement (hr@ / ceo@ admin: overview, survey results, categories, moderation). Two open surveys: "Q4 Engagement Pulse" (identified, 2 responses) and "Anonymous culture check" (anonymous, 3 responses).');
+  }
+
   // ---- extra demo tenants + subscriptions (vendor-console charts) -------------
   const extra = [
     { slug: 'demo-globex', name: 'Globex Industries (demo)', edition: 'ENTERPRISE' as const, status: 'ACTIVE' as const, sub: 'ACTIVE' as const, seats: 250, ago: 160, country: 'US' },

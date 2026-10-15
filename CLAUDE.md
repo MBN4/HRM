@@ -121,6 +121,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/attendance-ui.md`](./docs/conventions/attendance-ui.md)                       | The live analog clock (server-anchored elapsed, goal ring, reduced-motion), the colour-coded monthly graph (status→colour, reason→i18n mapping, RTL calendar mirroring), the manager/HR member picker, and the demo helpers. (8.1 Part 3)                                                                                                                                                                    |
 | [`docs/conventions/shift-scheduling.md`](./docs/conventions/shift-scheduling.md)                 | Shift scheduling & rostering: the reconciled shift-vs-working-hours model (a shift carries the policy parameters; a standing assignment is a policy row linked to a shift; one precedence chain), the dated roster calendar (draft/publish, day off, copy-week, coverage, past-day rule), scope via the hierarchy, classification against the day's effective shift, and swap via the workflow engine. (8.2) |
 | [`docs/conventions/resume-parsing-screening.md`](./docs/conventions/resume-parsing-screening.md) | Resume parsing + candidate screening (extends 2.3 ATS): the swappable `RESUME_PARSER` seam + the dependency-free default parser and its honest accuracy limits, the async BullMQ parse flow + graceful failure, screening criteria as config data, the pure transparent scorer, human-in-the-loop (scores never move a stage), PII/privacy. (9.1)                                                            |
+| [`docs/conventions/engagement-culture.md`](./docs/conventions/engagement-culture.md)             | Engagement & culture: tenant-configurable recognition + points, surveys (audience targeting, pre-aggregated results, the server+DB-enforced anonymity guarantee and its honest limits), the scoped social feed + moderation + derived celebrations, and the two new permissions. (10.1)                                                                                                                      |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                            |
 
 ## 5. Build log summary
@@ -1038,6 +1039,15 @@ into an editable `ParsedResume` on the candidate; per-requisition screening crit
 0–100 match score (matched/missed per criterion), a ranked/filterable list, and scoring NEVER changes a stage — a human decides.
 Failed parses leave the candidate usable (manual entry). New `/recruitment/screening/[requisitionId]` + candidate-page panel;
 no new permissions. See [`docs/conventions/resume-parsing-screening.md`](./docs/conventions/resume-parsing-screening.md).
+
+**10.1 — Engagement & culture (2026-10-15)** — not a numbered phase step; a new module consuming existing systems:
+recognition (tenant-configurable categories + a simple running points tally, public/private, leaderboard/profile, branch-scoped),
+surveys (rating/single/multi/text, ORG/BRANCH/DEPARTMENT/TEAM audiences snapshotted at publish, incremental `SurveyTally` rollup,
+**anonymous responses genuinely unlinkable** — NULL respondent, date-only timestamps, no audit row, `hrm_app` INSERT-only on
+responses, aggregates withheld below 3 responses — proven against the raw tables), and a company feed (org/branch/department scope,
+reactions, comments, admin moderation that also reverses a removed recognition's points, idempotent derived celebrations via a daily
+BullMQ job). New permissions `recognition.give` (all roles) and `engagement.manage` (admin/CEO/HR). Portal `/recognition`, `/feed`,
+`/surveys`, `/engagement`. See [`docs/conventions/engagement-culture.md`](./docs/conventions/engagement-culture.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

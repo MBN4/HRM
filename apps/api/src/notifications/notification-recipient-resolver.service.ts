@@ -154,6 +154,12 @@ export class NotificationRecipientResolverService {
       case 'shift_swap.requested':
         return typeof payload.employeeUserId === 'string' ? [payload.employeeUserId] : [];
 
+      // Step 10.1 — see docs/conventions/engagement-culture.md. Both carry the recipient's own
+      // `recipientUserId` directly (no DB query).
+      case 'engagement.recognition_received':
+      case 'engagement.survey_assigned':
+        return typeof payload.recipientUserId === 'string' ? [payload.recipientUserId] : [];
+
       default:
         return [];
     }

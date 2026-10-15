@@ -19,6 +19,10 @@ import {
   LifeBuoy,
   Megaphone,
   GitFork,
+  Award,
+  ClipboardList,
+  Heart,
+  Newspaper,
   Network,
   Paintbrush,
   Receipt,
@@ -64,6 +68,10 @@ export function Sidebar() {
     { href: '/notifications', label: t('nav.notifications'), icon: Bell },
     { href: '/announcements', label: t('nav.announcements'), icon: Megaphone },
     { href: '/esignature/my', label: t('nav.myEsignatures'), icon: FileSignature },
+    // Engagement & culture (step 10.1) — see docs/conventions/engagement-culture.md.
+    { href: '/feed', label: t('nav.feed'), icon: Newspaper },
+    { href: '/recognition', label: t('nav.recognition'), icon: Award },
+    { href: '/surveys', label: t('nav.surveys'), icon: ClipboardList },
   ];
 
   const mssItems: NavItem[] = [{ href: '/approvals', label: t('nav.approvals'), icon: ClipboardCheck }];
@@ -154,6 +162,10 @@ export function Sidebar() {
   // Default leave allocation (step 8.1 Part 4) — see docs/conventions/leave.md.
   if (can(PERMISSIONS.LEAVE_DEFAULTS_MANAGE)) {
     adminItems.push({ href: '/leave-defaults', label: t('nav.leaveDefaults'), icon: CalendarRange });
+  }
+  // Engagement & culture admin hub (step 10.1) — see docs/conventions/engagement-culture.md.
+  if (can(PERMISSIONS.ENGAGEMENT_MANAGE)) {
+    adminItems.push({ href: '/engagement', label: t('nav.engagement'), icon: Heart });
   }
   // Data privacy & residency (step 6.1) — see docs/conventions/privacy-residency.md.
   if (can(PERMISSIONS.PRIVACY_MANAGE)) {

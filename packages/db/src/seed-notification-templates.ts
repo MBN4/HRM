@@ -255,6 +255,45 @@ const TEMPLATES: TemplateSeed[] = [
     locale: 'ar',
     body: 'طلب منك {{requesterName}} تولّي نوبة {{shiftName}} في {{date}}. افتح "جدولي" للرد.',
   },
+  // Step 10.1 — engagement & culture (docs/conventions/engagement-culture.md).
+  {
+    eventType: 'engagement.recognition_received',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: '{{giverName}} recognized you for "{{categoryName}}" (+{{points}} pts): {{message}}',
+  },
+  {
+    eventType: 'engagement.recognition_received',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'قام {{giverName}} بتقديرك على "{{categoryName}}" (+{{points}} نقطة): {{message}}',
+  },
+  {
+    eventType: 'engagement.survey_assigned',
+    channel: 'IN_APP',
+    locale: 'en',
+    body: 'You have a new survey to answer: "{{surveyTitle}}". Open "Surveys" to take it.',
+  },
+  {
+    eventType: 'engagement.survey_assigned',
+    channel: 'IN_APP',
+    locale: 'ar',
+    body: 'لديك استبيان جديد للإجابة عليه: "{{surveyTitle}}". افتح "الاستبيانات" للمشاركة.',
+  },
+  {
+    eventType: 'engagement.survey_assigned',
+    channel: 'EMAIL',
+    locale: 'en',
+    subject: 'New survey: {{surveyTitle}}',
+    body: 'You have been invited to answer the survey "{{surveyTitle}}". Sign in and open "Surveys" to take it.',
+  },
+  {
+    eventType: 'engagement.survey_assigned',
+    channel: 'EMAIL',
+    locale: 'ar',
+    subject: 'استبيان جديد: {{surveyTitle}}',
+    body: 'تمت دعوتك للإجابة على الاستبيان "{{surveyTitle}}". سجّل الدخول وافتح "الاستبيانات" للمشاركة.',
+  },
 ];
 
 /**

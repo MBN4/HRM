@@ -59,6 +59,10 @@ export const NOTIFICATION_EVENT_TYPES = [
   'roster.published',
   'roster.changed',
   'shift_swap.requested',
+  // Step 10.1 (engagement & culture) — see docs/conventions/engagement-culture.md. Both carry the
+  // recipient's own `recipientUserId` directly (no DB query in the recipient resolver).
+  'engagement.recognition_received',
+  'engagement.survey_assigned',
 ] as const;
 
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
@@ -95,4 +99,6 @@ export const DEFAULT_NOTIFICATION_CHANNELS: Record<NotificationEventType, readon
   'roster.published': ['IN_APP', 'EMAIL'],
   'roster.changed': ['IN_APP', 'EMAIL'],
   'shift_swap.requested': ['IN_APP'],
+  'engagement.recognition_received': ['IN_APP'],
+  'engagement.survey_assigned': ['IN_APP', 'EMAIL'],
 };

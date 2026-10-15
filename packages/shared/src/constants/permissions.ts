@@ -170,6 +170,17 @@ export const PERMISSIONS = {
   // requesting a swap need only `attendance.read`/`attendance.write`.
   // See docs/conventions/shift-scheduling.md.
   SCHEDULING_MANAGE: 'scheduling.manage',
+
+  // Step 10.1 (engagement & culture) — see docs/conventions/engagement-culture.md.
+  // `recognition.give` is the BROAD participation permission, seeded onto every system role:
+  // give recognition, react and comment on the feed. Reading the feed, answering a survey
+  // assigned to you and viewing the recognition you received need only authentication (they are
+  // inherently self-scoped, like /notifications). `engagement.manage` is the admin tier
+  // (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER explicitly): create/publish/close surveys
+  // and read their results, configure recognition categories, post announcements and moderate
+  // (remove) feed posts/comments, and see the engagement overview.
+  RECOGNITION_GIVE: 'recognition.give',
+  ENGAGEMENT_MANAGE: 'engagement.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -252,6 +263,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.WORKING_HOURS_MANAGE,
     PERMISSIONS.LEAVE_DEFAULTS_MANAGE,
     PERMISSIONS.SCHEDULING_MANAGE,
+    PERMISSIONS.RECOGNITION_GIVE,
+    PERMISSIONS.ENGAGEMENT_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -284,6 +297,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.BENEFITS_ENROLL,
     PERMISSIONS.ESIGNATURE_SIGN,
     PERMISSIONS.SCHEDULING_MANAGE,
+    PERMISSIONS.RECOGNITION_GIVE,
   ],
   [SYSTEM_ROLES.EMPLOYEE]: [
     PERMISSIONS.EMPLOYEE_READ,
@@ -308,5 +322,6 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.BENEFITS_READ,
     PERMISSIONS.BENEFITS_ENROLL,
     PERMISSIONS.ESIGNATURE_SIGN,
+    PERMISSIONS.RECOGNITION_GIVE,
   ],
 };

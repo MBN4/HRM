@@ -32,6 +32,6 @@ import { StandingShiftService } from './standing-shift.service';
     ShiftSwapService,
     ShiftSwapWorkflowEventsListener,
   ],
-  exports: [RosterWriteService],
+  exports: [RosterWriteService, SchedulingScopeService],
 })
 export class SchedulingModule {}

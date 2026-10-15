@@ -4452,3 +4452,36 @@ modern PDFs ("bad XRef entry") → moved to v2; pdf.js' worker bootstrap needs r
 `worker_threads` Worker (also a resilience win); month-range arithmetic off by one (inclusive months).
 **Known gaps**: screening questionnaires not built (fast-follow); no LLM/API parser adapter (seam only); no OCR; synchronous
 re-score bounded at 5,000 applications; replacing a resume orphans the old object; mobile untouched.
+
+## 10.1 — Engagement & culture: recognition, surveys, social feed (2026-10-15)
+
+Design, the anonymity guarantee and its honest residual risks, the feed/moderation model and the permission table:
+[`conventions/engagement-culture.md`](./conventions/engagement-culture.md). A **new module consuming existing systems** — auth, RLS,
+the notification hub, audit, the scheduled-job pattern and 8.2's reporting-chain resolver are used as-is.
+**Schema** (migrations `20261015090000_add_engagement_culture` + `…090100_enable_rls_for_engagement`, additive): `RecognitionCategory`,
+`Recognition`, `RecognitionRecipient` (points snapshot + denormalized category/date for a join-free leaderboard), `RecognitionBalance`
+(running tally), `Survey`/`SurveyQuestion`/`SurveyAssignment`/`SurveyResponse`/`SurveyAnswer`/`SurveyTally` (incremental rollup),
+`FeedPost`/`FeedReaction`/`FeedComment`; all RLS'd (`tenant_isolation`), **`hrm_app` is SELECT+INSERT only on `survey_responses`/
+`survey_answers`**; the migration also backfills the two new permissions for every existing tenant. **Permissions**: `recognition.give`
+(every system role), `engagement.manage` (TENANT_ADMIN/CEO/HR_MANAGER). **Shared**: `engagement.validator.ts`, 2 notification events
+(`engagement.recognition_received`, `engagement.survey_assigned`) + en/ar templates, ~230 en+ar UI strings. **API**
+(`apps/api/src/engagement/`): categories, recognition (give/received/given/leaderboard/profile/revoke), survey audience resolution
+(ORG/BRANCH/DEPARTMENT+sub-departments/TEAM = reporting chain), lifecycle (DRAFT→OPEN→CLOSED, effective state computed on read),
+response submission (atomic assignment claim, atomic tally increments), results (counters only, anonymity threshold), feed (scoped
+visibility, reactions, comments, moderation), derived celebrations (idempotent by `celebrationKey`, daily `engagement-celebrations`
+BullMQ job + KEDA trigger), admin overview. One additive export (`SchedulingModule` → `SchedulingScopeService`). **Portal**:
+`/recognition`, `/feed`, `/surveys`, `/surveys/[id]`, `/engagement` (Overview / Surveys / Recognition values / Feed tools),
+`/engagement/surveys/[id]` (results), sidebar entries, 14 components in `components/engagement/`. **Demo**: `seed:demo` adds categories,
+9 recognitions, an org+team feed with celebrations/reactions/comments, an identified and an anonymous OPEN survey.
+
+**Verification** (all run): `engagement.e2e-spec.ts` **25/25** over real HTTP + DB + the real BullMQ notification worker — including the
+anonymity proof against the RAW tables with the owner client (no identity anywhere in response-side rows, NULL respondent, date-only
+timestamps, no linking audit row, threshold suppression, app-role `UPDATE`/`DELETE` denied, non-anonymous contrast), concurrent
+double-submit = one response, RBAC on every admin route, cross-tenant isolation (API + RLS). Portal Playwright `engagement.spec.ts`
+**13/13** (incl. Arabic/RTL as `demo.qa@`, axe) and the existing accessibility/sidebar/rtl/rbac/ess/theme specs 32/32.
+**Bugs caught on the way**: Prisma's checked nested `create` rejects `tenantId` on a composite-FK child (recipients are now a separate
+`createMany`); a test that deleted a role-permission row directly was defeated by the 5.1 permission cache (a stale cache also briefly hid
+the freshly backfilled `engagement.manage` from the demo HR user until it refreshed — use a fresh role in tests, expect up to the cache TTL
+after a backfill migration).
+**Known gaps**: see the doc's list — no points redemption (fast-follow), no birthday opt-out, UTC celebrations, no survey reminders,
+no per-segment breakdown (deliberate), departments picker in the builder depends on `working_hours.manage`, mobile untouched.

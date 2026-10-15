@@ -200,6 +200,20 @@ model Tenant {
   ticketComments                 TicketComment[]
   ticketAttachments              TicketAttachment[]
   announcements                  Announcement[]
+  // Step 10.1 — Engagement & culture (docs/conventions/engagement-culture.md).
+  recognitionCategories          RecognitionCategory[]
+  recognitions                   Recognition[]
+  recognitionRecipients          RecognitionRecipient[]
+  recognitionBalances            RecognitionBalance[]
+  surveys                        Survey[]
+  surveyQuestions                SurveyQuestion[]
+  surveyAssignments              SurveyAssignment[]
+  surveyResponses                SurveyResponse[]
+  surveyAnswers                  SurveyAnswer[]
+  surveyTallies                  SurveyTally[]
+  feedPosts                      FeedPost[]
+  feedReactions                  FeedReaction[]
+  feedComments                   FeedComment[]
   policies                       Policy[]
   policyAcknowledgments          PolicyAcknowledgment[]
   lmsCourseCategories            CourseCategory[]
@@ -1785,6 +1799,10 @@ model Employee {
   lmsEnrollments            Enrollment[]
   lmsQuizAttempts           QuizAttempt[]
   lmsCertifications         Certification[]
+  recognitionsGiven         Recognition[]              @relation("RecognitionGiver")
+  recognitionsReceived      RecognitionRecipient[]
+  recognitionBalance        RecognitionBalance?
+  feedCelebrations          FeedPost[]
 
   // Step 3.5.1 — data migration & onboarding toolkit (see
   // docs/conventions/data-migration.md).
@@ -5781,4 +5799,347 @@ model WorkingHoursPolicy {
   @@index([tenantId, scope])
   @@index([tenantId, shiftDefinitionId])
   @@map("working_hours_policies")
+}
+
+// ===========================================================================
+// Step 10.1 — Engagement & culture (recognition, surveys, social feed).
+// See docs/conventions/engagement-culture.md.
+// ===========================================================================
+
+enum RecognitionVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum SurveyStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+enum SurveyAudienceType {
+  ORG
+  BRANCH
+  DEPARTMENT
+  TEAM
+}
+
+enum SurveyQuestionType {
+  RATING
+  SINGLE_CHOICE
+  MULTI_CHOICE
+  TEXT
+}
+
+enum SurveyAssignmentStatus {
+  PENDING
+  SUBMITTED
+}
+
+enum FeedPostType {
+  RECOGNITION
+  ANNOUNCEMENT
+  CELEBRATION
+}
+
+enum FeedScopeType {
+  ORG
+  BRANCH
+  DEPARTMENT
+}
+
+enum CelebrationKind {
+  BIRTHDAY
+  WORK_ANNIVERSARY
+  NEW_JOINER
+}
+
+enum FeedReactionType {
+  LIKE
+  CELEBRATE
+}
+
+// Tenant-configurable recognition values ("Teamwork", "Going above & beyond").
+// `points` is what each recipient earns per recognition in this category — a
+// plain running count, no redemption store in v1.
+model RecognitionCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  name        String
+  description String?
+  points      Int      @default(1)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recognitions Recognition[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, name])
+  @@map("recognition_categories")
+}
+
+model Recognition {
+  id              String                @id @default(uuid()) @db.Uuid
+  tenantId        String                @map("tenant_id") @db.Uuid
+  giverEmployeeId String                @map("giver_employee_id") @db.Uuid
+  categoryId      String                @map("category_id") @db.Uuid
+  message         String
+  visibility      RecognitionVisibility @default(PUBLIC)
+  // Set when a moderator removes the recognition's feed post — the points it
+  // awarded are reversed at the same time (see RecognitionService.revoke).
+  removedAt       DateTime?             @map("removed_at")
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  giver      Employee               @relation("RecognitionGiver", fields: [tenantId, giverEmployeeId], references: [tenantId, id], onDelete: Cascade)
+  category   RecognitionCategory    @relation(fields: [tenantId, categoryId], references: [tenantId, id], onDelete: Restrict)
+  recipients RecognitionRecipient[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, giverEmployeeId])
+  @@map("recognitions")
+}
+
+// One row per (recognition, recipient). `categoryId`/`occurredAt`/`removedAt`
+// are denormalized from the parent so the leaderboard is a single indexed
+// group-by with no join.
+model RecognitionRecipient {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  recognitionId       String    @map("recognition_id") @db.Uuid
+  recipientEmployeeId String    @map("recipient_employee_id") @db.Uuid
+  categoryId          String    @map("category_id") @db.Uuid
+  points              Int
+  occurredAt          DateTime  @default(now()) @map("occurred_at")
+  removedAt           DateTime? @map("removed_at")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recognition Recognition @relation(fields: [tenantId, recognitionId], references: [tenantId, id], onDelete: Cascade)
+  recipient   Employee    @relation(fields: [tenantId, recipientEmployeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([recognitionId, recipientEmployeeId])
+  @@index([tenantId, recipientEmployeeId, occurredAt])
+  @@index([tenantId, occurredAt])
+  @@map("recognition_recipients")
+}
+
+// The running points tally per employee (all-time), maintained with atomic
+// increments inside the same transaction as the recognition itself.
+model RecognitionBalance {
+  tenantId      String   @map("tenant_id") @db.Uuid
+  employeeId    String   @map("employee_id") @db.Uuid
+  totalPoints   Int      @default(0) @map("total_points")
+  receivedCount Int      @default(0) @map("received_count")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([tenantId, employeeId])
+  @@index([tenantId, totalPoints])
+  @@map("recognition_balances")
+}
+
+// `audienceIds` meaning depends on `audienceType`: BRANCH -> branch ids,
+// DEPARTMENT -> department ids, TEAM -> the MANAGER's employee ids (their whole
+// reporting chain), ORG -> empty. Membership is SNAPSHOTTED into
+// `survey_assignments` at publish.
+//
+// ANONYMITY: when `anonymous` is true, `survey_responses.respondent_user_id` is
+// NULL and `submitted_on` is a DATE (no time), so a response can neither be
+// joined to a person nor correlated to an assignment by timestamp.
+model Survey {
+  id              String             @id @default(uuid()) @db.Uuid
+  tenantId        String             @map("tenant_id") @db.Uuid
+  title           String
+  description     String?
+  status          SurveyStatus       @default(DRAFT)
+  anonymous       Boolean            @default(false)
+  audienceType    SurveyAudienceType @default(ORG) @map("audience_type")
+  audienceIds     String[]           @default([]) @map("audience_ids") @db.Uuid
+  opensAt         DateTime?          @map("opens_at")
+  closesAt        DateTime?          @map("closes_at")
+  createdByUserId String             @map("created_by_user_id") @db.Uuid
+  publishedAt     DateTime?          @map("published_at")
+  closedAt        DateTime?          @map("closed_at")
+  assignedCount   Int                @default(0) @map("assigned_count")
+  responseCount   Int                @default(0) @map("response_count")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  questions   SurveyQuestion[]
+  assignments SurveyAssignment[]
+  responses   SurveyResponse[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status])
+  @@map("surveys")
+}
+
+model SurveyQuestion {
+  id       String             @id @default(uuid()) @db.Uuid
+  tenantId String             @map("tenant_id") @db.Uuid
+  surveyId String             @map("survey_id") @db.Uuid
+  order    Int
+  type     SurveyQuestionType
+  prompt   String
+  required Boolean            @default(true)
+  // RATING only: the inclusive scale.
+  scaleMin Int?               @map("scale_min")
+  scaleMax Int?               @map("scale_max")
+  // SINGLE_CHOICE / MULTI_CHOICE only: `[{ id, label }]`.
+  options  Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  survey Survey @relation(fields: [tenantId, surveyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@unique([surveyId, order])
+  @@map("survey_questions")
+}
+
+// WHO has/hasn't answered — drives "my surveys", double-submit prevention and
+// the response rate. Deliberately has NO link to the answers themselves, and
+// for an anonymous survey records only the DATE of submission.
+model SurveyAssignment {
+  id          String                 @id @default(uuid()) @db.Uuid
+  tenantId    String                 @map("tenant_id") @db.Uuid
+  surveyId    String                 @map("survey_id") @db.Uuid
+  userId      String                 @map("user_id") @db.Uuid
+  status      SurveyAssignmentStatus @default(PENDING)
+  submittedOn DateTime?              @map("submitted_on") @db.Date
+  createdAt   DateTime               @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  survey Survey @relation(fields: [tenantId, surveyId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([surveyId, userId])
+  @@index([tenantId, userId, status])
+  @@map("survey_assignments")
+}
+
+model SurveyResponse {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  surveyId         String   @map("survey_id") @db.Uuid
+  // NULL for an anonymous survey — the privacy guarantee. Plain column (no FK)
+  // so nothing about the identity link outlives the user row either.
+  respondentUserId String?  @map("respondent_user_id") @db.Uuid
+  submittedOn      DateTime @map("submitted_on") @db.Date
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  survey  Survey         @relation(fields: [tenantId, surveyId], references: [tenantId, id], onDelete: Cascade)
+  answers SurveyAnswer[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, surveyId])
+  @@map("survey_responses")
+}
+
+model SurveyAnswer {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  responseId  String   @map("response_id") @db.Uuid
+  surveyId    String   @map("survey_id") @db.Uuid
+  questionId  String   @map("question_id") @db.Uuid
+  ratingValue Int?     @map("rating_value")
+  optionIds   String[] @default([]) @map("option_ids")
+  textValue   String?  @map("text_value")
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  response SurveyResponse @relation(fields: [tenantId, responseId], references: [tenantId, id], onDelete: Cascade)
+
+  @@index([tenantId, surveyId, questionId])
+  @@map("survey_answers")
+}
+
+// The precomputed rollup: one counter per (survey, question, bucket) where
+// bucket is a rating value ("1".."5") or a choice option id, incremented
+// atomically at submit. Results read ONLY this (plus a bounded text-answer
+// page) — never a scan of survey_answers.
+model SurveyTally {
+  tenantId   String @map("tenant_id") @db.Uuid
+  surveyId   String @map("survey_id") @db.Uuid
+  questionId String @map("question_id") @db.Uuid
+  bucket     String
+  count      Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([surveyId, questionId, bucket])
+  @@index([tenantId, surveyId])
+  @@map("survey_tallies")
+}
+
+// One feed item. RECOGNITION posts mirror a PUBLIC recognition; ANNOUNCEMENT
+// posts are admin-authored; CELEBRATION posts are derived from employee data
+// (`celebrationKey` makes generation idempotent). Soft-removed by moderators.
+model FeedPost {
+  id                String           @id @default(uuid()) @db.Uuid
+  tenantId          String           @map("tenant_id") @db.Uuid
+  type              FeedPostType
+  scopeType         FeedScopeType    @default(ORG) @map("scope_type")
+  scopeId           String?          @map("scope_id") @db.Uuid
+  authorUserId      String?          @map("author_user_id") @db.Uuid
+  title             String?
+  body              String
+  recognitionId     String?          @unique @map("recognition_id") @db.Uuid
+  celebrationKind   CelebrationKind? @map("celebration_kind")
+  subjectEmployeeId String?          @map("subject_employee_id") @db.Uuid
+  celebrationKey    String?          @map("celebration_key")
+  // CELEBRATION only: structured facts the UI renders into localized text (e.g. `{ years: 3 }`), so no English copy is stored.
+  meta              Json?
+  pinned            Boolean          @default(false)
+  removedAt         DateTime?        @map("removed_at")
+  removedByUserId   String?          @map("removed_by_user_id") @db.Uuid
+  removalReason     String?          @map("removal_reason")
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject   Employee?      @relation(fields: [tenantId, subjectEmployeeId], references: [tenantId, id], onDelete: Cascade)
+  reactions FeedReaction[]
+  comments  FeedComment[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, celebrationKey])
+  @@index([tenantId, removedAt, createdAt])
+  @@map("feed_posts")
+}
+
+model FeedReaction {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
+  postId    String           @map("post_id") @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      FeedReactionType
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post   FeedPost @relation(fields: [tenantId, postId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([tenantId, postId])
+  @@map("feed_reactions")
+}
+
+model FeedComment {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  postId          String    @map("post_id") @db.Uuid
+  authorUserId    String    @map("author_user_id") @db.Uuid
+  body            String
+  removedAt       DateTime? @map("removed_at")
+  removedByUserId String?   @map("removed_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  post   FeedPost @relation(fields: [tenantId, postId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, postId, createdAt])
+  @@map("feed_comments")
 }
