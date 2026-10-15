@@ -16,6 +16,9 @@ import { appPrisma, Prisma, withTenantContext } from '@hrm/db';
 import { DEFAULT_REQUEST_PRIORITY, RequestPriority } from '@hrm/shared';
 import { ApiKeyAuthService } from '../auth/api-key/api-key-auth.service';
 import { ApiKeyRateLimitService } from '../auth/api-key/api-key-rate-limit.service';
+import { IS_KIOSK_ROUTE_KEY } from '../auth/kiosk/kiosk-route.decorator';
+import { KioskAuthService } from '../auth/kiosk/kiosk-auth.service';
+import { RateLimiterService } from '../redis/rate-limiter.service';
 import { IS_ALLOW_ANONYMOUS_KEY } from '../auth/decorators/allow-anonymous.decorator';
 import { IS_ALLOW_PASSWORD_CHANGE_PENDING_KEY } from '../auth/decorators/allow-password-change-pending.decorator';
 import { PermissionsCacheService } from '../auth/permissions-cache.service';
@@ -41,6 +44,7 @@ const EMPTY_CONTEXT: Omit<RequestTenantStore, 'platform' | 'tx'> = {
   platformAdminId: null,
   platformRole: null,
   impersonatedByPlatformAdminId: null,
+  kiosk: null,
 };
 
 /** Requests are blocked entirely (not just billing-gated) for a tenant in either of these states — see docs/conventions/vendor-console.md → Tenant lifecycle. */
@@ -78,6 +82,17 @@ const API_KEY_HEADER_NAME = 'x-api-key';
 
 function extractApiKey(req: Request): string | null {
   const header = req.headers[API_KEY_HEADER_NAME];
+  return typeof header === 'string' && header.length > 0 ? header : null;
+}
+
+/** Step 11.1 — a kiosk device's credential header (see `@KioskRoute()`). */
+const KIOSK_TOKEN_HEADER_NAME = 'x-kiosk-token';
+
+/** A kiosk is a shared device, so one token legitimately serves a whole shift change — generous, but bounded per device. */
+const KIOSK_REQUESTS_PER_MINUTE = 240;
+
+function extractKioskToken(req: Request): string | null {
+  const header = req.headers[KIOSK_TOKEN_HEADER_NAME];
   return typeof header === 'string' && header.length > 0 ? header : null;
 }
 
@@ -156,6 +171,8 @@ export class TenantScopeInterceptor implements NestInterceptor {
     private readonly loadShedding: LoadSheddingService,
     private readonly apiKeyAuth: ApiKeyAuthService,
     private readonly apiKeyRateLimit: ApiKeyRateLimitService,
+    private readonly kioskAuth: KioskAuthService,
+    private readonly rateLimiter: RateLimiterService,
     private readonly platformAuth: PlatformAuthContextService,
     private readonly permissionsCache: PermissionsCacheService,
   ) {}
@@ -239,6 +256,25 @@ export class TenantScopeInterceptor implements NestInterceptor {
     }
 
     const req = context.switchToHttp().getRequest<Request>();
+
+    // Step 11.1 — kiosk device tokens, a THIRD parallel path, with a strict two-way fence:
+    // a `@KioskRoute()` handler accepts ONLY a kiosk token (never a JWT/API key), and a request
+    // carrying a kiosk token is refused on EVERY other route before any tenant work happens. A
+    // stolen device token therefore reaches exactly the identify-and-clock endpoints, regardless of
+    // what any other route's own RBAC would have said. See docs/conventions/kiosk.md.
+    const isKioskRoute = Boolean(
+      this.reflector.getAllAndOverride<boolean>(IS_KIOSK_ROUTE_KEY, [context.getHandler(), context.getClass()]),
+    );
+    const kioskToken = extractKioskToken(req);
+    if (isKioskRoute) {
+      if (!kioskToken) {
+        throw new UnauthorizedException('A kiosk device token is required.');
+      }
+      return this.handleKioskRequest(kioskToken, next);
+    }
+    if (kioskToken) {
+      throw new ForbiddenException('A kiosk device token can only be used on kiosk routes.');
+    }
 
     // Step 3.3 — the versioned public API's SECOND, parallel authentication
     // path: an `X-Api-Key` header authenticates AND resolves the tenant in
@@ -381,6 +417,53 @@ export class TenantScopeInterceptor implements NestInterceptor {
         impersonatedByPlatformAdminId: null,
       };
       return this.tenantContext.run({ ...apiKeyContext, platform: false, tx }, () =>
+        firstValueFrom(next.handle(), { defaultValue: undefined }),
+      );
+    });
+  }
+
+  /**
+   * Step 11.1 — authenticates a kiosk device, then runs the request inside the SAME `withTenantContext`
+   * transaction every other path uses (RLS identical). The store carries `kiosk` (id + the ONE bound
+   * branch), `userId: null`, `roles: []`, `permissions: []` — nothing here can satisfy a
+   * `PermissionsGuard`, by construction.
+   */
+  private async handleKioskRequest(rawToken: string, next: CallHandler): Promise<unknown> {
+    const validated = await this.kioskAuth.validate(rawToken);
+    if (!validated) {
+      throw new UnauthorizedException('Invalid or revoked kiosk device token.');
+    }
+
+    const tenant = await appPrisma.tenant.findUnique({ where: { id: validated.tenantId }, select: { status: true, hostingRegion: true } });
+    if (!tenant || BLOCKED_TENANT_STATUSES.has(tenant.status)) {
+      throw new ForbiddenException('This tenant account is suspended.');
+    }
+    this.assertResidency(tenant.hostingRegion);
+
+    await this.tenantRateLimit.enforce(validated.tenantId);
+    await this.rateLimiter.consume(`kiosk:${validated.kioskId}`, KIOSK_REQUESTS_PER_MINUTE, 60);
+    setRequestLogIdentity(validated.tenantId);
+
+    return withTenantContext(validated.tenantId, async (tx) => {
+      const kioskContext: Omit<RequestTenantStore, 'platform' | 'tx'> = {
+        tenantId: validated.tenantId,
+        branchId: validated.branchId,
+        userId: null,
+        roles: [],
+        permissions: [],
+        branchIds: [validated.branchId],
+        platformAdminId: null,
+        platformRole: null,
+        impersonatedByPlatformAdminId: null,
+        kiosk: {
+          id: validated.kioskId,
+          branchId: validated.branchId,
+          name: validated.name,
+          requirePhoto: validated.requirePhoto,
+          biometricEnabled: validated.biometricEnabled,
+        },
+      };
+      return this.tenantContext.run({ ...kioskContext, platform: false, tx }, () =>
         firstValueFrom(next.handle(), { defaultValue: undefined }),
       );
     });

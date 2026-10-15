@@ -233,6 +233,8 @@ model Tenant {
   webhookSubscriptions         WebhookSubscription[]
   webhookDeliveries            WebhookDelivery[]
   apiKeys                      ApiKey[]
+  kiosks                       Kiosk[]
+  employeeKioskPins            EmployeeKioskPin[]
   ssoConfig                    SsoConfig?
   biometricDeviceRegistrations BiometricDeviceRegistration[]
   slackWorkspaceConfig         SlackWorkspaceConfig?
@@ -410,6 +412,7 @@ model Branch {
   userBranches                   UserBranch[]
   employees                      Employee[]
   attendanceRecords              AttendanceRecord[]
+  kiosks                         Kiosk[]
   attendanceDailySummaries       AttendanceDailySummary[]
   headcountDailySnapshots        HeadcountDailySnapshot[]
   workforceMovementDailyCounts   WorkforceMovementDailyCount[]
@@ -1783,6 +1786,7 @@ model Employee {
   shiftSwapsRequested       ShiftSwapRequest[]         @relation("ShiftSwapRequester")
   shiftSwapsReceived        ShiftSwapRequest[]         @relation("ShiftSwapCounterpart")
   attendanceRecords         AttendanceRecord[]
+  kioskPin                  EmployeeKioskPin?
   attendanceRegularizations AttendanceRegularization[]
   attendanceDailySummaries  AttendanceDailySummary[]
   payrollRunLines           PayrollRunLine[]
@@ -2091,6 +2095,8 @@ enum AttendanceSource {
   MOBILE
   BIOMETRIC
   MANUAL
+  // Step 11.1 — a shared kiosk terminal (docs/conventions/kiosk.md).
+  KIOSK
 }
 
 enum AttendanceRecordStatus {
@@ -2285,6 +2291,12 @@ model AttendanceRecord {
   clockOutLat      Float?            @map("clock_out_lat")
   clockOutLong     Float?            @map("clock_out_long")
   clockOutPhotoKey String?           @map("clock_out_photo_key")
+
+  // Step 11.1 — which kiosk terminal captured the punch (null for every non-kiosk source). A plain
+  // UUID, NO FK: this table is range-partitioned with a composite PK, the same reasoning
+  // `AttendanceRegularization.attendanceRecordId` documents for the reverse direction.
+  clockInKioskId  String?            @map("clock_in_kiosk_id") @db.Uuid
+  clockOutKioskId String?            @map("clock_out_kiosk_id") @db.Uuid
 
   status          AttendanceRecordStatus @default(OPEN)
   // Populated at clock-out. `overtimeMinutes`/`lateMinutes` are resolved
@@ -6142,4 +6154,64 @@ model FeedComment {
   @@unique([tenantId, id])
   @@index([tenantId, postId, createdAt])
   @@map("feed_comments")
+}
+
+// ===========================================================================
+// Step 11.1 — Kiosk mode: a shared attendance terminal. See docs/conventions/kiosk.md.
+// ===========================================================================
+
+enum KioskStatus {
+  ACTIVE
+  REVOKED
+}
+
+// A registered shared device bound to ONE tenant and ONE branch. It authenticates as ITSELF via
+// a device token (argon2id-hashed at rest, an indexed plaintext prefix for lookup — the SAME shape
+// as `ApiKey`), never as an employee. The token can reach only the `@KioskRoute()` identify-and-clock
+// endpoints, and only for employees of `branchId`.
+model Kiosk {
+  id             String      @id @default(uuid()) @db.Uuid
+  tenantId       String      @map("tenant_id") @db.Uuid
+  branchId       String      @map("branch_id") @db.Uuid
+  name           String
+  // First chars of the raw token, GLOBALLY unique (the token itself is what establishes the tenant).
+  tokenPrefix    String      @unique @map("token_prefix") @db.VarChar(20)
+  hashedToken    String      @map("hashed_token")
+  status         KioskStatus @default(ACTIVE)
+  // Capture a photo on every punch (buddy-punching deterrent); the punch is refused without one.
+  requirePhoto   Boolean     @default(false) @map("require_photo")
+  // Opt-in: trust this device's biometric reader (via the 1.3 BIOMETRIC_DEVICE_ADAPTER seam) to
+  // identify an employee without a PIN. OFF by default — see the doc's trust-model note.
+  biometricEnabled Boolean   @default(false) @map("biometric_enabled")
+  tokenIssuedAt  DateTime    @default(now()) @map("token_issued_at")
+  lastSeenAt     DateTime?   @map("last_seen_at")
+  revokedAt      DateTime?   @map("revoked_at")
+  createdByUserId String?    @map("created_by_user_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, branchId])
+  @@map("kiosks")
+}
+
+// An employee's kiosk PIN (admin-issued, argon2id-hashed — shown once, never recoverable). One per employee.
+model EmployeeKioskPin {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  employeeId      String    @map("employee_id") @db.Uuid
+  pinHash         String    @map("pin_hash")
+  issuedByUserId  String?   @map("issued_by_user_id") @db.Uuid
+  issuedAt        DateTime  @default(now()) @map("issued_at")
+  lastUsedAt      DateTime? @map("last_used_at")
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [tenantId, employeeId], references: [tenantId, id], onDelete: Cascade)
+
+  @@unique([tenantId, employeeId])
+  @@index([tenantId])
+  @@map("employee_kiosk_pins")
 }

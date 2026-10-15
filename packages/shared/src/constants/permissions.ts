@@ -181,6 +181,13 @@ export const PERMISSIONS = {
   // (remove) feed posts/comments, and see the engagement overview.
   RECOGNITION_GIVE: 'recognition.give',
   ENGAGEMENT_MANAGE: 'engagement.manage',
+
+  // Step 11.1 (kiosk mode) — see docs/conventions/kiosk.md. Register/rotate/revoke shared attendance
+  // terminals and issue/reset employee kiosk PINs. Deliberately a SEPARATE key from
+  // `attendance.write`: it controls which devices may speak for the whole branch, so it is an
+  // admin-tier permission (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER explicitly), never
+  // MANAGER/EMPLOYEE. The kiosk DEVICE itself holds NO permission at all — it is not an RBAC subject.
+  KIOSK_MANAGE: 'kiosk.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -265,6 +272,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.SCHEDULING_MANAGE,
     PERMISSIONS.RECOGNITION_GIVE,
     PERMISSIONS.ENGAGEMENT_MANAGE,
+    PERMISSIONS.KIOSK_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

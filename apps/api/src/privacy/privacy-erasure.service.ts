@@ -78,6 +78,8 @@ export class PrivacyErasureService {
       await tx.employeeDependent.deleteMany({ where: { tenantId, employeeId } });
       await tx.employeeEmergencyContact.deleteMany({ where: { tenantId, employeeId } });
       await tx.employeeDocument.deleteMany({ where: { tenantId, employeeId } });
+      // Step 11.1 — a kiosk PIN is a credential, not a record to keep: gone with the person (docs/conventions/kiosk.md).
+      await tx.employeeKioskPin.deleteMany({ where: { tenantId, employeeId } });
       await tx.customFieldValueSet.deleteMany({ where: { tenantId, entityType: 'Employee', entityId: employeeId } });
 
       if (employee.userId) {

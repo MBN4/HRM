@@ -4485,3 +4485,40 @@ the freshly backfilled `engagement.manage` from the demo HR user until it refres
 after a backfill migration).
 **Known gaps**: see the doc's list — no points redemption (fast-follow), no birthday opt-out, UTC celebrations, no survey reminders,
 no per-segment breakdown (deliberate), departments picker in the builder depends on `working_hours.manage`, mobile untouched.
+
+## 11.1 — Kiosk mode: a shared attendance terminal (2026-10-15)
+
+Device model, the trust fence, PIN security and the screens: [`conventions/kiosk.md`](./conventions/kiosk.md). A **consumer** of the
+attendance module — a kiosk punch is the existing `AttendanceClockService` with source `KIOSK`; auth, RLS and the attendance engine are
+untouched (one additive optional `kioskId` argument on the clock service).
+**Schema** (migrations `20261016090000_add_kiosk_mode` + `…090100_enable_rls_for_kiosk`, additive; the first generated from
+`prisma migrate diff` against the live DB — no drift noise): `Kiosk` (tenant + branch bound, `tokenPrefix` unique + argon2id `hashedToken`,
+`status`, `requirePhoto`, `biometricEnabled`, `lastSeenAt`), `EmployeeKioskPin` (argon2id hash, one per employee), enum `KioskStatus`,
+`AttendanceSource` + `KIOSK`, `attendance_records` + `clock_in_kiosk_id`/`clock_out_kiosk_id` (plain UUIDs, no FK — partitioned table);
+RLS `tenant_isolation` + `FORCE` on both new tables; `kiosk.manage` backfilled for every existing tenant (TENANT_ADMIN/CEO/HR_MANAGER).
+**Shared**: `kiosk.validator.ts`, `PERMISSIONS.KIOSK_MANAGE` (+ HR_MANAGER), `KIOSK` in `ATTENDANCE_SOURCES` (still not accepted from
+a client body on the self-service routes), `^pin$|pinHash` added to the audit redaction pattern, ~115 en+ar strings.
+**API**: `auth/kiosk/` (`@KioskRoute()`, `KioskAuthService`, `KioskAuthModule` imported by `TenancyModule`); `TenantScopeInterceptor` gains
+the third auth path with a **two-way fence** (a `@KioskRoute()` accepts only a kiosk token; every other route 403s a request carrying
+one, before any tenant work) and a per-device rate limit; `RequestTenantStore.kiosk` + `TenantContextService.kiosk`;
+`apps/api/src/kiosk/` — `KioskService`/`KioskAdminController` (`/kiosks`: register/list/update/rotate/revoke/activity + PIN
+issue/reset/remove/list), `KioskDeviceController` (`/kiosk/me|identify|identify/biometric|clock`), `KioskPunchService`,
+`KioskPinService`, `KioskTicketService`; privacy erasure now deletes an employee's kiosk PIN. **Portal**: `/kiosk` (outside `(app)`;
+own device-token-only client, fragment-token pairing, on-screen keypad, confirm/done/revoked/setup states, optional camera capture,
+EN/ع switch, theme toggle), `/kiosks` admin (Devices + Employee PINs tabs), sidebar entry. **Demo**: `seed:demo` seeds "US HQ Front
+Desk" at Acme US HQ with the fixed demo token `kio_demo_acme_hq_front_desk_token_0001` and PINs for `CHAIN-INTERN`/`CHAIN-LEAD`/
+`CHAIN-PM` (`111111`/`222222`/`333333`) — **demo tenant only**; the block was placed before the engagement seed (see below).
+
+**Verification** (all run): `kiosk.e2e-spec.ts` **34/34** (real HTTP + Postgres + Redis + MinIO — see the doc §9 for the list, notably
+the branch/tenant/ticket/route-fence scoping proofs and a punch classified identically to `GET /attendance/status`); portal Playwright
+`kiosk.spec.ts` **16/16** (incl. axe in light/dark/RTL and a Chromium fake-camera photo punch); neighbouring suites
+(attendance, attendance-status, scheduling, auth-rbac, tenant-isolation-exhaustive, audit, privacy, integrations-api-keys) 195/195
+before the final full-suite run recorded below.
+**Bugs caught on the way**: (1) a failed identify ends in a 401 that **rolls back the request transaction**, so a DB failure counter
+or in-transaction audit row would never persist and the lockout would never trip — counters moved to Redis, failure audit goes through
+`recordForTenant`; (2) the Playwright suite's own setup was consuming the demo kiosk's real 30/min identify cap — test setup now uses a
+separate helper kiosk; (3) `@@unique([employeeId])` isn't a valid target for a composite one-to-one relation — now
+`@@unique([tenantId, employeeId])`. **Pre-existing, not fixed**: re-running `seed:demo` against an already-seeded database fails in the
+10.1 engagement block (`SurveyTally` unique violation) — it is not idempotent; the kiosk seed sits before it so it still runs.
+**Known gaps**: see the doc §10 — admin-issued PINs only, device token in `localStorage`, no photo viewer, fixed (non-configurable)
+caps, no offline punching, mobile untouched.

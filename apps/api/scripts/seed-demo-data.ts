@@ -38,6 +38,9 @@ const TENANT_SLUG = 'acme-demo';
 const DEMO_PASSWORD = 'DemoPass-123!';
 /** The one-time temporary password of the demo user that is mid-onboarding (mustChangePassword=true) — see the "team access" section below. */
 const DEMO_TEMP_PASSWORD = 'Temp-Pass-123!';
+// Step 11.1 — DEMO ONLY: a fixed kiosk device token + PINs so the kiosk screen works out of the box.
+const DEMO_KIOSK_TOKEN = 'kio_demo_acme_hq_front_desk_token_0001';
+const DEMO_KIOSK_PINS: Record<string, string> = { 'CHAIN-INTERN': '111111', 'CHAIN-LEAD': '222222', 'CHAIN-PM': '333333' };
 const ARGON2ID = 2;
 const DAY_MS = 86_400_000;
 const HISTORY_DAYS = 100;
@@ -788,6 +791,23 @@ async function main() {
       });
     }
     console.log(`Resume screening demo: requisition "${SCREENING_TITLE}" (id ${requisition.id}) -> portal /recruitment/screening/${requisition.id} (sign in as hr@acme-demo.local or ceo@).`);
+  }
+
+  // ---- kiosk mode (step 11.1) ---------------------------------------------------
+  // One shared terminal at Acme US HQ with a FIXED, documented device token so the screen is demonstrable
+  // immediately (a real token is random and shown once). Three HQ employees get fixed PINs. This token is
+  // for the LOCAL DEMO tenant only — never seed a known token anywhere real.
+  if (usHq) {
+    const kioskTokenPrefix = DEMO_KIOSK_TOKEN.slice(0, 16);
+    const kioskData = { tenantId, branchId: usHq.id, name: 'US HQ Front Desk', status: 'ACTIVE' as const, revokedAt: null, requirePhoto: false, hashedToken: await hash(DEMO_KIOSK_TOKEN, { algorithm: ARGON2ID }) };
+    await prisma.kiosk.upsert({ where: { tokenPrefix: kioskTokenPrefix }, update: kioskData, create: { ...kioskData, tokenPrefix: kioskTokenPrefix, createdByUserId: whAdmin.id } });
+    for (const [code, pin] of Object.entries(DEMO_KIOSK_PINS)) {
+      const emp = await prisma.employee.findUnique({ where: { tenantId_employeeCode: { tenantId, employeeCode: code } } });
+      if (!emp) continue;
+      const pinHash = await hash(pin, { algorithm: ARGON2ID });
+      await prisma.employeeKioskPin.upsert({ where: { tenantId_employeeId: { tenantId, employeeId: emp.id } }, update: { pinHash, lastUsedAt: null }, create: { tenantId, employeeId: emp.id, pinHash, issuedByUserId: whAdmin.id } });
+    }
+    console.log(`Kiosk (11.1): open http://localhost:3003/kiosk#token=${DEMO_KIOSK_TOKEN}  — employee ID + PIN: ${Object.entries(DEMO_KIOSK_PINS).map(([c, p]) => `${c}/${p}`).join(', ')}. Manage at /kiosks (hr@ or ceo@).`);
   }
 
   // ---- engagement & culture (step 10.1) ----------------------------------------------

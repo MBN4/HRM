@@ -31,7 +31,7 @@
  * sinks at once, automatically.
  */
 const REDACTED_KEY_PATTERN =
-  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown|proposedSalary|ssn|cnic|ntn|qatarId|nationalId|passportNumber|bankAccount|iban|taxId|rawText/i;
+  /password|token|secret|privateKey|licenseFile|signedToken|bankDetails|compensation|grossPay|netPay|employerCost|componentBreakdown|proposedSalary|ssn|cnic|ntn|qatarId|nationalId|passportNumber|bankAccount|iban|taxId|rawText|^pin$|pinHash/i;
 
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 

@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { ApiKeyAuthModule } from '../auth/api-key/api-key-auth.module';
+import { KioskAuthModule } from '../auth/kiosk/kiosk-auth.module';
 import { PermissionsCacheService } from '../auth/permissions-cache.service';
 import { PermissionFieldDemoController } from '../common/permissions/demo/permission-field-demo.controller';
 import { PermissionSerializerInterceptor } from '../common/permissions/permission-serializer.interceptor';
@@ -50,6 +51,8 @@ import { TenantScopeInterceptor } from './tenant-scope.interceptor';
     // own doc comment for why this is a DIFFERENT module from the
     // tenant-facing ApiKeysModule).
     ApiKeyAuthModule,
+    // Step 11.1 — the kiosk-device authentication branch (docs/conventions/kiosk.md).
+    KioskAuthModule,
     // Step 4.1 — the platform-admin authentication branch below needs
     // PlatformAuthContextService. Same leaf-module split, same reasoning.
     PlatformAuthContextModule,

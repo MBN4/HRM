@@ -79,6 +79,11 @@ export class TenantContextService {
     return this.getStore()?.impersonatedByPlatformAdminId ?? null;
   }
 
+  /** Step 11.1 — the authenticated kiosk device, set only for a `@KioskRoute()` request. Null otherwise. */
+  get kiosk(): NonNullable<RequestTenantStore['kiosk']> | null {
+    return this.getStore()?.kiosk ?? null;
+  }
+
   getPermissions(): string[] {
     return this.getStore()?.permissions ?? [];
   }

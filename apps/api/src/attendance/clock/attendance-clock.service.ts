@@ -79,6 +79,7 @@ export class AttendanceClockService {
     lat?: number,
     long?: number,
     photo?: UploadedPhoto,
+    kioskId?: string,
   ): Promise<AttendanceRecordResponseDto> {
     const open = await tx.attendanceRecord.findFirst({ where: { employeeId: employee.id, status: 'OPEN' } });
     if (open) {
@@ -102,6 +103,8 @@ export class AttendanceClockService {
         clockInSource: source,
         clockInLat: lat ?? null,
         clockInLong: long ?? null,
+        // Step 11.1 — which kiosk terminal captured this punch (null for every non-kiosk source).
+        clockInKioskId: kioskId ?? null,
         status: 'OPEN',
       },
     });
@@ -140,6 +143,7 @@ export class AttendanceClockService {
     lat?: number,
     long?: number,
     photo?: UploadedPhoto,
+    kioskId?: string,
   ): Promise<AttendanceRecordResponseDto> {
     const open = await tx.attendanceRecord.findFirst({ where: { employeeId: employee.id, status: 'OPEN' } });
     if (!open) {
@@ -179,6 +183,7 @@ export class AttendanceClockService {
         clockOutLat: lat ?? null,
         clockOutLong: long ?? null,
         clockOutPhotoKey,
+        clockOutKioskId: kioskId ?? null,
         status: 'CLOSED',
         workedMinutes,
         overtimeMinutes,

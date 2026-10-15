@@ -122,6 +122,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/shift-scheduling.md`](./docs/conventions/shift-scheduling.md)                 | Shift scheduling & rostering: the reconciled shift-vs-working-hours model (a shift carries the policy parameters; a standing assignment is a policy row linked to a shift; one precedence chain), the dated roster calendar (draft/publish, day off, copy-week, coverage, past-day rule), scope via the hierarchy, classification against the day's effective shift, and swap via the workflow engine. (8.2) |
 | [`docs/conventions/resume-parsing-screening.md`](./docs/conventions/resume-parsing-screening.md) | Resume parsing + candidate screening (extends 2.3 ATS): the swappable `RESUME_PARSER` seam + the dependency-free default parser and its honest accuracy limits, the async BullMQ parse flow + graceful failure, screening criteria as config data, the pure transparent scorer, human-in-the-loop (scores never move a stage), PII/privacy. (9.1)                                                            |
 | [`docs/conventions/engagement-culture.md`](./docs/conventions/engagement-culture.md)             | Engagement & culture: tenant-configurable recognition + points, surveys (audience targeting, pre-aggregated results, the server+DB-enforced anonymity guarantee and its honest limits), the scoped social feed + moderation + derived celebrations, and the two new permissions. (10.1)                                                                                                                      |
+| [`docs/conventions/kiosk.md`](./docs/conventions/kiosk.md)                                       | Kiosk mode: a shared attendance terminal — the device model (tenant+branch-bound, argon2id-hashed revocable token), the two-way `@KioskRoute()` auth fence, identify-and-clock via a signed ticket, PIN lockout/rate-limit design (and why failures live in Redis), photo capture, the opt-in biometric seam, and how a punch is just a normal `KIOSK` attendance record. (11.1)                             |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                            |
 
 ## 5. Build log summary
@@ -1048,6 +1049,16 @@ responses, aggregates withheld below 3 responses — proven against the raw tabl
 reactions, comments, admin moderation that also reverses a removed recognition's points, idempotent derived celebrations via a daily
 BullMQ job). New permissions `recognition.give` (all roles) and `engagement.manage` (admin/CEO/HR). Portal `/recognition`, `/feed`,
 `/surveys`, `/engagement`. See [`docs/conventions/engagement-culture.md`](./docs/conventions/engagement-culture.md).
+
+**11.1 — Kiosk mode (2026-10-15)** — not a numbered phase step; a shared attendance terminal consuming the existing attendance module (a
+kiosk punch = the normal `AttendanceClockService` with source `KIOSK` → shifts/classification/payroll unchanged). A **kiosk** is a registered
+device bound to one tenant + one branch that authenticates as ITSELF via a hashed, revocable `X-Kiosk-Token` — a third auth path in
+`TenantScopeInterceptor` with a two-way fence: only `@KioskRoute()` handlers accept it, and every other route 403s it, so a stolen token
+reaches only identify-and-clock for its own branch (RLS identical). Employees identify with employee ID + an admin-issued argon2id-hashed PIN
+(per-employee lockout + per-device caps, held in Redis because a 401 rolls back the request transaction); a signed 60 s ticket carries the
+verified identity between identify and punch. Optional photo capture (`requirePhoto`) and an opt-in biometric path through the 1.3 seam. New
+`kiosk.manage` permission, `/kiosks` admin (devices + PINs), the locked-down `/kiosk` screen (outside `(app)`, en/ar RTL, light/dark,
+tablet-first), demo kiosk + PINs in `seed:demo`. See [`docs/conventions/kiosk.md`](./docs/conventions/kiosk.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

@@ -44,6 +44,13 @@ export interface RequestTenantStore {
    * every other request, platform or tenant.
    */
   impersonatedByPlatformAdminId: string | null;
+  /**
+   * Step 11.1 — set ONLY for a request authenticated by a kiosk device token (`X-Kiosk-Token`): the device's
+   * id, the ONE branch it is bound to and its name. `userId` is null and `permissions` is `[]` for such a
+   * request — a kiosk is not an RBAC subject; its entire authority is "identify-and-clock at this branch".
+   * Absent/null for every other request.
+   */
+  kiosk?: { id: string; branchId: string; name: string; requirePhoto: boolean; biometricEnabled: boolean } | null;
   tx: Prisma.TransactionClient | null;
 }
 

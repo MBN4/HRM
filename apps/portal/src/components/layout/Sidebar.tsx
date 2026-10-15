@@ -23,6 +23,7 @@ import {
   ClipboardList,
   Heart,
   Newspaper,
+  Tablet,
   Network,
   Paintbrush,
   Receipt,
@@ -166,6 +167,10 @@ export function Sidebar() {
   // Engagement & culture admin hub (step 10.1) — see docs/conventions/engagement-culture.md.
   if (can(PERMISSIONS.ENGAGEMENT_MANAGE)) {
     adminItems.push({ href: '/engagement', label: t('nav.engagement'), icon: Heart });
+  }
+  // Kiosk mode (step 11.1) — shared attendance terminals + employee PINs; see docs/conventions/kiosk.md.
+  if (can(PERMISSIONS.KIOSK_MANAGE)) {
+    adminItems.push({ href: '/kiosks', label: t('nav.kiosks'), icon: Tablet });
   }
   // Data privacy & residency (step 6.1) — see docs/conventions/privacy-residency.md.
   if (can(PERMISSIONS.PRIVACY_MANAGE)) {

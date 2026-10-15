@@ -9,7 +9,7 @@ import { z } from 'zod';
  * free-form-string convention — none of this is tenant-extensible data.
  */
 
-export const ATTENDANCE_SOURCES = ['WEB', 'MOBILE', 'BIOMETRIC', 'MANUAL'] as const;
+export const ATTENDANCE_SOURCES = ['WEB', 'MOBILE', 'BIOMETRIC', 'MANUAL', 'KIOSK'] as const;
 export type AttendanceSourceKey = (typeof ATTENDANCE_SOURCES)[number];
 
 export const ATTENDANCE_RECORD_STATUSES = ['OPEN', 'CLOSED'] as const;
@@ -34,7 +34,7 @@ const HHMM_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
  * multipart wire format" approach that controller already uses for
  * `documentType`.
  */
-/** Only WEB/MOBILE may be self-reported through these routes — BIOMETRIC/MANUAL are set internally (the device seam, and regularization) and never accepted from a client body. */
+/** Only WEB/MOBILE may be self-reported through these routes — BIOMETRIC/MANUAL/KIOSK are set internally (the device seams, and regularization) and never accepted from a client body. */
 export const SELF_SERVICE_ATTENDANCE_SOURCES = ['WEB', 'MOBILE'] as const;
 
 export const clockInSchema = z

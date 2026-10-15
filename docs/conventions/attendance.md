@@ -257,6 +257,9 @@ MANUAL`. Either way it enqueues a fire-and-forget summary recompute for
   the same class of accepted read `LeaveService`'s team calendar already
   is.
 
+> **Step 11.1 update** — a third punch source, `KIOSK` (a shared terminal), is now a consumer of this same clock service; see
+> [kiosk.md](./kiosk.md). `AttendanceRecord` also carries `clockInKioskId`/`clockOutKioskId`.
+
 ## The biometric device seam
 
 - `BiometricDeviceAdapter` (`devices/biometric-device.interface.ts`) is a
