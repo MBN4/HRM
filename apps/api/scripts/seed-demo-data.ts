@@ -289,6 +289,7 @@ async function main() {
       where: { tenantId, branchId, periodYear: lastMonth.getUTCFullYear(), periodMonth: lastMonth.getUTCMonth() + 1, runType: 'REGULAR' },
     });
     if (exists) continue;
+    const branchRow = await prisma.branch.findUniqueOrThrow({ where: { id: branchId }, select: { legalEntityId: true } });
     const staff = employeesByBranch[branchId].filter((e) => e.status === 'ACTIVE' && e.joinDate < lastMonth);
     const lines = staff.map((e) => {
       const gross = plan.countryCode === 'QA' ? 9000 + Math.floor(rand() * 9000) : 4200 + Math.floor(rand() * 5200);
@@ -302,6 +303,7 @@ async function main() {
         periodYear: lastMonth.getUTCFullYear(),
         periodMonth: lastMonth.getUTCMonth() + 1,
         status: 'FINALIZED',
+        legalEntityId: branchRow.legalEntityId,
         payrollMode: 'CALCULATE',
         currencyCode: plan.currency,
         totalGross: lines.reduce((s, l) => s + l.gross, 0),

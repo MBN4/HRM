@@ -135,6 +135,12 @@ export class PlatformTenantService {
     // permissions at all and nobody could ever be granted access.
     await seedSystemRolesAndPermissions(prisma, tenant.id);
 
+    // Step 12.1 — every tenant starts with a DEFAULT legal entity named/countried from the tenant itself
+    // (branches with no explicit link resolve to it). Editable afterwards via /legal-entities.
+    await prisma.legalEntity.create({
+      data: { tenantId: tenant.id, legalName: tenant.name, countryCode: tenant.defaultCountryCode, isDefault: true },
+    });
+
     let initialAdminUserId: string | null = null;
     if (input.initialAdminEmail && input.initialAdminName && input.initialAdminPassword) {
       const hashedPassword = await this.password.hash(input.initialAdminPassword);

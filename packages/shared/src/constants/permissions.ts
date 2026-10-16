@@ -188,6 +188,12 @@ export const PERMISSIONS = {
   // admin-tier permission (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER explicitly), never
   // MANAGER/EMPLOYEE. The kiosk DEVICE itself holds NO permission at all — it is not an RBAC subject.
   KIOSK_MANAGE: 'kiosk.manage',
+
+  // Step 12.1 (multi-legal-entity) — see docs/conventions/legal-entities.md. Create/edit the tenant's
+  // registered legal entities (legal name, registration/tax IDs, address, logo, payroll bank details)
+  // and assign branches to them. Admin-tier (TENANT_ADMIN/CEO via ALL_PERMISSIONS, HR_MANAGER
+  // explicitly); the entity's bank details are additionally field-gated behind `salary.view`.
+  ENTITY_MANAGE: 'entity.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -273,6 +279,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, readonly Permission
     PERMISSIONS.RECOGNITION_GIVE,
     PERMISSIONS.ENGAGEMENT_MANAGE,
     PERMISSIONS.KIOSK_MANAGE,
+    PERMISSIONS.ENTITY_MANAGE,
   ],
   [SYSTEM_ROLES.MANAGER]: [
     PERMISSIONS.EMPLOYEE_READ,

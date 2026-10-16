@@ -96,6 +96,17 @@ export type PayslipTemplate = z.infer<typeof payslipTemplateSchema>;
 export const payrollModeSchema = z.enum(['CALCULATE', 'DELEGATE']);
 export type PayrollMode = z.infer<typeof payrollModeSchema>;
 
+/**
+ * Step 12.1 (multi-legal-entity) — OPTIONAL display labels for this country's business identifiers on a
+ * legal entity (a generic `registrationNumber`/`taxId` pair is stored; the pack says what they are CALLED
+ * here). Purely presentational — never read by the tax/statutory engine. Optional so every pre-12.1 pack
+ * still validates; absent → the generic labels in legal-entity.validator.ts.
+ */
+export const legalEntityPackSchema = z.object({
+  registrationNumberLabel: z.string().min(1),
+  taxIdLabel: z.string().min(1),
+});
+
 export const countryPackConfigSchema = z.object({
   locale: localeSchema,
   workingTime: workingTimeSchema,
@@ -109,6 +120,7 @@ export const countryPackConfigSchema = z.object({
   payrollMode: payrollModeSchema,
   /** Advisory only — e.g. "us-east-1", "me-south-1" — never enforced as a hard data-residency boundary by this schema alone. */
   hostingRegionHint: z.string().min(1),
+  legalEntity: legalEntityPackSchema.optional(),
 });
 export type CountryPackConfig = z.infer<typeof countryPackConfigSchema>;
 

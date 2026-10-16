@@ -105,6 +105,7 @@ export default function PayrollRunDetailPage({ params }: { params: { id: string 
             <Field label={t('common.branch')} value={branchName} />
             <Field label={t('payroll.period')} value={`${run.periodMonth}/${run.periodYear}`} />
             <Field label={t('payroll.currency')} value={run.currencyCode} />
+            {run.legalEntity && <Field label={t('entity.legalEntity')} value={<span data-testid="run-legal-entity">{run.legalEntity.legalName}</span>} />}
             <Field label={t('common.status')} value={<StatusBadge status={run.status} label={t(`payroll.status.${run.status}`)} />} />
           </dl>
 

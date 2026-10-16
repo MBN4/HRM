@@ -123,6 +123,7 @@ Every app/package that needs environment variables documents them in its own
 | [`docs/conventions/resume-parsing-screening.md`](./docs/conventions/resume-parsing-screening.md) | Resume parsing + candidate screening (extends 2.3 ATS): the swappable `RESUME_PARSER` seam + the dependency-free default parser and its honest accuracy limits, the async BullMQ parse flow + graceful failure, screening criteria as config data, the pure transparent scorer, human-in-the-loop (scores never move a stage), PII/privacy. (9.1)                                                            |
 | [`docs/conventions/engagement-culture.md`](./docs/conventions/engagement-culture.md)             | Engagement & culture: tenant-configurable recognition + points, surveys (audience targeting, pre-aggregated results, the server+DB-enforced anonymity guarantee and its honest limits), the scoped social feed + moderation + derived celebrations, and the two new permissions. (10.1)                                                                                                                      |
 | [`docs/conventions/kiosk.md`](./docs/conventions/kiosk.md)                                       | Kiosk mode: a shared attendance terminal — the device model (tenant+branch-bound, argon2id-hashed revocable token), the two-way `@KioskRoute()` auth fence, identify-and-clock via a signed ticket, PIN lockout/rate-limit design (and why failures live in Redis), photo capture, the opt-in biometric seam, and how a punch is just a normal `KIOSK` attendance record. (11.1)                             |
+| [`docs/conventions/legal-entities.md`](./docs/conventions/legal-entities.md)                     | Multi-legal-entity identity: the additive `LegalEntity` model + `Branch.legalEntityId` link (employee's entity derived from their branch, null → default entity), how payslips/statutory reports/offer letters/payroll runs print/attribute it, Country-Pack display labels, bank-detail encryption + field gating, the default-entity migration, and "country resolution unchanged". (12.1)                 |
 | [`docs/conventions/design-system.md`](./docs/conventions/design-system.md)                       | The MBN brand constant (one-line rename), the shared bottle-green/sea-green token palette + Tailwind preset (`packages/config`), light/dark via flipped ramps, the restyled UI kit, and the Wordmark/login treatment — one design system for BOTH `apps/portal` and `apps/admin`. (Branding pass)                                                                                                            |
 
 ## 5. Build log summary
@@ -1059,6 +1060,16 @@ reaches only identify-and-clock for its own branch (RLS identical). Employees id
 verified identity between identify and punch. Optional photo capture (`requirePhoto`) and an opt-in biometric path through the 1.3 seam. New
 `kiosk.manage` permission, `/kiosks` admin (devices + PINs), the locked-down `/kiosk` screen (outside `(app)`, en/ar RTL, light/dark,
 tablet-first), demo kiosk + PINs in `seed:demo`. See [`docs/conventions/kiosk.md`](./docs/conventions/kiosk.md).
+
+**12.1 — Multi-legal-entity identity (2026-10-16)** — not a numbered phase step; additive, closes the gap that a tenant with
+companies in several countries (already modelled as branches, each with its own Country Pack) had no legal-entity IDENTITY. New
+tenant-scoped `LegalEntity` (legal name, registration number, tax ID, address, country, logo, encrypted optional payroll bank
+details, one `isDefault` per tenant); `Branch.legalEntityId` (nullable — null resolves to the default entity); an employee's
+entity is derived from their branch. Payslips, statutory-report PDFs and offer letters now name the correct employing/filing
+entity; payroll runs and generated reports are attributed to (stamped with) it — payroll/statutory engines and country resolution
+untouched. New `entity.manage` permission (admin/CEO/HR), `/legal-entities` API + portal screen, default entity backfilled for
+every existing tenant, two demo entities on `acme-demo`. See
+[`docs/conventions/legal-entities.md`](./docs/conventions/legal-entities.md).
 
 **Auth UI/UX pass (2026-09-22)** — not a numbered phase step; a
 frontend-only polish pass over `/login` on both `apps/portal` and

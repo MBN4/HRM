@@ -61,3 +61,4 @@ export * from './validators/working-hours.validator';
 export * from './validators/scheduling.validator';
 export * from './validators/engagement.validator';
 export * from './validators/kiosk.validator';
+export * from './validators/legal-entity.validator';

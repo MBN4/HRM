@@ -9,6 +9,7 @@ import type {
 } from '@hrm/shared';
 import { PERMISSIONS } from '@hrm/shared';
 import { StorageService } from '../storage/storage.service';
+import { findEntityForBranch, toLegalEntityIdentity } from '../legal-entities/legal-entity-identity.util';
 import { SignableDocumentPdfService } from './signable-document-pdf.service';
 import { SigningProgressService } from './signing-progress.service';
 import { sha256Hex } from './document-hash.util';
@@ -213,9 +214,26 @@ export class SignatureRequestService {
         throw new NotFoundException(`Offer "${input.generate.offerId}" was not found.`);
       }
       const candidate = offer.application.candidate;
+      // Step 12.1 — the EMPLOYING legal entity (branch -> entity): named in the letter so the signed document
+      // (whose SHA-256 is captured from this exact text) identifies who the employer actually is.
+      const entityRow = await findEntityForBranch(tx, offer.tenantId, offer.branchId);
+      const employer = entityRow ? await toLegalEntityIdentity(tx, entityRow) : null;
+      const employerParagraphs = employer
+        ? [
+            `Employer: ${employer.legalName}`,
+            [
+              employer.registrationNumber ? `${employer.registrationNumberLabel}: ${employer.registrationNumber}` : null,
+              employer.taxId ? `${employer.taxIdLabel}: ${employer.taxId}` : null,
+              employer.addressLines.length > 0 ? employer.addressLines.join(', ') : null,
+            ]
+              .filter((part): part is string => Boolean(part))
+              .join(' · '),
+          ].filter((line) => line.length > 0)
+        : [];
       const paragraphs = [
+        ...employerParagraphs,
         `Dear ${candidate.firstName} ${candidate.lastName},`,
-        `We are pleased to offer you a position at ${offer.branch.name} as a ${offer.employmentType.replace('_', ' ').toLowerCase()} employee, starting on ${offer.proposedJoinDate.toISOString().slice(0, 10)}.`,
+        `We are pleased to offer you a position${employer ? ` with ${employer.legalName}` : ''} at ${offer.branch.name} as a ${offer.employmentType.replace('_', ' ').toLowerCase()} employee, starting on ${offer.proposedJoinDate.toISOString().slice(0, 10)}.`,
         `Your proposed compensation is ${offer.proposedSalary.toString()} ${offer.salaryCurrency} per month.`,
         'Please review the terms of this offer and sign below to indicate your acceptance.',
       ];

@@ -17,6 +17,8 @@ export class GeneratedReportResponseDto {
   reportDefinitionId!: string;
   reportCode!: string;
   countryCode!: string;
+  /** Step 12.1 — the legal entity this filing is FOR (name + registration number as printed on the PDF). */
+  legalEntity!: { id: string; legalName: string; registrationNumber: string | null; countryCode: string } | null;
   periodType!: string;
   periodYear!: number;
   periodMonth!: number | null;

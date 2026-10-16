@@ -24,6 +24,7 @@ import {
   Heart,
   Newspaper,
   Tablet,
+  Building2,
   Network,
   Paintbrush,
   Receipt,
@@ -167,6 +168,10 @@ export function Sidebar() {
   // Engagement & culture admin hub (step 10.1) — see docs/conventions/engagement-culture.md.
   if (can(PERMISSIONS.ENGAGEMENT_MANAGE)) {
     adminItems.push({ href: '/engagement', label: t('nav.engagement'), icon: Heart });
+  }
+  // Multi-legal-entity identity (step 12.1) — see docs/conventions/legal-entities.md.
+  if (can(PERMISSIONS.ENTITY_MANAGE)) {
+    adminItems.push({ href: '/legal-entities', label: t('nav.legalEntities'), icon: Building2 });
   }
   // Kiosk mode (step 11.1) — shared attendance terminals + employee PINs; see docs/conventions/kiosk.md.
   if (can(PERMISSIONS.KIOSK_MANAGE)) {

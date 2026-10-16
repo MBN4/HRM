@@ -116,6 +116,7 @@ model Tenant {
   updatedAt          DateTime            @updatedAt @map("updated_at")
 
   branches                       Branch[]
+  legalEntities                  LegalEntity[]
   departments                    Department[]
   designations                   Designation[]
   costCenters                    CostCenter[]
@@ -399,8 +400,14 @@ model Branch {
   geofenceLat          Float?  @map("geofence_lat")
   geofenceLong         Float?  @map("geofence_long")
   geofenceRadiusMeters Int?    @map("geofence_radius_meters")
+  // Step 12.1 (multi-legal-entity) — the legal entity this branch belongs to. NULLABLE by design:
+  // a null resolves to the tenant's DEFAULT legal entity (`LegalEntityResolverService`), so every
+  // pre-12.1 branch/fixture keeps working untouched. The migration backfills it for real data.
+  // See docs/conventions/legal-entities.md.
+  legalEntityId        String? @map("legal_entity_id") @db.Uuid
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity LegalEntity? @relation(fields: [tenantId, legalEntityId], references: [tenantId, id], onDelete: Restrict)
 
   // Composite FK back to the SAME tenant: a branch's parent must belong to
   // the same tenant, enforced at the schema level (not just by RLS).
@@ -2725,6 +2732,9 @@ model PayrollRun {
   totalGrossBase       Decimal?         @map("total_gross_base") @db.Decimal(14, 2)
   totalNetBase         Decimal?         @map("total_net_base") @db.Decimal(14, 2)
   createdByUserId      String?          @map("created_by_user_id") @db.Uuid
+  // Step 12.1 — the legal entity this run is attributable to (stamped from the branch at creation;
+  // ATTRIBUTION only, never read by the payroll engine). Null on pre-12.1 runs → derived live.
+  legalEntityId        String?          @map("legal_entity_id") @db.Uuid
   approvedAt           DateTime?        @map("approved_at")
   finalizedAt          DateTime?        @map("finalized_at")
   paidAt               DateTime?        @map("paid_at")
@@ -2733,6 +2743,7 @@ model PayrollRun {
 
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch             Branch              @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  legalEntity        LegalEntity?        @relation(fields: [tenantId, legalEntityId], references: [tenantId, id], onDelete: Restrict)
   settlementEmployee Employee?           @relation("PayrollFinalSettlement", fields: [tenantId, settlementEmployeeId], references: [tenantId, id], onDelete: Cascade)
   lines              PayrollRunLine[]
   bankExports        PayrollBankExport[]
@@ -2926,12 +2937,15 @@ model GeneratedReport {
   summary            Json?
   errorMessage       String?                   @map("error_message")
   requestedByUserId  String?                   @map("requested_by_user_id") @db.Uuid
+  // Step 12.1 — the legal entity this filing is FOR (derived from the branch at generation time).
+  legalEntityId      String?                   @map("legal_entity_id") @db.Uuid
   generatedAt        DateTime?                 @map("generated_at")
   createdAt          DateTime                  @default(now()) @map("created_at")
   updatedAt          DateTime                  @updatedAt @map("updated_at")
 
   tenant           Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch           Branch                    @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Cascade)
+  legalEntity      LegalEntity?              @relation(fields: [tenantId, legalEntityId], references: [tenantId, id], onDelete: Restrict)
   reportDefinition StatutoryReportDefinition @relation(fields: [reportDefinitionId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, branchId, reportDefinitionId, periodKey])
@@ -6214,4 +6228,43 @@ model EmployeeKioskPin {
   @@unique([tenantId, employeeId])
   @@index([tenantId])
   @@map("employee_kiosk_pins")
+}
+
+// ---------------------------------------------------------------------------
+// Multi-legal-entity identity (step 12.1) — see docs/conventions/legal-entities.md. A LegalEntity is
+// a registered company (name, registration number, tax ID, address) that branches belong to. It is
+// the IDENTITY layer only: a branch's own `countryCode` still drives every Country Pack behaviour
+// (currency/tax/holidays/weekends/payroll) exactly as before. Payslips, statutory reports and offer
+// letters print the entity's identity as the employer. Exactly one entity per tenant is the
+// `isDefault` one (partial unique index in the migration) — what a null `Branch.legalEntityId`
+// resolves to. Bank details are encrypted at rest (EncryptionService), like Employee's.
+// ---------------------------------------------------------------------------
+model LegalEntity {
+  id                         String   @id @default(uuid()) @db.Uuid
+  tenantId                   String   @map("tenant_id") @db.Uuid
+  legalName                  String   @map("legal_name")
+  countryCode                String   @map("country_code") @db.VarChar(2)
+  registrationNumber         String?  @map("registration_number")
+  taxId                      String?  @map("tax_id")
+  addressLine1               String?  @map("address_line1")
+  addressLine2               String?  @map("address_line2")
+  city                       String?
+  region                     String?
+  postalCode                 String?  @map("postal_code")
+  logoStorageKey             String?  @map("logo_storage_key")
+  bankNameEncrypted          String?  @map("bank_name_encrypted")
+  bankAccountNumberEncrypted String?  @map("bank_account_number_encrypted")
+  bankRoutingCodeEncrypted   String?  @map("bank_routing_code_encrypted")
+  isDefault                  Boolean  @default(false) @map("is_default")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branches         Branch[]
+  generatedReports GeneratedReport[]
+  payrollRuns      PayrollRun[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId])
+  @@map("legal_entities")
 }

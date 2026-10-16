@@ -16,6 +16,7 @@ import { seedDemoSubscription } from '../src/seed-licensing';
 import { seedNotificationTemplates } from '../src/seed-notification-templates';
 import { seedExchangeRates } from '../src/seed-exchange-rates';
 import { seedPlatformAdmin } from '../src/seed-platform';
+import { seedDemoLegalEntities } from '../src/seed-legal-entities';
 
 const prisma = new PrismaClient();
 
@@ -54,6 +55,9 @@ async function main() {
       timezone: 'Asia/Qatar',
     },
   });
+
+  // Step 12.1 — two legal entities for the demo tenant (US HQ -> US entity, Doha -> Qatar entity).
+  await seedDemoLegalEntities(prisma, tenant.id, { usBranchId: usBranch.id, qaBranchId: qaBranch.id });
 
   await seedSystemRolesAndPermissions(prisma, tenant.id);
   await seedCountryPacks(prisma);

@@ -114,6 +114,8 @@ export const USA_PACK: CountryPackConfig = {
       },
     ],
   },
+  // Step 12.1 — what a legal entity's generic registration/tax fields are CALLED in this country.
+  legalEntity: { registrationNumberLabel: 'State File Number', taxIdLabel: 'EIN (Employer Identification Number)' },
   requiredEmployeeFields: ['SSN', 'W4'],
   payslipTemplate: {
     language: 'en',
@@ -203,6 +205,7 @@ export const QATAR_PACK: CountryPackConfig = {
       },
     ],
   },
+  legalEntity: { registrationNumberLabel: 'Commercial Registration (CR) No.', taxIdLabel: 'Tax Card No.' },
   requiredEmployeeFields: ['QATAR_ID', 'VISA_SPONSORSHIP'],
   payslipTemplate: {
     language: 'ar',
@@ -410,6 +413,7 @@ export const PAKISTAN_PACK: CountryPackConfig = {
   // (National Tax Number, FBR) mirrors the US pack's W4 slot — a
   // tax-withholding-related identifier captured at onboarding, analogous
   // pairing to ["SSN","W4"].
+  legalEntity: { registrationNumberLabel: 'SECP Company Registration No.', taxIdLabel: 'NTN (National Tax Number)' },
   requiredEmployeeFields: ['CNIC', 'NTN'],
   payslipTemplate: {
     language: 'ur',

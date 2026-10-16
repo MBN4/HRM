@@ -9,6 +9,7 @@ import { PermissionSerializerInterceptor } from '../common/permissions/permissio
 import { AuditLog } from '../audit/audit-log.decorator';
 import { AuditInterceptor } from '../audit/audit.interceptor';
 import { TenantContextService } from '../tenancy/tenant-context.service';
+import { summarizeEntitiesForRows } from '../legal-entities/legal-entity-identity.util';
 import { StorageService } from '../storage/storage.service';
 import { StatutoryReportService } from './statutory-report.service';
 import { GeneratedReportResponseDto } from './statutory-report-response.dto';
@@ -21,9 +22,11 @@ function requireTenantId(tenantId: string | null): string {
   return tenantId;
 }
 
-function toDto(report: {
+function toDto(
+  report: {
   id: string;
   branchId: string;
+  legalEntityId: string | null;
   reportDefinitionId: string;
   reportCode: string;
   countryCode: string;
@@ -37,13 +40,16 @@ function toDto(report: {
   errorMessage: string | null;
   generatedAt: Date | null;
   createdAt: Date;
-}): GeneratedReportResponseDto {
+},
+  legalEntity: GeneratedReportResponseDto['legalEntity'] = null,
+): GeneratedReportResponseDto {
   return new GeneratedReportResponseDto({
     id: report.id,
     branchId: report.branchId,
     reportDefinitionId: report.reportDefinitionId,
     reportCode: report.reportCode,
     countryCode: report.countryCode,
+    legalEntity,
     periodType: report.periodType,
     periodYear: report.periodYear,
     periodMonth: report.periodMonth,
@@ -92,7 +98,7 @@ export class StatutoryReportController {
     this.reports.assertBranchAllowed(body.branchId, this.tenantContext.getBranchIds());
     const tenantId = requireTenantId(this.tenantContext.tenantId);
     const report = await this.reports.generate(this.tenantContext.getTx(), tenantId, this.tenantContext.userId!, body);
-    return toDto(report);
+    return toDto(report, (await summarizeEntitiesForRows(this.tenantContext.getTx(), tenantId, [report])).get(report.id) ?? null);
   }
 
   @Get()
@@ -102,13 +108,19 @@ export class StatutoryReportController {
     @Query('branchId') branchId?: string,
     @Query('reportCode') reportCode?: string,
     @Query('periodYear') periodYear?: string,
+    @Query('legalEntityId') legalEntityId?: string,
   ): Promise<GeneratedReportResponseDto[]> {
+    if (legalEntityId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(legalEntityId)) {
+      throw new BadRequestException('"legalEntityId" must be a UUID.');
+    }
     const reports = await this.reports.findMany(
       this.tenantContext.getTx(),
-      { branchId, reportCode, periodYear: periodYear ? Number(periodYear) : undefined },
+      { branchId, reportCode, periodYear: periodYear ? Number(periodYear) : undefined, legalEntityId },
       this.tenantContext.getBranchIds(),
     );
-    return reports.map(toDto);
+    const tenantId = requireTenantId(this.tenantContext.tenantId);
+    const entities = await summarizeEntitiesForRows(this.tenantContext.getTx(), tenantId, reports);
+    return reports.map((r) => toDto(r, entities.get(r.id) ?? null));
   }
 
   @Get(':id')
@@ -118,7 +130,8 @@ export class StatutoryReportController {
     const tx = this.tenantContext.getTx();
     const report = await this.reports.requireById(tx, id);
     this.reports.assertBranchAllowed(report.branchId, this.tenantContext.getBranchIds());
-    return toDto(report);
+    const entities = await summarizeEntitiesForRows(tx, requireTenantId(this.tenantContext.tenantId), [report]);
+    return toDto(report, entities.get(report.id) ?? null);
   }
 
   /**

@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import type { GeneratedReport, Prisma, StatutoryReportPeriodType } from '@hrm/db';
+import { findEntityForBranch } from '../legal-entities/legal-entity-identity.util';
 import { resolvePayrollPackConfig } from '../payroll/payroll-pack.util';
 import { StatutoryReportQueueService } from './statutory-report-queue.service';
 
@@ -69,11 +70,16 @@ export class StatutoryReportService {
       throw new NotFoundException(`No active statutory report "${params.reportCode}" is defined for country "${branch.countryCode}".`);
     }
 
+    // Step 12.1 — the filing is FOR the branch's legal entity: stamped on the register row so the
+    // report's identity is stable even if the branch is later re-assigned. The unique key is unchanged
+    // (a branch belongs to exactly one entity at a time), so idempotent re-generation is unaffected.
+    const entity = await findEntityForBranch(tx, tenantId, branch.id);
+
     const periodKey = computePeriodKey(definition.periodType, params.periodYear, params.periodMonth, params.periodQuarter);
 
     const report = await tx.generatedReport.upsert({
       where: { tenantId_branchId_reportDefinitionId_periodKey: { tenantId, branchId: branch.id, reportDefinitionId: definition.id, periodKey } },
-      update: { status: 'PENDING', errorMessage: null, requestedByUserId: callerUserId },
+      update: { status: 'PENDING', errorMessage: null, requestedByUserId: callerUserId, legalEntityId: entity?.id ?? null },
       create: {
         tenantId,
         branchId: branch.id,
@@ -87,6 +93,7 @@ export class StatutoryReportService {
         periodKey,
         status: 'PENDING',
         requestedByUserId: callerUserId,
+        legalEntityId: entity?.id ?? null,
       },
     });
 
@@ -97,7 +104,7 @@ export class StatutoryReportService {
   /** A pure read — an out-of-scope `branchId` filter returns `[]`, never a 403, matching `PayrollRunService.findMany`'s own branch-scoping posture for LIST reads. */
   async findMany(
     tx: Prisma.TransactionClient,
-    filters: { branchId?: string; reportCode?: string; periodYear?: number },
+    filters: { branchId?: string; reportCode?: string; periodYear?: number; legalEntityId?: string },
     allowedBranchIds: string[] | null,
   ): Promise<GeneratedReport[]> {
     if (filters.branchId && allowedBranchIds && !allowedBranchIds.includes(filters.branchId)) {
@@ -107,6 +114,7 @@ export class StatutoryReportService {
       ...(filters.branchId ? { branchId: filters.branchId } : allowedBranchIds ? { branchId: { in: allowedBranchIds } } : {}),
       ...(filters.reportCode ? { reportCode: filters.reportCode } : {}),
       ...(filters.periodYear ? { periodYear: filters.periodYear } : {}),
+      ...(filters.legalEntityId ? { legalEntityId: filters.legalEntityId } : {}),
     };
     return tx.generatedReport.findMany({ where, orderBy: { createdAt: 'desc' }, take: 200 });
   }

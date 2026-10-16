@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { isRtlLanguage } from '@hrm/shared';
+import type { LegalEntityIdentity } from '../legal-entities/legal-entity-identity.util';
 import type { StatutoryReportData } from './statutory-report-generator.interface';
 
 const FONT_REGULAR = `${__dirname}/../../assets/fonts/DejaVuSans.ttf`;
@@ -12,6 +13,8 @@ export interface StatutoryReportPdfRenderInput {
   branchName: string;
   /** This report definition's own VERIFY-style compliance note (see `packages/db/src/seed-statutory-report-definitions.ts`) — printed directly on the PDF so a downloaded/shared/printed copy still carries the "verify before filing" warning, not only the portal UI around it. */
   complianceNote: string;
+  /** Step 12.1 — the legal entity this filing is FOR; printed as the filer block (legal name + registration/tax IDs + address). Null → pre-12.1 tenant-name header. */
+  legalEntity?: LegalEntityIdentity | null;
 }
 
 /**
@@ -44,10 +47,24 @@ export class StatutoryReportPdfService {
       doc.registerFont('bold', FONT_BOLD);
 
       doc.font('bold').fontSize(16).text(data.reportName, { align });
+      const entity = input.legalEntity;
+      if (entity) {
+        doc.font('bold').fontSize(11).text(`Filer: ${entity.legalName}`, { align });
+        doc.font('body').fontSize(9);
+        if (entity.registrationNumber) {
+          doc.text(`${entity.registrationNumberLabel}: ${entity.registrationNumber}`, { align });
+        }
+        if (entity.taxId) {
+          doc.text(`${entity.taxIdLabel}: ${entity.taxId}`, { align });
+        }
+        if (entity.addressLines.length > 0) {
+          doc.text(entity.addressLines.join(', '), { align });
+        }
+      }
       doc
         .font('body')
         .fontSize(10)
-        .text(`${input.tenantName} — ${input.branchName} (${data.countryCode})`, { align })
+        .text(`${entity ? '' : `${input.tenantName} — `}${input.branchName} (${data.countryCode})`, { align })
         .text(`Period: ${data.periodLabel}`, { align })
         .moveDown(0.5);
 

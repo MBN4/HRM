@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@hrm/db';
 import { resolvePayrollPackConfig } from '../payroll-pack.util';
 import type { PayrollComponentLine } from '../engine/payroll-engine.service';
+import { findEntityForBranch, toLegalEntityIdentity } from '../../legal-entities/legal-entity-identity.util';
 import { StorageService } from '../../storage/storage.service';
 import { PayslipPdfService } from './payslip-pdf.service';
 
@@ -36,8 +37,14 @@ export class PayslipService {
     const pack = await resolvePayrollPackConfig(tx, tenantId, line.branchId);
     const lineItemLabels = Object.fromEntries(pack.config.payslipTemplate.lineItems.map((item) => [item.key, item.label]));
 
+    // Step 12.1 — the employing entity: the run's stamped entity, else derived from the employee's branch.
+    const stamped = line.payrollRun.legalEntityId ? await tx.legalEntity.findUnique({ where: { id: line.payrollRun.legalEntityId } }) : null;
+    const entity = stamped ?? (await findEntityForBranch(tx, tenantId, line.branchId));
+    const employer = entity ? await toLegalEntityIdentity(tx, entity) : null;
+
     const pdfBytes = await this.pdf.render({
       tenantName,
+      employer,
       employeeName: `${line.employee.firstName} ${line.employee.lastName}`,
       employeeCode: line.employee.employeeCode,
       periodYear: line.payrollRun.periodYear,

@@ -382,6 +382,8 @@ export interface PayrollRun {
   payrollMode: string;
   workflowInstanceId: string | null;
   currencyCode: string;
+  /** Step 12.1 — the legal entity this run is attributable to (attribution only). */
+  legalEntity?: { id: string; legalName: string; registrationNumber: string | null; countryCode: string } | null;
   createdAt: string;
   /** Present only for a caller with `salary.view` — omitted (not null) otherwise. Always check `'totalGross' in run` rather than truthiness. */
   totalGross?: string;

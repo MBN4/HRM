@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { findEntityForBranch } from '../../legal-entities/legal-entity-identity.util';
 import type { Prisma } from '@hrm/db';
 import { WorkflowEngineService } from '../../workflow/workflow-engine.service';
 import { resolvePayrollPackConfig } from '../payroll-pack.util';
@@ -38,6 +39,8 @@ export class PayrollRunService {
     settlement?: { employeeId: string },
   ) {
     const pack = await resolvePayrollPackConfig(tx, tenantId, branchId);
+    // Step 12.1 — ATTRIBUTE the run to the branch's legal entity (never read by the engine).
+    const entity = await findEntityForBranch(tx, tenantId, branchId);
 
     return tx.payrollRun.create({
       data: {
@@ -49,6 +52,7 @@ export class PayrollRunService {
         payrollMode: pack.config.payrollMode,
         currencyCode: pack.config.locale.currencyCode,
         createdByUserId: callerUserId,
+        legalEntityId: entity?.id ?? null,
         runType: settlement ? 'FINAL_SETTLEMENT' : 'REGULAR',
         settlementEmployeeId: settlement?.employeeId ?? null,
       },

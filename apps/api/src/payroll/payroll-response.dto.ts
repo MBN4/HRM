@@ -43,6 +43,8 @@ export class PayrollRunResponseDto {
   payrollMode!: string;
   workflowInstanceId!: string | null;
   currencyCode!: string;
+  /** Step 12.1 — the legal entity this run is attributable to (attribution only; never read by the engine). */
+  legalEntity!: { id: string; legalName: string; registrationNumber: string | null; countryCode: string } | null;
 
   @RequiresPermission(PERMISSIONS.SALARY_VIEW)
   totalGross!: string;

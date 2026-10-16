@@ -5,6 +5,7 @@ import type { Prisma } from '@hrm/db';
 import { withTenantContext } from '@hrm/db';
 import { STATUTORY_REPORT_QUEUE } from '../queue/queue.constants';
 import { shouldAutorunWorkers } from '../queue/queue-worker.util';
+import { findEntityForBranch, toLegalEntityIdentity, type LegalEntityIdentity } from '../legal-entities/legal-entity-identity.util';
 import { resolvePayrollPackConfig } from '../payroll/payroll-pack.util';
 import { StorageService } from '../storage/storage.service';
 import { StatutoryReportPdfService } from './statutory-report-pdf.service';
@@ -42,7 +43,7 @@ export class StatutoryReportProcessor extends WorkerHost {
     });
 
     try {
-      const { data, tenantName, branchName, definitionOutputFormats, complianceNote } = await withTenantContext(
+      const { data, tenantName, branchName, definitionOutputFormats, complianceNote, legalEntity } = await withTenantContext(
         tenantId,
         async (tx: Prisma.TransactionClient) => {
           const report = await tx.generatedReport.findUniqueOrThrow({ where: { id: generatedReportId } });
@@ -52,6 +53,10 @@ export class StatutoryReportProcessor extends WorkerHost {
             tx.statutoryReportDefinition.findUniqueOrThrow({ where: { id: report.reportDefinitionId } }),
           ]);
           const pack = await resolvePayrollPackConfig(tx, tenantId, report.branchId);
+          // Step 12.1 — the filing's legal entity: the one stamped at generation, else derived from the branch.
+          const stamped = report.legalEntityId ? await tx.legalEntity.findUnique({ where: { id: report.legalEntityId } }) : null;
+          const entity = stamped ?? (await findEntityForBranch(tx, tenantId, report.branchId));
+          const legalEntity: LegalEntityIdentity | null = entity ? await toLegalEntityIdentity(tx, entity) : null;
 
           const generator = this.registry.resolve(report.reportCode);
           if (!generator) {
@@ -70,7 +75,7 @@ export class StatutoryReportProcessor extends WorkerHost {
             periodQuarter: report.periodQuarter ?? undefined,
           });
 
-          return { data, tenantName: tenant.name, branchName: branch.name, definitionOutputFormats: definition.outputFormats, complianceNote: definition.complianceNote };
+          return { data, tenantName: tenant.name, branchName: branch.name, definitionOutputFormats: definition.outputFormats, complianceNote: definition.complianceNote, legalEntity };
         },
       );
 
@@ -78,7 +83,7 @@ export class StatutoryReportProcessor extends WorkerHost {
       let csvStorageKey: string | null = null;
 
       if (definitionOutputFormats.includes('PDF')) {
-        const pdfBytes = await this.pdf.render({ data, tenantName, branchName, complianceNote });
+        const pdfBytes = await this.pdf.render({ data, tenantName, branchName, complianceNote, legalEntity });
         pdfStorageKey = `statutory-reports/${tenantId}/${generatedReportId}.pdf`;
         await this.storage.uploadObject({ key: pdfStorageKey, body: pdfBytes, contentType: 'application/pdf' });
       }

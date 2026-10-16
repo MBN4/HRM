@@ -23,6 +23,8 @@ export interface GeneratedReport {
   reportDefinitionId: string;
   reportCode: string;
   countryCode: string;
+  /** Step 12.1 — the legal entity this filing is FOR. */
+  legalEntity?: { id: string; legalName: string; registrationNumber: string | null; countryCode: string } | null;
   periodType: 'MONTHLY' | 'QUARTERLY' | 'ANNUAL';
   periodYear: number;
   periodMonth: number | null;

@@ -33,6 +33,7 @@ import { AnnouncementsModule } from './announcements/announcements.module';
 import { LmsModule } from './lms/lms.module';
 import { EngagementModule } from './engagement/engagement.module';
 import { KioskModule } from './kiosk/kiosk.module';
+import { LegalEntitiesModule } from './legal-entities/legal-entities.module';
 import { LoggingModule } from './common/logging/logging.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { IntegrationsModule } from './integrations/integrations.module';
@@ -105,6 +106,7 @@ import { SchedulingModule } from './scheduling/scheduling.module';
     LmsModule,
     EngagementModule,
     KioskModule,
+    LegalEntitiesModule,
     // Step 3.3 (Integrations) — the last Phase 3 slice: outbound webhooks,
     // the versioned /v1 public API + API keys, adapter seams, biometric
     // device ingestion. See docs/conventions/integrations.md.

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { isRtlLanguage } from '@hrm/shared';
+import type { LegalEntityIdentity } from '../../legal-entities/legal-entity-identity.util';
 import type { PayrollComponentLine } from '../engine/payroll-engine.service';
 
 const FONT_REGULAR = `${__dirname}/../../../assets/fonts/DejaVuSans.ttf`;
@@ -8,6 +9,8 @@ const FONT_BOLD = `${__dirname}/../../../assets/fonts/DejaVuSans-Bold.ttf`;
 
 export interface PayslipRenderInput {
   tenantName: string;
+  /** Step 12.1 — the employing legal entity (derived from the employee's branch). When present it REPLACES the bare tenant name as the employer header; null → pre-12.1 behaviour. */
+  employer?: LegalEntityIdentity | null;
   employeeName: string;
   employeeCode: string;
   periodYear: number;
@@ -46,7 +49,23 @@ export class PayslipPdfService {
 
       const align = rtl ? 'right' : 'left';
 
-      doc.font('bold').fontSize(18).text(input.tenantName, { align });
+      if (input.employer) {
+        const employer = input.employer;
+        doc.font('bold').fontSize(18).text(employer.legalName, { align });
+        doc.font('body').fontSize(9);
+        for (const line of employer.addressLines) {
+          doc.text(line, { align });
+        }
+        if (employer.registrationNumber) {
+          doc.text(`${employer.registrationNumberLabel}: ${employer.registrationNumber}`, { align });
+        }
+        if (employer.taxId) {
+          doc.text(`${employer.taxIdLabel}: ${employer.taxId}`, { align });
+        }
+        doc.moveDown(0.5);
+      } else {
+        doc.font('bold').fontSize(18).text(input.tenantName, { align });
+      }
       doc
         .font('body')
         .fontSize(11)

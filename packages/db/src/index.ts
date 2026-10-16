@@ -10,3 +10,4 @@ export * from './seed-licensing';
 export * from './seed-notification-templates';
 export * from './seed-exchange-rates';
 export * from './seed-platform';
+export * from './seed-legal-entities';

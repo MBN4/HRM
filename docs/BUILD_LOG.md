@@ -4522,3 +4522,31 @@ separate helper kiosk; (3) `@@unique([employeeId])` isn't a valid target for a c
 10.1 engagement block (`SurveyTally` unique violation) — it is not idempotent; the kiosk seed sits before it so it still runs.
 **Known gaps**: see the doc §10 — admin-issued PINs only, device token in `localStorage`, no photo viewer, fixed (non-configurable)
 caps, no offline punching, mobile untouched.
+
+## 12.1 — Multi-legal-entity identity (2026-10-16)
+
+Additive; see [`docs/conventions/legal-entities.md`](./conventions/legal-entities.md). **Schema/migrations**:
+`20261017090000_add_legal_entities` (`legal_entities` table; `branches.legal_entity_id`, `payroll_runs.legal_entity_id`,
+`generated_reports.legal_entity_id` — nullable, composite same-tenant FKs, `ON DELETE RESTRICT`) and
+`20261017090100_enable_rls_for_legal_entities` (grants, `tenant_isolation` RLS + `FORCE`, one-default-per-tenant partial unique index,
+the **default-entity backfill** for every existing tenant + branch linking, `entity.manage` backfilled to TENANT_ADMIN/CEO/HR_MANAGER).
+Applied to the dev DB: 21 tenants → 21 default entities, 0 unlinked branches. **Shared**: `legal-entity.validator.ts`,
+`PERMISSIONS.ENTITY_MANAGE` (+ HR_MANAGER), optional `CountryPackConfig.legalEntity` labels (US/QA/PK seeded), ~60 en+ar strings.
+**API**: `apps/api/src/legal-entities/` (`LegalEntityService`/`Controller`, identity util with `findEntityForBranch`/
+`toLegalEntityIdentity`/`summarizeEntitiesForRows`); consumers extended, not rebuilt — `PayslipService`+`PayslipPdfService` (employer
+header), `PayrollRunService.createRun` (stamp) + run DTO `legalEntity`, `StatutoryReportService`/`Processor`/`PdfService`
+(stamp, `legalEntityId` filter, "Filer:" block), `SignatureRequestService` offer letter (employing entity); platform tenant
+provisioning creates a default entity. **Portal**: `/legal-entities` (cards, create/edit with encrypted bank section, assign
+branches, employees, default, delete), sidebar entry, `/statutory-reports` entity filter + filing-for line, payroll run detail entity
+field. **Demo**: `seedDemoLegalEntities` (called from `prisma db seed`) → `acme-demo` gets "Acme Demo Corp, Inc." (US HQ) and
+"Acme Demo Qatar W.L.L." (Doha).
+**Decisions**: `Branch.legalEntityId` nullable with a default-entity fallback (zero disruption to every existing branch/fixture/importer
+instead of a NOT NULL column); no `Employee.legalEntityId` (derived, so it cannot drift); stamps on payroll runs/reports for
+historical stability; statutory reports stay per-branch; CSV export unchanged; labels via an optional Country Pack section.
+**Verification** (all run): `legal-entities.e2e-spec.ts` **12/12**; portal Playwright `legal-entities.spec.ts` **6/6** (create/edit/assign/delete,
+masked bank, entity filter, RBAC, Arabic RTL + light/dark axe); neighbouring `statutory-reporting`/`payroll`/`esignature`/`auth-rbac`/
+`tenant-isolation-exhaustive` e2e 138/138 and portal `statutory-reports`/`payroll`/`accessibility` specs 25/25; `packages/db` 37/37;
+`pnpm lint` 0 errors. Full `apps/api` `--runInBand`: 926/928 — the 2 failures were `tenant-resolution` (known env test) and a flaky
+`migration.e2e-spec.ts` commit step (the job is enqueued before the request transaction commits, so the worker can see
+`DRY_RUN_COMPLETE` and skip; failures vary run to run with identical code — pre-existing race, not touched).
+**Known gaps**: see the doc §9.

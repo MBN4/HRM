@@ -5,6 +5,7 @@ import { createPayrollComponentSchema, CreatePayrollComponentInput, FEATURE_FLAG
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { RequirePermissions } from '../auth/decorators/require-permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { summarizeEntitiesForRows } from '../legal-entities/legal-entity-identity.util';
 import { PermissionSerializerInterceptor } from '../common/permissions/permission-serializer.interceptor';
 import { RequireFeature } from '../licensing/require-feature.decorator';
 import { FeatureFlagGuard } from '../licensing/feature-flag.guard';
@@ -48,7 +49,7 @@ export class PayrollController {
     this.runs.assertBranchAllowed(body.branchId, this.tenantContext.getBranchIds());
     const tenantId = requireTenantId(this.tenantContext.tenantId);
     const run = await this.runs.createRun(this.tenantContext.getTx(), tenantId, this.tenantContext.userId!, body.branchId, body.periodYear, body.periodMonth);
-    return toRunDto(run);
+    return toRunDto(run, undefined, (await summarizeEntitiesForRows(this.tenantContext.getTx(), tenantId, [run])).get(run.id) ?? null);
   }
 
   @Post('runs/:id/calculate')
@@ -82,7 +83,9 @@ export class PayrollController {
       { branchId, periodYear: periodYear ? Number(periodYear) : undefined, periodMonth: periodMonth ? Number(periodMonth) : undefined },
       this.tenantContext.getBranchIds(),
     );
-    return runs.map((r) => toRunDto(r));
+    const tenantId = requireTenantId(this.tenantContext.tenantId);
+    const entities = await summarizeEntitiesForRows(this.tenantContext.getTx(), tenantId, runs);
+    return runs.map((r) => toRunDto(r, undefined, entities.get(r.id) ?? null));
   }
 
   @Get('runs/:id')
@@ -94,7 +97,9 @@ export class PayrollController {
     const run = await this.runs.requireRun(tx, id);
     this.runs.assertBranchAllowed(run.branchId, this.tenantContext.getBranchIds());
     const lines = await tx.payrollRunLine.findMany({ where: { payrollRunId: id }, orderBy: { createdAt: 'asc' } });
-    return toRunDto(run, lines.map(toLineDto));
+    const tenantId = requireTenantId(this.tenantContext.tenantId);
+    const entity = (await summarizeEntitiesForRows(tx, tenantId, [run])).get(run.id) ?? null;
+    return toRunDto(run, lines.map(toLineDto), entity);
   }
 
   @Post('runs/:id/submit-for-approval')
@@ -236,6 +241,7 @@ function toRunDto(
     createdAt: Date;
   },
   lines?: PayrollRunLineResponseDto[],
+  legalEntity: PayrollRunResponseDto['legalEntity'] = null,
 ): PayrollRunResponseDto {
   return new PayrollRunResponseDto({
     id: run.id,
@@ -251,6 +257,7 @@ function toRunDto(
     totalEmployerCost: run.totalEmployerCost.toString(),
     totalGrossBase: run.totalGrossBase?.toString() ?? null,
     totalNetBase: run.totalNetBase?.toString() ?? null,
+    legalEntity,
     createdAt: run.createdAt.toISOString(),
     lines,
   });
